@@ -6,3 +6,5 @@ qemu/vars.fd
 **/*.bin
 .direnv/
 .envrc
+*.iso
+qemu/tempCodeRunnerFile.sh
