@@ -1,0 +1,14 @@
+[workspace]
+resolver = "2"
+members = ["kernel", "libos"]
+
+[workspace.package]
+edition = "2021"
+
+# workspace 级 profile, 所有 member 共用
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
+opt-level = 2

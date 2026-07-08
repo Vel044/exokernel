@@ -1,0 +1,11 @@
+# libOS — EL1 裸机测试程序, 被 EL2 外核加载到 0x4000_0000 并 eret 进入
+
+# aarch64-unknown-none: 裸机 ARM64, 无 std, 无 OS
+[build]
+target = "aarch64-unknown-none"
+
+[unstable]
+build-std = ["core", "compiler_builtins"]
+
+[target.aarch64-unknown-none]
+rustflags = ["-C", "link-arg=-Tlibos/link.ld"]

@@ -1,0 +1,8 @@
+target/
+qemu/esp.img
+qemu/vars.fd
+*.iso
+*.bin
+**/*.bin
+.direnv/
+.envrc

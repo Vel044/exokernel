@@ -1,0 +1,17 @@
+[package]
+name = "exokernel"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "BOOTAA64"
+path = "src/main.rs"
+
+[dependencies]
+uefi = { version = "0.33", default-features = false, features = ["panic_handler"] }
+
+[features]
+default = ["qemu"]
+qemu = []
+pi5  = []
+
