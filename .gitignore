@@ -3,8 +3,6 @@ qemu/esp.img
 qemu/vars.fd
 *.iso
 *.bin
-**/*.bin
 .direnv/
 .envrc
-*.iso
 qemu/tempCodeRunnerFile.sh

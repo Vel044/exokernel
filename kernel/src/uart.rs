@@ -12,6 +12,12 @@ const PL011_FR_TXFF: u32 = 1 << 5;  // FR 的第 5 位: 1 = 发送 FIFO 满了 (
 
 static mut UART_BASE: u64 = 0;
 
+/// Pi5 UART10 的已知 CPU 物理地址, 只作为 early bring-up 诊断兜底。
+///
+/// 正式路径仍然是从 DTB 的 stdout-path/aliases/reg/ranges 解析 UART。
+#[cfg(feature = "pi5")]
+pub const PI5_DEBUG_UART_BASE: u64 = 0x107d_001000;
+
 /// 初始化运行时 UART MMIO 基址。
 ///
 /// base 来自 DTB 的 reg 物理地址。当前 EL1 打开 MMU 前是物理地址直接访问;

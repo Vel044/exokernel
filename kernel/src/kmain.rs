@@ -30,8 +30,9 @@ const USER_BASE: u64 = 0x4000_0000;
 const DTB_USER_VA: u64 = 0x4020_0000;
 
 // EL0 栈顶。AArch64 栈向低地址增长, 所以实际映射的栈页是:
-//   [USER_STACK_TOP - 4096, USER_STACK_TOP)
+//   [USER_STACK_TOP - USER_STACK_PAGES * 4096, USER_STACK_TOP)
 const USER_STACK_TOP: u64 = 0x4100_0000;
+const USER_STACK_PAGES: u64 = 4;
 
 // EL0 用户窗口的上界。
 //
@@ -51,25 +52,14 @@ pub extern "C" fn el1_main(boot_info_addr: u64) -> ! {
     //   x0       = BootInfo 指针
     // 然后执行 eret。AArch64 C ABI 规定第一个参数在 x0, 所以这里的
     // boot_info_addr 就是 EL2 传下来的 BootInfo 物理地址。
-    // 安装 EL1 异常向量表。
-    //
-    // 之后 EL0 的 SVC、Data Abort、Instruction Abort、IRQ 都会先进入 VBAR_EL1。
-    // 必须尽早安装, 否则 EL1/EL0 发生异常时 CPU 会跳到固件留下的旧向量或空地址。
+
+    // 安装 EL1 异常向量表 — 必须尽早, EL0 的 SVC/Abort/IRQ 都走 VBAR_EL1。
     let vbar = crate::vectors::install_el1();
 
-    // boot_info_addr 是一个物理地址。
-    //
-    // 当前 EL1 stage-1 MMU 还没有打开, 地址翻译关闭, CPU 把这个数直接当物理地址用。
-    // 因此这里可以直接把 u64 转成 *const BootInfo 再解引用。
-    //
-    // 打开 MMU 之后如果还要访问 BootInfo, 必须确保 BootInfo 所在物理页也被映射。
-    // 当前 build_el1_stage1() 做了宽松 identity map, 所以后续仍然可访问。
+    // 解引用 BootInfo。MMU 还没开, CPU 把指针值直接当物理地址用。
     let bi = unsafe { &*(boot_info_addr as *const BootInfo) };
 
     // 用 EL2 收集到的 UEFI conventional memory ranges 初始化 EL1 物理页分配器。
-    //
-    // 设计上, EL2 只负责收集 MemoryMap, 不长期管理物理页。
-    // 真正开始 alloc_page()/alloc_pages() 的地方是 EL1。
     init_allocator_from_bootinfo(bi);
 
     // 选择 DTB 来源。
@@ -79,8 +69,6 @@ pub extern "C" fn el1_main(boot_info_addr: u64) -> ! {
     let dtb_addr = if bi.dtb == 0 {
         #[cfg(all(feature = "qemu", not(feature = "pi5")))]
         {
-            // DTB 是一段字节数组, 但是 dtb::parse() 按物理地址读取。
-            // 所以这里要先从物理页分配器申请连续页, 再把 EMBEDDED_DTB 拷进去。
             let pages = ((EMBEDDED_DTB.len() + 4095) / 4096) as u64;
             let pa = crate::mem::alloc_pages(pages).expect("no mem for DTB");
             unsafe { copy_nonoverlapping(EMBEDDED_DTB.as_ptr(), pa as *mut u8, EMBEDDED_DTB.len()); }
@@ -88,22 +76,25 @@ pub extern "C" fn el1_main(boot_info_addr: u64) -> ! {
         }
         #[cfg(not(all(feature = "qemu", not(feature = "pi5"))))]
         {
+            // Pi5 没有 DTB 无法继续 — 此时 UART 还没初始化, 无法打印, 只能死循环。
             loop {}
         }
     } else {
         bi.dtb
     };
+
     let dtb_total_size = crate::dtb::total_size(dtb_addr).expect("bad DTB");
     let dtb_page_pa = dtb_addr & !0xfff;
     let dtb_page_off = dtb_addr & 0xfff;
     let dtb_map_pages = ((dtb_page_off + dtb_total_size + 4095) / 4096) as u64;
     let dtb_user_va = DTB_USER_VA + dtb_page_off;
 
-    // 在跑稍复杂的 Rust DTB 查询前, 先打开一个 EL1 identity stage-1。
+    // 打开 EL1 identity stage-1。
     //
-    // 原因: EL1 MMU 关闭时, QEMU/ARM 对部分栈上的宽访问会按严格对齐处理。
-    // DTB parser 这种 Rust 函数容易生成栈访问, 所以先把代码/数据/栈按 Normal
-    // memory identity-map 起来。UART 还没发现, 所以这里仍然不依赖日志输出。
+    // EL1 MMU 关闭时 ARM 对部分栈上的宽访问会按严格对齐处理, Rust 的 DTB
+    // parser 容易触发对齐异常。先把代码/数据/栈/DTB 按 Normal memory 做
+    // identity map。UART 的 MMIO 区域暂不映射 — 等 DTB 发现 UART 地址后再
+    // 精确映射为 Device memory。
     let root = crate::mmu::create_table();
     crate::mmu::map_range_2m(
         root,
@@ -115,12 +106,11 @@ pub extern "C" fn el1_main(boot_info_addr: u64) -> ! {
     );
     crate::mmu::activate(root);
 
-    // UART 初始化必须在 dtb::parse() 打印前完成。
-    //
-    // find_pl011_reg() 不打印, 只从 DTB 中找 compatible="arm,pl011" 的节点,
-    // 读取它的 reg base/size。EL1 用 base 初始化调试 UART。
+    // 从 DTB 发现 UART 物理地址 (只读 DTB 内存, 不碰 UART MMIO)。
     let uart_reg = crate::dtb::find_pl011_reg(dtb_addr).expect("no PL011 UART in DTB");
-    uart::init(uart_reg.base);
+
+    // 把 DTB 发现的 UART 地址所在的 2MB block 映射为 Device memory,
+    // 然后初始化 UART。从这行开始, 所有日志都走 DTB 发现的 UART, 不再有硬编码地址。
     crate::mmu::map_block_2m(
         root,
         uart_reg.base & !0x1f_ffff,
@@ -128,6 +118,8 @@ pub extern "C" fn el1_main(boot_info_addr: u64) -> ! {
         crate::mmu::MMU_DEV,
     );
     crate::mmu::flush_el1_tlb();
+    crate::protect::register(uart_reg.base, uart_reg.size);
+    uart::init(uart_reg.base);
 
     uart::puts("\r\n*** [exo] EL1 kernel alive ***\r\n");
     uart::puts("[exo] VBAR_EL1=");
@@ -170,11 +162,11 @@ pub extern "C" fn el1_main(boot_info_addr: u64) -> ! {
     // 为 EL0 分配代码物理页和栈物理页。
     //
     // code_paddr 是 libOS 机器码实际放置的物理地址。
-    // stack_paddr 是 EL0 栈页实际放置的物理地址。
+    // stack_paddr 是 EL0 栈物理页实际放置的起始物理地址。
     //
     // 注意: 这两个地址都不是 EL0 看到的 VA。EL0 看到的是 USER_BASE 和 USER_STACK_TOP。
     let code_paddr = crate::mem::alloc_pages(code_pages).expect("no mem for EL0 code");
-    let stack_paddr = crate::mem::alloc_page().expect("no mem for EL0 stack");
+    let stack_paddr = crate::mem::alloc_pages(USER_STACK_PAGES).expect("no mem for EL0 stack");
 
     // 把 .efi rodata 里的 libos.bin 拷贝到新分配的代码物理页。
     //
@@ -199,7 +191,7 @@ pub extern "C" fn el1_main(boot_info_addr: u64) -> ! {
     // 这个页表同时服务两个目标:
     //   1. EL1 外核自己继续运行: 需要 identity map 当前代码、栈、DTB、UART 等。
     //   2. EL0 libOS 能启动: 需要把 USER_BASE 映射到 code_paddr,
-    //      把 USER_STACK_TOP-4K 映射到 stack_paddr。
+    //      把 USER_STACK_TOP 下方的栈窗口映射到 stack_paddr。
     complete_el1_stage1(
         root,
         bi,
@@ -317,16 +309,17 @@ fn complete_el1_stage1(
 
     // 映射 EL0 栈:
     //
-    //   EL0 VA [USER_STACK_TOP - 4096, USER_STACK_TOP) -> PA stack_paddr
+    //   EL0 VA [USER_STACK_TOP - USER_STACK_PAGES*4K, USER_STACK_TOP)
+    //       -> PA [stack_paddr, stack_paddr + USER_STACK_PAGES*4K)
     //
     // 栈向低地址增长, SP_EL0 初始放在 USER_STACK_TOP。
     // MMU_USER_RW 允许 EL0 读写, 但不允许执行。
     crate::mmu::map(
         root,
-        USER_STACK_TOP - 4096,
+        USER_STACK_TOP - USER_STACK_PAGES * 4096,
         stack_paddr,
         crate::mmu::MMU_USER_RW,
-        1,
+        USER_STACK_PAGES,
     );
 
 }

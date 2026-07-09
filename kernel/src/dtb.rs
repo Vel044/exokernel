@@ -43,13 +43,57 @@ pub fn total_size(dtb_paddr: u64) -> Option<u64> {
 
 /// 静默查找第一个 compatible 匹配的节点, 返回它的第一个 reg 范围。
 ///
-/// 这个函数不打印, 用在 UART 初始化前。当前 parser 只实现 bring-up 需要的
-/// FDT 子集: root 下 64-bit address/size cell, compatible 字符串列表, reg。
+/// 这个函数不打印, 用在 UART 初始化前。
+/// 返回值是已经经过父节点 ranges 翻译后的 CPU 物理地址。
 pub fn find_pl011_reg(dtb_paddr: u64) -> Option<RegRange> {
     if dtb_paddr == 0 {
         return None;
     }
 
+    find_uart_in_dtb(dtb_paddr)
+}
+
+const MAX_DEPTH: usize = 24;
+const MAX_RANGES: usize = 8;
+const MAX_PATH: usize = 192;
+
+#[derive(Clone, Copy)]
+struct RangeMap {
+    child: u64,
+    parent: u64,
+    size: u64,
+}
+
+#[derive(Clone, Copy)]
+struct BusInfo {
+    addr_cells: u32,
+    size_cells: u32,
+    ranges: [RangeMap; MAX_RANGES],
+    range_count: usize,
+    ranges_seen: bool,
+    ranges_word_index: usize,
+    ranges_len: u32,
+}
+
+impl BusInfo {
+    const fn default() -> Self {
+        Self {
+            addr_cells: 2,
+            size_cells: 1,
+            ranges: [RangeMap {
+                child: 0,
+                parent: 0,
+                size: 0,
+            }; MAX_RANGES],
+            range_count: 0,
+            ranges_seen: false,
+            ranges_word_index: 0,
+            ranges_len: 0,
+        }
+    }
+}
+
+fn find_uart_in_dtb(dtb_paddr: u64) -> Option<RegRange> {
     let ptr = dtb_paddr as *const u32;
     let magic = unsafe { read_be(ptr.add(0)) };
     if magic != FDT_MAGIC {
@@ -61,16 +105,28 @@ pub fn find_pl011_reg(dtb_paddr: u64) -> Option<RegRange> {
     let sp = (dtb_paddr + off_struct as u64) as *const u32;
     let ss = (dtb_paddr + off_strings as u64) as *const u8;
 
-    let mut addr_cells: u32 = 2;
-    let mut size_cells: u32 = 2;
+    let target_path = find_stdout_target_path(sp, ss);
+    let mut bus_stack = [BusInfo::default(); MAX_DEPTH];
+    let mut depth = 0usize;
+    let mut path = [0u8; MAX_PATH];
+    let mut path_len_stack = [0usize; MAX_DEPTH];
+    let mut path_len = 0usize;
+
     let mut node_compatible = false;
+    let mut node_disabled = false;
     let mut node_reg: Option<RegRange> = None;
+    let mut fallback_uart_reg: Option<RegRange> = None;
     let mut i = 0usize;
 
     loop {
         let token = unsafe { read_be(sp.add(i)) };
         if token == FDT_END {
-            return None;
+            if node_compatible && !node_disabled && path_matches(&path, path_len, &target_path) {
+                if let Some(reg) = node_reg {
+                    return Some(reg);
+                }
+            }
+            return fallback_uart_reg;
         }
 
         if token == FDT_BEGIN_NODE {
@@ -80,20 +136,42 @@ pub fn find_pl011_reg(dtb_paddr: u64) -> Option<RegRange> {
             while unsafe { *name_ptr.add(name_len) } != 0 {
                 name_len += 1;
             }
+
+            if depth + 1 >= MAX_DEPTH {
+                return None;
+            }
+            path_len_stack[depth] = path_len;
+            append_node_to_path(&mut path, &mut path_len, name_ptr, name_len);
+
+            if depth == 0 {
+                bus_stack[0] = BusInfo::default();
+            } else {
+                bus_stack[depth] = BusInfo::default();
+            }
+            depth += 1;
+
             node_compatible = false;
+            node_disabled = false;
             node_reg = None;
             i += (name_len + 4) / 4;
         } else if token == FDT_END_NODE {
-            if node_compatible {
+            if node_compatible && !node_disabled && path_matches(&path, path_len, &target_path) {
                 if let Some(reg) = node_reg {
                     return Some(reg);
                 }
             }
+            if node_compatible && !node_disabled && fallback_uart_reg.is_none() {
+                fallback_uart_reg = node_reg;
+            }
             i += 1;
-            addr_cells = 2;
-            size_cells = 2;
+            if depth == 0 {
+                return None;
+            }
+            depth -= 1;
+            path_len = path_len_stack[depth];
             node_compatible = false;
             node_reg = None;
+            node_disabled = false;
         } else if token == FDT_PROP {
             i += 1;
             let len = unsafe { read_be(sp.add(i)) };
@@ -104,13 +182,21 @@ pub fn find_pl011_reg(dtb_paddr: u64) -> Option<RegRange> {
             let prop_name_ptr = unsafe { ss.add(nameoff as usize) };
 
             if cstr_eq_address_cells(prop_name_ptr) && len == 4 {
-                addr_cells = unsafe { read_be(sp.add(i)) };
+                bus_stack[depth - 1].addr_cells = unsafe { read_be(sp.add(i)) };
+                reparse_current_ranges(sp, &mut bus_stack, depth);
             } else if cstr_eq_size_cells(prop_name_ptr) && len == 4 {
-                size_cells = unsafe { read_be(sp.add(i)) };
+                bus_stack[depth - 1].size_cells = unsafe { read_be(sp.add(i)) };
+                reparse_current_ranges(sp, &mut bus_stack, depth);
+            } else if cstr_eq_ranges(prop_name_ptr) {
+                bus_stack[depth - 1].ranges_word_index = i;
+                bus_stack[depth - 1].ranges_len = len;
+                parse_ranges(sp, i, len, &mut bus_stack, depth);
+            } else if cstr_eq_status(prop_name_ptr) {
+                node_disabled = prop_is_disabled(unsafe { sp.add(i) } as *const u8, len as usize);
             } else if cstr_eq_compatible(prop_name_ptr) {
                 node_compatible = prop_contains_pl011(unsafe { sp.add(i) } as *const u8, len as usize);
             } else if cstr_eq_reg(prop_name_ptr) && node_reg.is_none() {
-                node_reg = read_first_reg(sp, i, addr_cells, size_cells);
+                node_reg = read_first_translated_reg(sp, i, len, &bus_stack, depth);
             }
 
             i += ((len + 3) / 4) as usize;
@@ -262,28 +348,301 @@ unsafe fn read_be(p: *const u32) -> u32 {
     u32::from_be(unsafe { core::ptr::read_volatile(p) })
 }
 
-fn read_first_reg(sp: *const u32, i: usize, addr_cells: u32, size_cells: u32) -> Option<RegRange> {
-    if addr_cells == 0 || size_cells == 0 {
+fn read_first_translated_reg(
+    sp: *const u32,
+    i: usize,
+    len: u32,
+    bus_stack: &[BusInfo; MAX_DEPTH],
+    depth: usize,
+) -> Option<RegRange> {
+    if depth < 2 {
         return None;
     }
 
-    let base = if addr_cells == 2 {
-        ((unsafe { read_be(sp.add(i)) }) as u64) << 32 | (unsafe { read_be(sp.add(i + 1)) }) as u64
-    } else {
-        (unsafe { read_be(sp.add(i)) }) as u64
-    };
-    let size_offset = i + addr_cells as usize;
-    let size = if size_cells == 2 {
-        ((unsafe { read_be(sp.add(size_offset)) }) as u64) << 32
-            | (unsafe { read_be(sp.add(size_offset + 1)) }) as u64
-    } else {
-        (unsafe { read_be(sp.add(size_offset)) }) as u64
-    };
+    let parent = bus_stack[depth - 2];
+    let entry_words = parent.addr_cells + parent.size_cells;
+    if parent.addr_cells == 0 || parent.size_cells == 0 || entry_words == 0 || len < entry_words * 4 {
+        return None;
+    }
 
+    let raw_base = read_addr_cells(sp, i, parent.addr_cells);
+    let size = read_size_cells(sp, i + parent.addr_cells as usize, parent.size_cells);
     if size == 0 {
-        None
-    } else {
-        Some(RegRange { base, size })
+        return None;
+    }
+
+    translate_to_cpu(raw_base, bus_stack, depth - 2).map(|base| RegRange { base, size })
+}
+
+fn translate_to_cpu(mut addr: u64, bus_stack: &[BusInfo; MAX_DEPTH], mut bus_index: usize) -> Option<u64> {
+    loop {
+        let bus = bus_stack[bus_index];
+        addr = translate_one_bus(addr, bus)?;
+        if bus_index == 0 {
+            return Some(addr);
+        }
+        bus_index -= 1;
+    }
+}
+
+fn translate_one_bus(addr: u64, bus: BusInfo) -> Option<u64> {
+    // Linux 的 of_translate_address() 语义里:
+    // - ranges 存在但长度为 0: 子总线地址和父总线地址 1:1。
+    // - ranges 不存在: 严格说不少总线不能翻译。
+    //
+    // 这里为 bring-up 保守采用 1:1, 避免 QEMU 这类简单总线因为缺省 ranges 失效。
+    if !bus.ranges_seen || bus.range_count == 0 {
+        return Some(addr);
+    }
+
+    let mut i = 0usize;
+    while i < bus.range_count {
+        let r = bus.ranges[i];
+        if r.size != 0 && addr >= r.child && addr - r.child < r.size {
+            return Some(r.parent + (addr - r.child));
+        }
+        i += 1;
+    }
+    None
+}
+
+fn parse_ranges(sp: *const u32, i: usize, len: u32, bus_stack: &mut [BusInfo; MAX_DEPTH], depth: usize) {
+    if depth < 2 {
+        return;
+    }
+
+    let parent = bus_stack[depth - 2];
+    let bus = &mut bus_stack[depth - 1];
+    bus.ranges_seen = true;
+    bus.range_count = 0;
+
+    if len == 0 {
+        return;
+    }
+
+    let entry_words = bus.addr_cells + parent.addr_cells + bus.size_cells;
+    if entry_words == 0 {
+        return;
+    }
+
+    let entries = (len / 4) / entry_words;
+    let mut e = 0usize;
+    while e < entries as usize && e < MAX_RANGES {
+        let off = i + e * entry_words as usize;
+        let child = read_addr_cells(sp, off, bus.addr_cells);
+        let parent_addr = read_addr_cells(sp, off + bus.addr_cells as usize, parent.addr_cells);
+        let size = read_size_cells(
+            sp,
+            off + bus.addr_cells as usize + parent.addr_cells as usize,
+            bus.size_cells,
+        );
+        bus.ranges[e] = RangeMap {
+            child,
+            parent: parent_addr,
+            size,
+        };
+        bus.range_count += 1;
+        e += 1;
+    }
+}
+
+fn reparse_current_ranges(sp: *const u32, bus_stack: &mut [BusInfo; MAX_DEPTH], depth: usize) {
+    if depth == 0 {
+        return;
+    }
+    let bus = bus_stack[depth - 1];
+    if bus.ranges_len != 0 || bus.ranges_seen {
+        parse_ranges(sp, bus.ranges_word_index, bus.ranges_len, bus_stack, depth);
+    }
+}
+
+fn read_addr_cells(sp: *const u32, i: usize, cells: u32) -> u64 {
+    if cells == 0 {
+        return 0;
+    }
+    // PCI 地址通常是 3 cells: flags/space + high32 + low32。
+    // 地址数值只取 high32/low32, flags 不参与 CPU 物理地址计算。
+    if cells == 3 {
+        return ((unsafe { read_be(sp.add(i + 1)) } as u64) << 32) | unsafe { read_be(sp.add(i + 2)) } as u64;
+    }
+
+    let mut value = 0u64;
+    let mut c = 0u32;
+    while c < cells {
+        value = (value << 32) | unsafe { read_be(sp.add(i + c as usize)) } as u64;
+        c += 1;
+    }
+    value
+}
+
+fn read_size_cells(sp: *const u32, i: usize, cells: u32) -> u64 {
+    let mut value = 0u64;
+    let mut c = 0u32;
+    while c < cells {
+        value = (value << 32) | unsafe { read_be(sp.add(i + c as usize)) } as u64;
+        c += 1;
+    }
+    value
+}
+
+fn find_stdout_target_path(sp: *const u32, ss: *const u8) -> [u8; MAX_PATH] {
+    let mut selector = [0u8; 64];
+    let mut selector_len = 0usize;
+    let mut target = [0u8; MAX_PATH];
+    let mut path = [0u8; MAX_PATH];
+    let mut path_len_stack = [0usize; MAX_DEPTH];
+    let mut path_len = 0usize;
+    let mut depth = 0usize;
+    let mut i = 0usize;
+
+    loop {
+        let token = unsafe { read_be(sp.add(i)) };
+        if token == FDT_END {
+            return target;
+        }
+
+        if token == FDT_BEGIN_NODE {
+            i += 1;
+            let name_ptr = unsafe { sp.add(i) as *const u8 };
+            let mut name_len = 0usize;
+            while unsafe { *name_ptr.add(name_len) } != 0 {
+                name_len += 1;
+            }
+            if depth < MAX_DEPTH {
+                path_len_stack[depth] = path_len;
+                append_node_to_path(&mut path, &mut path_len, name_ptr, name_len);
+                depth += 1;
+            }
+            i += (name_len + 4) / 4;
+        } else if token == FDT_END_NODE {
+            i += 1;
+            if depth > 0 {
+                depth -= 1;
+                path_len = path_len_stack[depth];
+            }
+        } else if token == FDT_PROP {
+            i += 1;
+            let len = unsafe { read_be(sp.add(i)) };
+            i += 1;
+            let nameoff = unsafe { read_be(sp.add(i)) };
+            i += 1;
+            let prop_name_ptr = unsafe { ss.add(nameoff as usize) };
+            let value = unsafe { sp.add(i) } as *const u8;
+
+            if path_eq_bytes(&path, path_len, b"/chosen")
+                && (cstr_eq_stdout_path(prop_name_ptr) || cstr_eq_linux_stdout_path(prop_name_ptr))
+            {
+                copy_stdout_selector(value, len as usize, &mut selector, &mut selector_len);
+            } else if path_eq_bytes(&path, path_len, b"/aliases")
+                && selector_len != 0
+                && cstr_eq_bytes(prop_name_ptr, &selector[..selector_len])
+            {
+                copy_cstr_to_buf(value, len as usize, &mut target);
+            }
+
+            if target[0] != 0 {
+                return target;
+            }
+            i += ((len + 3) / 4) as usize;
+        } else if token == FDT_NOP {
+            i += 1;
+        } else {
+            return target;
+        }
+    }
+}
+
+fn append_node_to_path(path: &mut [u8; MAX_PATH], path_len: &mut usize, name_ptr: *const u8, name_len: usize) {
+    if name_len == 0 {
+        if *path_len == 0 {
+            path[0] = b'/';
+            *path_len = 1;
+        }
+        return;
+    }
+    if *path_len == 0 {
+        path[0] = b'/';
+        *path_len = 1;
+    } else if *path_len > 1 && *path_len < MAX_PATH {
+        path[*path_len] = b'/';
+        *path_len += 1;
+    }
+
+    let mut i = 0usize;
+    while i < name_len && *path_len < MAX_PATH - 1 {
+        path[*path_len] = unsafe { *name_ptr.add(i) };
+        *path_len += 1;
+        i += 1;
+    }
+    if *path_len < MAX_PATH {
+        path[*path_len] = 0;
+    }
+}
+
+fn path_matches(path: &[u8; MAX_PATH], path_len: usize, target: &[u8; MAX_PATH]) -> bool {
+    if target[0] == 0 {
+        return false;
+    }
+    let mut len = 0usize;
+    while len < MAX_PATH && target[len] != 0 {
+        len += 1;
+    }
+    if len != path_len {
+        return false;
+    }
+    let mut i = 0usize;
+    while i < len {
+        if path[i] != target[i] {
+            return false;
+        }
+        i += 1;
+    }
+    true
+}
+
+fn path_eq_bytes(path: &[u8; MAX_PATH], path_len: usize, b: &[u8]) -> bool {
+    if path_len != b.len() {
+        return false;
+    }
+    let mut i = 0usize;
+    while i < b.len() {
+        if path[i] != b[i] {
+            return false;
+        }
+        i += 1;
+    }
+    true
+}
+
+fn copy_stdout_selector(src: *const u8, len: usize, dst: &mut [u8; 64], dst_len: &mut usize) {
+    *dst_len = 0;
+    let mut i = 0usize;
+    while i < len && i < dst.len() - 1 {
+        let b = unsafe { *src.add(i) };
+        if b == 0 || b == b':' {
+            break;
+        }
+        dst[i] = b;
+        *dst_len += 1;
+        i += 1;
+    }
+    if *dst_len < dst.len() {
+        dst[*dst_len] = 0;
+    }
+}
+
+fn copy_cstr_to_buf(src: *const u8, len: usize, dst: &mut [u8; MAX_PATH]) {
+    let mut i = 0usize;
+    while i < len && i < MAX_PATH - 1 {
+        let b = unsafe { *src.add(i) };
+        if b == 0 {
+            break;
+        }
+        dst[i] = b;
+        i += 1;
+    }
+    if i < MAX_PATH {
+        dst[i] = 0;
     }
 }
 
@@ -305,20 +664,66 @@ fn prop_contains_pl011(prop: *const u8, len: usize) -> bool {
 }
 
 fn is_arm_pl011(ptr: *const u8, len: usize) -> bool {
-    if len != 9 {
-        return false;
+    // "arm,pl011" (9 bytes)
+    if len == 9 {
+        unsafe {
+            if *ptr.add(0) == b'a'
+                && *ptr.add(1) == b'r'
+                && *ptr.add(2) == b'm'
+                && *ptr.add(3) == b','
+                && *ptr.add(4) == b'p'
+                && *ptr.add(5) == b'l'
+                && *ptr.add(6) == b'0'
+                && *ptr.add(7) == b'1'
+                && *ptr.add(8) == b'1'
+            {
+                return true;
+            }
+        }
     }
-    unsafe {
-        *ptr.add(0) == b'a'
-            && *ptr.add(1) == b'r'
-            && *ptr.add(2) == b'm'
-            && *ptr.add(3) == b','
-            && *ptr.add(4) == b'p'
-            && *ptr.add(5) == b'l'
-            && *ptr.add(6) == b'0'
-            && *ptr.add(7) == b'1'
-            && *ptr.add(8) == b'1'
+    // "arm,pl011-axi" (13 bytes) — Raspberry Pi 5 的 UART10 使用这个 compatible。
+    if len == 13 {
+        unsafe {
+            if *ptr.add(0) == b'a'
+                && *ptr.add(1) == b'r'
+                && *ptr.add(2) == b'm'
+                && *ptr.add(3) == b','
+                && *ptr.add(4) == b'p'
+                && *ptr.add(5) == b'l'
+                && *ptr.add(6) == b'0'
+                && *ptr.add(7) == b'1'
+                && *ptr.add(8) == b'1'
+                && *ptr.add(9) == b'-'
+                && *ptr.add(10) == b'a'
+                && *ptr.add(11) == b'x'
+                && *ptr.add(12) == b'i'
+            {
+                return true;
+            }
+        }
     }
+    // "arm,sbsa-uart" (13 bytes) — PL011 in SBSA generic mode (Pi5 RP1 may use this)
+    if len == 13 {
+        unsafe {
+            if *ptr.add(0) == b'a'
+                && *ptr.add(1) == b'r'
+                && *ptr.add(2) == b'm'
+                && *ptr.add(3) == b','
+                && *ptr.add(4) == b's'
+                && *ptr.add(5) == b'b'
+                && *ptr.add(6) == b's'
+                && *ptr.add(7) == b'a'
+                && *ptr.add(8) == b'-'
+                && *ptr.add(9) == b'u'
+                && *ptr.add(10) == b'a'
+                && *ptr.add(11) == b'r'
+                && *ptr.add(12) == b't'
+            {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 fn cstr_eq_address_cells(ptr: *const u8) -> bool {
@@ -376,4 +781,95 @@ fn cstr_eq_compatible(ptr: *const u8) -> bool {
 
 fn cstr_eq_reg(ptr: *const u8) -> bool {
     unsafe { *ptr.add(0) == b'r' && *ptr.add(1) == b'e' && *ptr.add(2) == b'g' && *ptr.add(3) == 0 }
+}
+
+fn cstr_eq_ranges(ptr: *const u8) -> bool {
+    unsafe {
+        *ptr.add(0) == b'r'
+            && *ptr.add(1) == b'a'
+            && *ptr.add(2) == b'n'
+            && *ptr.add(3) == b'g'
+            && *ptr.add(4) == b'e'
+            && *ptr.add(5) == b's'
+            && *ptr.add(6) == 0
+    }
+}
+
+fn cstr_eq_status(ptr: *const u8) -> bool {
+    unsafe {
+        *ptr.add(0) == b's'
+            && *ptr.add(1) == b't'
+            && *ptr.add(2) == b'a'
+            && *ptr.add(3) == b't'
+            && *ptr.add(4) == b'u'
+            && *ptr.add(5) == b's'
+            && *ptr.add(6) == 0
+    }
+}
+
+fn cstr_eq_stdout_path(ptr: *const u8) -> bool {
+    unsafe {
+        *ptr.add(0) == b's'
+            && *ptr.add(1) == b't'
+            && *ptr.add(2) == b'd'
+            && *ptr.add(3) == b'o'
+            && *ptr.add(4) == b'u'
+            && *ptr.add(5) == b't'
+            && *ptr.add(6) == b'-'
+            && *ptr.add(7) == b'p'
+            && *ptr.add(8) == b'a'
+            && *ptr.add(9) == b't'
+            && *ptr.add(10) == b'h'
+            && *ptr.add(11) == 0
+    }
+}
+
+fn cstr_eq_linux_stdout_path(ptr: *const u8) -> bool {
+    unsafe {
+        *ptr.add(0) == b'l'
+            && *ptr.add(1) == b'i'
+            && *ptr.add(2) == b'n'
+            && *ptr.add(3) == b'u'
+            && *ptr.add(4) == b'x'
+            && *ptr.add(5) == b','
+            && *ptr.add(6) == b's'
+            && *ptr.add(7) == b't'
+            && *ptr.add(8) == b'd'
+            && *ptr.add(9) == b'o'
+            && *ptr.add(10) == b'u'
+            && *ptr.add(11) == b't'
+            && *ptr.add(12) == b'-'
+            && *ptr.add(13) == b'p'
+            && *ptr.add(14) == b'a'
+            && *ptr.add(15) == b't'
+            && *ptr.add(16) == b'h'
+            && *ptr.add(17) == 0
+    }
+}
+
+fn cstr_eq_bytes(ptr: *const u8, bytes: &[u8]) -> bool {
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if unsafe { *ptr.add(i) } != bytes[i] {
+            return false;
+        }
+        i += 1;
+    }
+    unsafe { *ptr.add(bytes.len()) == 0 }
+}
+
+fn prop_is_disabled(prop: *const u8, len: usize) -> bool {
+    if len < 8 {
+        return false;
+    }
+    unsafe {
+        *prop.add(0) == b'd'
+            && *prop.add(1) == b'i'
+            && *prop.add(2) == b's'
+            && *prop.add(3) == b'a'
+            && *prop.add(4) == b'b'
+            && *prop.add(5) == b'l'
+            && *prop.add(6) == b'e'
+            && *prop.add(7) == b'd'
+    }
 }
