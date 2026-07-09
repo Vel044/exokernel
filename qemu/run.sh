@@ -40,6 +40,7 @@ echo "QEMU command:"
 echo "  qemu-system-aarch64 -M virt,virtualization=on ..."
 echo ""
 
+
 exec qemu-system-aarch64 \
   -M virt,virtualization=on -cpu cortex-a72 -m 4G \
   -drive if=pflash,format=raw,unit=0,file=/opt/homebrew/share/qemu/edk2-aarch64-code.fd,readonly=on \
