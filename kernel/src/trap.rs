@@ -6,10 +6,13 @@
 
 use crate::uart;
 
-pub const SYS_PUTC: u64 = 1;
 pub const SYS_PUTS: u64 = 2;
 pub const SYS_EXIT: u64 = 5;
 pub const SYS_MAP_MMIO: u64 = 6;
+pub const SYS_IRQ_BIND: u64 = 7;
+pub const SYS_IRQ_WAIT: u64 = 8;
+pub const SYS_IRQ_ACK: u64 = 9;
+pub const SYS_IRQ_UNBIND: u64 = 10;
 
 /// EL2 boot shim 进入 EL1 外核。
 pub fn enter_el1_kernel(entry_pc: u64, stack_top: u64, boot_info_ptr: u64, next_pc: u64) -> ! {
@@ -29,10 +32,13 @@ pub fn enter_el1_kernel(entry_pc: u64, stack_top: u64, boot_info_ptr: u64, next_
     //
     // RW  (bit31) = 1: EL1 是 AArch64。
     // TGE (bit27) = 1: traps general exceptions, 不适合这里正常 eret 到 EL1。
+    // IMO/FMO/AMO (bits 4/3/5) = 1: 把物理 IRQ/FIQ/SError 路由到 EL2。
+    // EL2 只是 boot shim，所以三个位必须清零，让设备 IRQ 进入 EL1 外核。
     //
     // Pi5 UEFI 给的 HCR_EL2=0x88000000, 也就是 RW=1 且 TGE=1。
     // 如果保留 TGE, eret 到 EL1 会触发 EC=0x0e Illegal Execution state。
-    let new_hcr = (old_hcr | (1u64 << 31)) & !(1u64 << 27);
+    let new_hcr =
+        (old_hcr | (1u64 << 31)) & !((1u64 << 27) | (1u64 << 5) | (1u64 << 4) | (1u64 << 3));
     msr!("hcr_el2", new_hcr);
     uart::puts("[exo] new HCR_EL2=");
     uart::hex(new_hcr);
@@ -45,7 +51,10 @@ pub fn enter_el1_kernel(entry_pc: u64, stack_top: u64, boot_info_ptr: u64, next_
     // trampoline。等 EL1 能稳定打印后, 再由 EL1 建自己的 stage-1 页表接管。
     //
     // 只清 alignment/stack alignment 检查, 避免早期 Rust 栈访问被严格对齐规则打断。
-    msr!("sctlr_el1", old_sctlr_el1 & !((1u64 << 1) | (1u64 << 3) | (1u64 << 4)));
+    msr!(
+        "sctlr_el1",
+        old_sctlr_el1 & !((1u64 << 1) | (1u64 << 3) | (1u64 << 4))
+    );
 
     // 原设计: EL1 初始先关 MMU, 同时清掉固件可能留下的 alignment/stack alignment 检查。
     //
@@ -53,7 +62,9 @@ pub fn enter_el1_kernel(entry_pc: u64, stack_top: u64, boot_info_ptr: u64, next_
     // A  = bit1: 普通对齐检查
     // SA = bit3: EL1 SP 对齐检查
     // SA0= bit4: EL0 SP 对齐检查
-    unsafe { core::arch::asm!("isb", options(nomem, nostack)); }
+    unsafe {
+        core::arch::asm!("isb", options(nomem, nostack));
+    }
     msr!("elr_el2", entry_pc);
     let spsr_el2 = 0x3c5u64;
     msr!("spsr_el2", spsr_el2);
@@ -177,28 +188,31 @@ pub extern "C" fn el1_sync_handler(arg0: u64, arg1: u64, arg2: u64, sysno: u64) 
 
 #[no_mangle]
 pub extern "C" fn el1_irq_handler() {
-    uart::puts("\r\n!!! [EL1] IRQ !!!\r\n");
+    if let Some(iar_token) = crate::gic::acknowledge() {
+        let intid = crate::gic::intid(iar_token);
+        if crate::task::has_binding(intid) {
+            crate::gic::disable_spi(intid);
+            crate::task::record_iar(iar_token);
+        } else {
+            crate::gic::write_eoir(iar_token);
+        }
+    }
 }
 
 fn handle_svc(elr: u64, sysno: u64, arg0: u64, arg1: u64, arg2: u64) -> u64 {
-    msr!("elr_el1", elr + 4);
+    msr!("elr_el1", elr);
 
     match sysno {
-        SYS_PUTC => {
-            uart::putc(arg0 as u8);
-            0
-        }
         SYS_PUTS => {
             print_user_str(arg0, arg1);
             0
         }
         SYS_MAP_MMIO => sys_map_mmio(arg0, arg1, arg2),
-        SYS_EXIT => {
-            uart::puts("\r\n[exo] EL0 exit code=");
-            uart::hex(arg0);
-            uart::puts("\r\n");
-            loop {}
-        }
+        SYS_EXIT => crate::task::exit_current(arg0),
+        SYS_IRQ_BIND => sys_irq_bind(arg0),
+        SYS_IRQ_WAIT => sys_irq_wait(),
+        SYS_IRQ_ACK => sys_irq_ack(arg0),
+        SYS_IRQ_UNBIND => sys_irq_unbind(arg0),
         _ => {
             uart::puts("\r\n[exo] unknown SVC sysno=");
             uart::hex(sysno);
@@ -233,15 +247,14 @@ fn sys_map_mmio(paddr: u64, size: u64, user_va: u64) -> u64 {
     if root == 0 {
         return 3;
     }
+    if !crate::task::can_record_mmio() {
+        return 4;
+    }
 
-    crate::mmu::map(
-        root,
-        user_va,
-        paddr,
-        crate::mmu::MMU_USER_DEV,
-        size_rounded / 4096,
-    );
+    let pages = size_rounded / 4096;
+    crate::mmu::map(root, user_va, paddr, crate::mmu::MMU_USER_DEV, pages);
     crate::mmu::flush_el1_tlb();
+    crate::task::record_mmio(user_va, pages);
 
     uart::puts("\r\n[exo] SYS_MAP_MMIO pa=");
     uart::hex(paddr);
@@ -249,6 +262,113 @@ fn sys_map_mmio(paddr: u64, size: u64, user_va: u64) -> u64 {
     uart::hex(user_va);
     uart::puts(" size=");
     uart::hex(size_rounded);
+    uart::puts("\r\n");
+    0
+}
+
+// ── IRQ syscalls ──
+
+fn sys_irq_bind(intid: u64) -> u64 {
+    if intid > u32::MAX as u64 {
+        return 1;
+    }
+    let intid = intid as u32;
+    if intid < 32 {
+        // 只允许 SPI (INTID >= 32)
+        uart::puts("\r\n[exo] SYS_IRQ_BIND rejected: INTID must be >= 32 (got ");
+        uart::hex(intid as u64);
+        uart::puts(")\r\n");
+        return 1;
+    }
+    if !crate::task::can_bind_irq(intid) {
+        uart::puts("\r\n[exo] SYS_IRQ_BIND rejected: no active task\r\n");
+        return 2;
+    }
+    if !crate::task::bind_irq(intid) {
+        uart::puts("\r\n[exo] SYS_IRQ_BIND failed: already bound or full\r\n");
+        return 3;
+    }
+
+    // 配置 SPI 为电平触发 (PL011 中断是电平触发)
+    crate::gic::configure_spi(intid, true);
+
+    uart::puts("\r\n[exo] SYS_IRQ_BIND intid=");
+    uart::hex(intid as u64);
+    uart::puts("\r\n");
+    0
+}
+
+fn sys_irq_wait() -> u64 {
+    if crate::task::has_active_iar() {
+        uart::puts("\r\n[exo] SYS_IRQ_WAIT rejected: previous IRQ not ACKed\r\n");
+        return u64::MAX;
+    }
+
+    if crate::task::first_bound_intid().is_none() {
+        uart::puts("\r\n[exo] SYS_IRQ_WAIT rejected: no bound IRQ\r\n");
+        return u64::MAX;
+    }
+
+    unsafe {
+        core::arch::asm!("msr daifset, #2", options(nomem, nostack));
+    }
+    crate::task::enable_bound_irqs();
+
+    // 保持 PSTATE.I=1。ARM 的 WFI 会被已送达的物理 IRQ 唤醒，即使 IRQ
+    // 在 PSTATE 中被屏蔽；醒来后由当前同步异常上下文主动读取 GICC_IAR。
+    // 这样不存在“解屏蔽后、执行 WFI 前”被抢占导致错过唤醒的窗口。
+    let result: u64;
+    loop {
+        unsafe {
+            core::arch::asm!("msr daifset, #2", "dsb sy", "wfi", options(nomem, nostack));
+        }
+
+        if let Some(iar_token) = crate::gic::acknowledge() {
+            let pending_intid = crate::gic::intid(iar_token);
+            if crate::task::has_binding(pending_intid) {
+                crate::task::record_iar(iar_token);
+                result = pending_intid as u64;
+                break;
+            }
+            crate::gic::write_eoir(iar_token);
+        }
+    }
+
+    crate::task::disable_bound_irqs();
+
+    result
+}
+
+fn sys_irq_ack(intid: u64) -> u64 {
+    if intid > u32::MAX as u64 {
+        return 1;
+    }
+    let intid = intid as u32;
+    if !crate::task::ack_irq(intid) {
+        uart::puts("\r\n[exo] SYS_IRQ_ACK failed: no active IRQ or INTID mismatch (got ");
+        uart::hex(intid as u64);
+        uart::puts(" active=");
+        uart::hex(crate::task::active_iar() as u64);
+        uart::puts(")\r\n");
+        return 1;
+    }
+
+    0
+}
+
+fn sys_irq_unbind(intid: u64) -> u64 {
+    if intid > u32::MAX as u64 {
+        return 1;
+    }
+    let intid = intid as u32;
+    if !crate::task::unbind_irq(intid) {
+        uart::puts("\r\n[exo] SYS_IRQ_UNBIND: not bound (intid=");
+        uart::hex(intid as u64);
+        uart::puts(")\r\n");
+        return 1;
+    }
+    uart::puts("\r\n[exo] SYS_IRQ_UNBIND intid=");
+    uart::hex(intid as u64);
     uart::puts("\r\n");
     0
 }

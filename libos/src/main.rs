@@ -1,90 +1,138 @@
-//! libOS —— EL0 测试程序
-//! 用 SVC 陷入 EL1 外核, 验证 EL0 用户态路径能跑。
+//! libOS —— EL0 UART IRQ 回显程序。
+//!
+//! DTB 发现由 `dtb.rs` 完成，PL011 寄存器操作由 vendored
+//! `arm-pl011-uart` 完成。这里仅组织设备映射、IRQ syscall 和事件循环。
 
 #![no_std]
 #![no_main]
 
+mod dtb;
+
 use core::arch::asm;
+use core::ptr::NonNull;
 
 const SYS_PUTS: u64 = 2;
 const SYS_EXIT: u64 = 5;
 const SYS_MAP_MMIO: u64 = 6;
+const SYS_IRQ_BIND: u64 = 7;
+const SYS_IRQ_WAIT: u64 = 8;
+const SYS_IRQ_ACK: u64 = 9;
+const SYS_IRQ_UNBIND: u64 = 10;
 
+/// EL0 自己选择 UART MMIO 在用户地址空间中的虚拟地址。
 const UART_VA: u64 = 0x4040_0000;
-const PL011_DR: usize = 0x00;
-const PL011_FR: usize = 0x18;
-const PL011_FR_TXFF: u32 = 1 << 5;
-
-const FDT_MAGIC: u32 = 0xd00dfeed;
-const FDT_BEGIN_NODE: u32 = 1;
-const FDT_END_NODE: u32 = 2;
-const FDT_PROP: u32 = 3;
-const FDT_NOP: u32 = 4;
-const FDT_END: u32 = 9;
-
-#[derive(Clone, Copy)]
-struct RegRange {
-    base: u64,
-    size: u64,
-}
-
-const MAX_DEPTH: usize = 24;
-const MAX_RANGES: usize = 8;
-const MAX_PATH: usize = 192;
-
-#[derive(Clone, Copy)]
-struct RangeMap {
-    child: u64,
-    parent: u64,
-    size: u64,
-}
-
-#[derive(Clone, Copy)]
-struct BusInfo {
-    addr_cells: u32,
-    size_cells: u32,
-    ranges: [RangeMap; MAX_RANGES],
-    range_count: usize,
-    ranges_seen: bool,
-    ranges_word_index: usize,
-    ranges_len: u32,
-}
-
-impl BusInfo {
-    const fn default() -> Self {
-        Self {
-            addr_cells: 2,
-            size_cells: 1,
-            ranges: [RangeMap {
-                child: 0,
-                parent: 0,
-                size: 0,
-            }; MAX_RANGES],
-            range_count: 0,
-            ranges_seen: false,
-            ranges_word_index: 0,
-            ranges_len: 0,
-        }
-    }
-}
 
 #[no_mangle]
 #[link_section = ".text.entry"]
 pub extern "C" fn _start(dtb_va: u64) -> ! {
-    let msg = b"[libos] EL0 svc hello\r\n";
-    svc(SYS_PUTS, msg.as_ptr() as u64, msg.len() as u64, 0);
+    svc_puts(b"[libos] EL0 boot, searching UART in DTB...\r\n");
 
-    if let Some(uart_reg) = find_pl011_reg(dtb_va) {
-        svc(SYS_MAP_MMIO, uart_reg.base, uart_reg.size, UART_VA);
-        pl011_puts(UART_VA, b"U0\r\n");
-    } else {
-        let fail = b"[libos] PL011 not found in DTB\r\n";
-        svc(SYS_PUTS, fail.as_ptr() as u64, fail.len() as u64, 0);
+    // fdt crate 负责设备树结构解析；dtb 模块补充 ranges 地址翻译和
+    // GIC specifier 转换，最终返回 CPU 物理地址与 GIC INTID。
+    let uart = match dtb::find_stdout_uart(dtb_va) {
+        Ok(info) => info,
+        Err(error) => {
+            svc_puts(b"[libos] UART discovery failed, stage=");
+            svc_hex(error.code());
+            svc_puts(b"\r\n");
+            svc(SYS_EXIT, error.code(), 0, 0);
+            loop {
+                core::hint::spin_loop();
+            }
+        }
+    };
+
+    svc_puts(b"[libos] UART pa=");
+    svc_hex(uart.reg.base);
+    svc_puts(b" size=");
+    svc_hex(uart.reg.size);
+    svc_puts(b" INTID=");
+    svc_hex(uart.intid as u64);
+    svc_puts(b"\r\n");
+
+    // EL0 只能提出映射请求；EL1 检查 protect 表并写 stage-1 PTE。
+    let map_result = svc(SYS_MAP_MMIO, uart.reg.base, uart.reg.size, UART_VA);
+    if map_result != 0 {
+        svc_puts(b"[libos] SYS_MAP_MMIO failed, code=");
+        svc_hex(map_result);
+        svc_puts(b"\r\n");
+        svc(SYS_EXIT, map_result, 0, 0);
     }
 
-    svc(SYS_EXIT, 0, 0, 0);
+    // EL1 只允许绑定它从同一份 DTB 登记的 UART INTID。
+    let bind_result = irq_bind(uart.intid);
+    if bind_result != 0 {
+        svc_puts(b"[libos] SYS_IRQ_BIND failed, code=");
+        svc_hex(bind_result);
+        svc_puts(b"\r\n");
+        svc(SYS_EXIT, bind_result, 0, 0);
+    }
 
-    loop {}
+    // SAFETY:
+    // - UART_VA 已由 SYS_MAP_MMIO 映射到 DTB 发现的 PL011 寄存器页；
+    // - 当前只有一个 EL0 任务持有并访问这个寄存器块；
+    // - 映射在驱动实例的整个生命周期内保持有效。
+
+    // 把 EL0 虚拟地址 `UART_VA` 解释成一个指向 PL011 寄存器布局的裸指针；
+    // `NonNull` 只是告诉 Rust 这个指针不是 0，真实映射由前面的 SYS_MAP_MMIO 保证。
+    let uart_ptr = NonNull::new(UART_VA as *mut arm_pl011_uart::PL011Registers).unwrap();
+    // 把非空裸指针包装成 arm-pl011-uart 需要的唯一 MMIO 指针；
+    // unsafe 的原因是 Rust 无法证明这个地址真的是 UART、真的是 MMIO、且没有别名访问。
+    let mmio_ptr = unsafe { arm_pl011_uart::UniqueMmioPointer::new(uart_ptr) };
+    // 创建 PL011 驱动对象。之后 read_word/write_word/clear_interrupts
+    // 都会通过这个对象对 UART_VA 对应的硬件寄存器做 volatile 访问。
+    let mut pl011 = arm_pl011_uart::Uart::new(mmio_ptr);
+
+    // 保留 UEFI/固件配置好的时钟、波特率和线路格式，只打开接收 FIFO
+    // 与 receive-timeout 中断。Pi5 DTB 对该 UART 标记了 skip-init。
+    use arm_pl011_uart::Interrupts;
+    pl011.set_interrupt_masks(Interrupts::RXI | Interrupts::RTI);
+
+    svc_puts(b"[libos] ready for input\r\n");
+
+    loop {
+        // WAIT 在 EL1 中启用已绑定 GIC IRQ 并执行 WFI，返回实际 INTID。
+        let intid = irq_wait();
+
+        // IRQ 只说明设备可能有数据；真正的数据仍由 EL0 直接读 UARTDR。
+        loop {
+            match pl011.read_word() {
+                Ok(Some(byte)) => {
+                    // arm-pl011-uart::write_word() 是非阻塞原语，不检查 UARTFR.TXFF。
+                    // EL1 的 IRQ 日志可能刚填满 TX FIFO，因此必须等到有空位再回显。
+                    while pl011.is_tx_fifo_full() {
+                        core::hint::spin_loop();
+                    }
+                    pl011.write_word(byte);
+                }
+                Ok(None) => break,
+                Err(error) => {
+                    use arm_pl011_uart::Error;
+                    match error {
+                        Error::Overrun => svc_puts(b"[libos] UART RX error: overrun\r\n"),
+                        Error::Break => svc_puts(b"[libos] UART RX error: break\r\n"),
+                        Error::Parity => svc_puts(b"[libos] UART RX error: parity\r\n"),
+                        Error::Framing => svc_puts(b"[libos] UART RX error: framing\r\n"),
+                        Error::InvalidParameter => {
+                            svc_puts(b"[libos] UART RX error: invalid parameter\r\n")
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+
+        // 先清 PL011 设备侧中断源，再让 EL1 向 GIC 写 EOIR。
+        pl011.clear_interrupts(
+            Interrupts::RXI
+                | Interrupts::RTI
+                | Interrupts::OEI
+                | Interrupts::BEI
+                | Interrupts::PEI
+                | Interrupts::FEI,
+        );
+        irq_ack(intid as u32);
+    }
 }
 
 fn svc(sysno: u64, arg0: u64, arg1: u64, arg2: u64) -> u64 {
@@ -116,484 +164,58 @@ fn svc(sysno: u64, arg0: u64, arg1: u64, arg2: u64) -> u64 {
     ret
 }
 
-fn pl011_puts(uart_va: u64, s: &[u8]) {
-    for &b in s {
-        pl011_putc(uart_va, b);
-    }
+fn irq_bind(intid: u32) -> u64 {
+    svc(SYS_IRQ_BIND, intid as u64, 0, 0)
 }
 
-fn pl011_putc(uart_va: u64, c: u8) {
-    let uart = uart_va as *mut u8;
-    unsafe {
-        for _ in 0..100_000 {
-            let fr = (uart.add(PL011_FR) as *const u32).read_volatile();
-            if (fr & PL011_FR_TXFF) == 0 {
-                break;
-            }
-        }
-        (uart.add(PL011_DR) as *mut u32).write_volatile(c as u32);
-    }
+fn irq_wait() -> u64 {
+    svc(SYS_IRQ_WAIT, 0, 0, 0)
 }
 
-fn find_pl011_reg(dtb_va: u64) -> Option<RegRange> {
-    if dtb_va == 0 {
-        return None;
-    }
+fn irq_ack(intid: u32) -> u64 {
+    svc(SYS_IRQ_ACK, intid as u64, 0, 0)
+}
 
-    let ptr = dtb_va as *const u32;
-    if unsafe { read_be(ptr.add(0)) } != FDT_MAGIC {
-        return None;
-    }
+#[allow(dead_code)]
+fn irq_unbind(intid: u32) -> u64 {
+    svc(SYS_IRQ_UNBIND, intid as u64, 0, 0)
+}
 
-    let off_struct = unsafe { read_be(ptr.add(2)) };
-    let off_strings = unsafe { read_be(ptr.add(3)) };
-    let sp = (dtb_va + off_struct as u64) as *const u32;
-    let ss = (dtb_va + off_strings as u64) as *const u8;
-    let target_path = find_stdout_target_path(sp, ss);
+fn svc_puts(bytes: &[u8]) {
+    svc(SYS_PUTS, bytes.as_ptr() as u64, bytes.len() as u64, 0);
+}
 
-    let mut bus_stack = [BusInfo::default(); MAX_DEPTH];
-    let mut depth = 0usize;
-    let mut path = [0u8; MAX_PATH];
-    let mut path_len_stack = [0usize; MAX_DEPTH];
-    let mut path_len = 0usize;
-    let mut node_compatible = false;
-    let mut node_disabled = false;
-    let mut node_reg: Option<RegRange> = None;
-    let mut fallback_uart_reg: Option<RegRange> = None;
-    let mut i = 0usize;
+fn svc_hex(value: u64) {
+    let mut buffer = [b'0'; 18];
+    buffer[0] = b'0';
+    buffer[1] = b'x';
 
-    loop {
-        let token = unsafe { read_be(sp.add(i)) };
-        if token == FDT_END {
-            return fallback_uart_reg;
-        }
-
-        if token == FDT_BEGIN_NODE {
-            i += 1;
-            let name_ptr = unsafe { sp.add(i) as *const u8 };
-            let mut name_len = 0usize;
-            while unsafe { *name_ptr.add(name_len) } != 0 {
-                name_len += 1;
-            }
-            if depth + 1 >= MAX_DEPTH {
-                return None;
-            }
-            path_len_stack[depth] = path_len;
-            append_node_to_path(&mut path, &mut path_len, name_ptr, name_len);
-            bus_stack[depth] = BusInfo::default();
-            depth += 1;
-            node_compatible = false;
-            node_disabled = false;
-            node_reg = None;
-            i += (name_len + 4) / 4;
-        } else if token == FDT_END_NODE {
-            if node_compatible && !node_disabled && path_matches(&path, path_len, &target_path) {
-                if let Some(reg) = node_reg {
-                    return Some(reg);
-                }
-            }
-            if node_compatible && !node_disabled && fallback_uart_reg.is_none() {
-                fallback_uart_reg = node_reg;
-            }
-            i += 1;
-            if depth == 0 {
-                return None;
-            }
-            depth -= 1;
-            path_len = path_len_stack[depth];
-            node_compatible = false;
-            node_disabled = false;
-            node_reg = None;
-        } else if token == FDT_PROP {
-            i += 1;
-            let len = unsafe { read_be(sp.add(i)) };
-            i += 1;
-            let nameoff = unsafe { read_be(sp.add(i)) };
-            i += 1;
-
-            let pname = string_at(ss, nameoff as usize);
-            if bytes_eq(pname, b"#address-cells") && len == 4 {
-                bus_stack[depth - 1].addr_cells = unsafe { read_be(sp.add(i)) };
-                reparse_current_ranges(sp, &mut bus_stack, depth);
-            } else if bytes_eq(pname, b"#size-cells") && len == 4 {
-                bus_stack[depth - 1].size_cells = unsafe { read_be(sp.add(i)) };
-                reparse_current_ranges(sp, &mut bus_stack, depth);
-            } else if bytes_eq(pname, b"ranges") {
-                bus_stack[depth - 1].ranges_word_index = i;
-                bus_stack[depth - 1].ranges_len = len;
-                parse_ranges(sp, i, len, &mut bus_stack, depth);
-            } else if bytes_eq(pname, b"status") {
-                node_disabled = prop_is_disabled(unsafe { sp.add(i) } as *const u8, len as usize);
-            } else if bytes_eq(pname, b"compatible") {
-                let prop = unsafe { sp.add(i) } as *const u8;
-                node_compatible = prop_contains_string(prop, len as usize, b"arm,pl011")
-                    || prop_contains_string(prop, len as usize, b"arm,pl011-axi")
-                    || prop_contains_string(prop, len as usize, b"arm,sbsa-uart");
-            } else if bytes_eq(pname, b"reg") && node_reg.is_none() {
-                node_reg = read_first_translated_reg(sp, i, len, &bus_stack, depth);
-            }
-
-            i += ((len + 3) / 4) as usize;
-        } else if token == FDT_NOP {
-            i += 1;
+    let mut index = 0usize;
+    while index < 16 {
+        let shift = 60 - index * 4;
+        let nibble = ((value >> shift) & 0xf) as u8;
+        buffer[index + 2] = if nibble < 10 {
+            b'0' + nibble
         } else {
-            return None;
-        }
-    }
-}
-
-fn read_first_translated_reg(
-    sp: *const u32,
-    i: usize,
-    len: u32,
-    bus_stack: &[BusInfo; MAX_DEPTH],
-    depth: usize,
-) -> Option<RegRange> {
-    if depth < 2 {
-        return None;
-    }
-    let parent = bus_stack[depth - 2];
-    let entry_words = parent.addr_cells + parent.size_cells;
-    if parent.addr_cells == 0 || parent.size_cells == 0 || len < entry_words * 4 {
-        return None;
-    }
-    let raw_base = read_addr_cells(sp, i, parent.addr_cells);
-    let size = read_size_cells(sp, i + parent.addr_cells as usize, parent.size_cells);
-    if size == 0 {
-        return None;
-    }
-    translate_to_cpu(raw_base, bus_stack, depth - 2).map(|base| RegRange { base, size })
-}
-
-fn translate_to_cpu(mut addr: u64, bus_stack: &[BusInfo; MAX_DEPTH], mut bus_index: usize) -> Option<u64> {
-    loop {
-        let bus = bus_stack[bus_index];
-        addr = translate_one_bus(addr, bus)?;
-        if bus_index == 0 {
-            return Some(addr);
-        }
-        bus_index -= 1;
-    }
-}
-
-fn translate_one_bus(addr: u64, bus: BusInfo) -> Option<u64> {
-    if !bus.ranges_seen || bus.range_count == 0 {
-        return Some(addr);
-    }
-    let mut i = 0usize;
-    while i < bus.range_count {
-        let r = bus.ranges[i];
-        if r.size != 0 && addr >= r.child && addr - r.child < r.size {
-            return Some(r.parent + (addr - r.child));
-        }
-        i += 1;
-    }
-    None
-}
-
-fn parse_ranges(sp: *const u32, i: usize, len: u32, bus_stack: &mut [BusInfo; MAX_DEPTH], depth: usize) {
-    if depth < 2 {
-        return;
-    }
-    let parent = bus_stack[depth - 2];
-    let bus = &mut bus_stack[depth - 1];
-    bus.ranges_seen = true;
-    bus.range_count = 0;
-    if len == 0 {
-        return;
-    }
-    let entry_words = bus.addr_cells + parent.addr_cells + bus.size_cells;
-    if entry_words == 0 {
-        return;
-    }
-    let entries = (len / 4) / entry_words;
-    let mut e = 0usize;
-    while e < entries as usize && e < MAX_RANGES {
-        let off = i + e * entry_words as usize;
-        bus.ranges[e] = RangeMap {
-            child: read_addr_cells(sp, off, bus.addr_cells),
-            parent: read_addr_cells(sp, off + bus.addr_cells as usize, parent.addr_cells),
-            size: read_size_cells(
-                sp,
-                off + bus.addr_cells as usize + parent.addr_cells as usize,
-                bus.size_cells,
-            ),
+            b'a' + nibble - 10
         };
-        bus.range_count += 1;
-        e += 1;
+        index += 1;
     }
+
+    svc_puts(&buffer);
 }
 
-fn reparse_current_ranges(sp: *const u32, bus_stack: &mut [BusInfo; MAX_DEPTH], depth: usize) {
-    if depth == 0 {
-        return;
-    }
-    let bus = bus_stack[depth - 1];
-    if bus.ranges_len != 0 || bus.ranges_seen {
-        parse_ranges(sp, bus.ranges_word_index, bus.ranges_len, bus_stack, depth);
-    }
-}
-
-fn read_addr_cells(sp: *const u32, i: usize, cells: u32) -> u64 {
-    if cells == 3 {
-        return ((unsafe { read_be(sp.add(i + 1)) } as u64) << 32) | unsafe { read_be(sp.add(i + 2)) } as u64;
-    }
-    let mut value = 0u64;
-    let mut c = 0u32;
-    while c < cells {
-        value = (value << 32) | unsafe { read_be(sp.add(i + c as usize)) } as u64;
-        c += 1;
-    }
-    value
-}
-
-fn read_size_cells(sp: *const u32, i: usize, cells: u32) -> u64 {
-    let mut value = 0u64;
-    let mut c = 0u32;
-    while c < cells {
-        value = (value << 32) | unsafe { read_be(sp.add(i + c as usize)) } as u64;
-        c += 1;
-    }
-    value
-}
-
-fn string_at(base: *const u8, off: usize) -> &'static [u8] {
-    let ptr = unsafe { base.add(off) };
-    let mut len = 0usize;
-    while unsafe { *ptr.add(len) } != 0 {
-        len += 1;
-    }
-    unsafe { core::slice::from_raw_parts(ptr, len) }
-}
-
-fn prop_contains_string(prop: *const u8, len: usize, needle: &[u8]) -> bool {
-    let mut off = 0usize;
-    while off < len {
-        let start = off;
-        while off < len && unsafe { *prop.add(off) } != 0 {
-            off += 1;
-        }
-        if off > start {
-            let s = unsafe { core::slice::from_raw_parts(prop.add(start), off - start) };
-            if bytes_eq(s, needle) {
-                return true;
-            }
-        }
-        off += 1;
-    }
-    false
-}
-
-fn bytes_eq(a: &[u8], b: &[u8]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    let mut i = 0usize;
-    while i < a.len() {
-        if a[i] != b[i] {
-            return false;
-        }
-        i += 1;
-    }
-    true
-}
-
-fn find_stdout_target_path(sp: *const u32, ss: *const u8) -> [u8; MAX_PATH] {
-    let mut selector = [0u8; 64];
-    let mut selector_len = 0usize;
-    let mut target = [0u8; MAX_PATH];
-    let mut path = [0u8; MAX_PATH];
-    let mut path_len_stack = [0usize; MAX_DEPTH];
-    let mut path_len = 0usize;
-    let mut depth = 0usize;
-    let mut i = 0usize;
-
+fn exit_with_message(message: &[u8], code: u64) -> ! {
+    svc_puts(message);
+    svc(SYS_EXIT, code, 0, 0);
     loop {
-        let token = unsafe { read_be(sp.add(i)) };
-        if token == FDT_END {
-            return target;
-        }
-
-        if token == FDT_BEGIN_NODE {
-            i += 1;
-            let name_ptr = unsafe { sp.add(i) as *const u8 };
-            let mut name_len = 0usize;
-            while unsafe { *name_ptr.add(name_len) } != 0 {
-                name_len += 1;
-            }
-            if depth < MAX_DEPTH {
-                path_len_stack[depth] = path_len;
-                append_node_to_path(&mut path, &mut path_len, name_ptr, name_len);
-                depth += 1;
-            }
-            i += (name_len + 4) / 4;
-        } else if token == FDT_END_NODE {
-            i += 1;
-            if depth > 0 {
-                depth -= 1;
-                path_len = path_len_stack[depth];
-            }
-        } else if token == FDT_PROP {
-            i += 1;
-            let len = unsafe { read_be(sp.add(i)) };
-            i += 1;
-            let nameoff = unsafe { read_be(sp.add(i)) };
-            i += 1;
-            let pname = string_at(ss, nameoff as usize);
-            let value = unsafe { sp.add(i) } as *const u8;
-
-            if path_eq_bytes(&path, path_len, b"/chosen")
-                && (bytes_eq(pname, b"stdout-path") || bytes_eq(pname, b"linux,stdout-path"))
-            {
-                copy_stdout_selector(value, len as usize, &mut selector, &mut selector_len);
-            } else if path_eq_bytes(&path, path_len, b"/aliases")
-                && selector_len != 0
-                && cstr_eq_bytes(value_name_ptr(ss, nameoff as usize), &selector[..selector_len])
-            {
-                copy_cstr_to_buf(value, len as usize, &mut target);
-            }
-
-            if target[0] != 0 {
-                return target;
-            }
-            i += ((len + 3) / 4) as usize;
-        } else if token == FDT_NOP {
-            i += 1;
-        } else {
-            return target;
-        }
+        core::hint::spin_loop();
     }
-}
-
-fn value_name_ptr(ss: *const u8, nameoff: usize) -> *const u8 {
-    unsafe { ss.add(nameoff) }
-}
-
-fn append_node_to_path(path: &mut [u8; MAX_PATH], path_len: &mut usize, name_ptr: *const u8, name_len: usize) {
-    if name_len == 0 {
-        if *path_len == 0 {
-            path[0] = b'/';
-            *path_len = 1;
-        }
-        return;
-    }
-    if *path_len == 0 {
-        path[0] = b'/';
-        *path_len = 1;
-    } else if *path_len > 1 && *path_len < MAX_PATH {
-        path[*path_len] = b'/';
-        *path_len += 1;
-    }
-    let mut i = 0usize;
-    while i < name_len && *path_len < MAX_PATH - 1 {
-        path[*path_len] = unsafe { *name_ptr.add(i) };
-        *path_len += 1;
-        i += 1;
-    }
-    if *path_len < MAX_PATH {
-        path[*path_len] = 0;
-    }
-}
-
-fn path_matches(path: &[u8; MAX_PATH], path_len: usize, target: &[u8; MAX_PATH]) -> bool {
-    if target[0] == 0 {
-        return false;
-    }
-    let mut len = 0usize;
-    while len < MAX_PATH && target[len] != 0 {
-        len += 1;
-    }
-    if len != path_len {
-        return false;
-    }
-    let mut i = 0usize;
-    while i < len {
-        if path[i] != target[i] {
-            return false;
-        }
-        i += 1;
-    }
-    true
-}
-
-fn path_eq_bytes(path: &[u8; MAX_PATH], path_len: usize, b: &[u8]) -> bool {
-    if path_len != b.len() {
-        return false;
-    }
-    let mut i = 0usize;
-    while i < b.len() {
-        if path[i] != b[i] {
-            return false;
-        }
-        i += 1;
-    }
-    true
-}
-
-fn copy_stdout_selector(src: *const u8, len: usize, dst: &mut [u8; 64], dst_len: &mut usize) {
-    *dst_len = 0;
-    let mut i = 0usize;
-    while i < len && i < dst.len() - 1 {
-        let b = unsafe { *src.add(i) };
-        if b == 0 || b == b':' {
-            break;
-        }
-        dst[i] = b;
-        *dst_len += 1;
-        i += 1;
-    }
-    if *dst_len < dst.len() {
-        dst[*dst_len] = 0;
-    }
-}
-
-fn copy_cstr_to_buf(src: *const u8, len: usize, dst: &mut [u8; MAX_PATH]) {
-    let mut i = 0usize;
-    while i < len && i < MAX_PATH - 1 {
-        let b = unsafe { *src.add(i) };
-        if b == 0 {
-            break;
-        }
-        dst[i] = b;
-        i += 1;
-    }
-    if i < MAX_PATH {
-        dst[i] = 0;
-    }
-}
-
-fn cstr_eq_bytes(ptr: *const u8, bytes: &[u8]) -> bool {
-    let mut i = 0usize;
-    while i < bytes.len() {
-        if unsafe { *ptr.add(i) } != bytes[i] {
-            return false;
-        }
-        i += 1;
-    }
-    unsafe { *ptr.add(bytes.len()) == 0 }
-}
-
-fn prop_is_disabled(prop: *const u8, len: usize) -> bool {
-    if len < 8 {
-        return false;
-    }
-    unsafe {
-        *prop.add(0) == b'd'
-            && *prop.add(1) == b'i'
-            && *prop.add(2) == b's'
-            && *prop.add(3) == b'a'
-            && *prop.add(4) == b'b'
-            && *prop.add(5) == b'l'
-            && *prop.add(6) == b'e'
-            && *prop.add(7) == b'd'
-    }
-}
-
-unsafe fn read_be(p: *const u32) -> u32 {
-    u32::from_be(unsafe { core::ptr::read_volatile(p) })
 }
 
 #[panic_handler]
 fn panic(_: &core::panic::PanicInfo) -> ! {
-    loop {}
+    loop {
+        core::hint::spin_loop();
+    }
 }

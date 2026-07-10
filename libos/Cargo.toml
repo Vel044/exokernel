@@ -3,8 +3,12 @@ name = "libos"
 version = "0.1.0"
 edition = "2021"
 
-# 编译为裸机 EL1 二进制 (不是 UEFI .efi), 被 EL2 外核嵌在 .efi 里
+# 编译为裸机 EL0 二进制（不是 UEFI .efi），被 EL1 外核加载
 # 用 release 避免 debug 版 UB checks 导致 panic
+
+[dependencies]
+arm-pl011-uart = { path = "vendor/arm-pl011-uart", version = "=0.5.0", default-features = false }
+fdt = { path = "vendor/fdt", version = "=0.1.5" }
 
 [profile.dev]
 panic = "abort"

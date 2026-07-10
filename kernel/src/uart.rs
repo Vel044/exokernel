@@ -6,17 +6,11 @@
 
 use core::ptr::{read_volatile, write_volatile};
 
-const PL011_DR: usize = 0x00;       // 数据寄存器偏移: 写=发字符, 读=收字符
-const PL011_FR: usize = 0x18;       // 标志寄存器偏移: 读状态
-const PL011_FR_TXFF: u32 = 1 << 5;  // FR 的第 5 位: 1 = 发送 FIFO 满了 (不能写)
+const PL011_DR: usize = 0x00; // 数据寄存器偏移: 写=发字符, 读=收字符
+const PL011_FR: usize = 0x18; // 标志寄存器偏移: 读状态
+const PL011_FR_TXFF: u32 = 1 << 5; // FR 的第 5 位: 1 = 发送 FIFO 满了 (不能写)
 
 static mut UART_BASE: u64 = 0;
-
-/// Pi5 UART10 的已知 CPU 物理地址, 只作为 early bring-up 诊断兜底。
-///
-/// 正式路径仍然是从 DTB 的 stdout-path/aliases/reg/ranges 解析 UART。
-#[cfg(feature = "pi5")]
-pub const PI5_DEBUG_UART_BASE: u64 = 0x107d_001000;
 
 /// 初始化运行时 UART MMIO 基址。
 ///

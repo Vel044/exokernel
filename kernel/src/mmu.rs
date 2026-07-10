@@ -14,18 +14,18 @@
 use crate::mem;
 
 // ── 页表条目格式 ──
-const DESC_TABLE: u64 = 0b11;  // L1/L2 表项的 bit[1:0]=11: 指向下级表
-const DESC_BLOCK: u64 = 0b01;  // L1/L2 表项的 bit[1:0]=01: block 映射
-const DESC_PAGE: u64 = 0b11;   // L3 表项的 bit[1:0]=11: 指向一个 4KB 物理页
+const DESC_TABLE: u64 = 0b11; // L1/L2 表项的 bit[1:0]=11: 指向下级表
+const DESC_BLOCK: u64 = 0b01; // L1/L2 表项的 bit[1:0]=01: block 映射
+const DESC_PAGE: u64 = 0b11; // L3 表项的 bit[1:0]=11: 指向一个 4KB 物理页
 
 // ── 内存属性 (对应 MAIR_EL1 的索引) ──
 pub const ATTR_NORMAL: u64 = 0; // 索引 0 = 普通内存 (Normal WB-WA, 可缓存)
 pub const ATTR_DEVICE: u64 = 1; // 索引 1 = 设备内存 (Device-nGnRE, 不可缓存, MMIO 用)
 
 // ── 访问权限 ──
-pub const AP_RW_EL1: u64 = 0 << 6;  // EL1 可读写, EL0 不可访问
-pub const AP_RW_EL0: u64 = 1 << 6;  // EL1/EL0 都可读写
-pub const AP_RO_EL0: u64 = 3 << 6;  // EL1/EL0 都只读
+pub const AP_RW_EL1: u64 = 0 << 6; // EL1 可读写, EL0 不可访问
+pub const AP_RW_EL0: u64 = 1 << 6; // EL1/EL0 都可读写
+pub const AP_RO_EL0: u64 = 3 << 6; // EL1/EL0 都只读
 
 // ── 预设的映射标志组合 ──
 pub const MMU_KERNEL: u64 = AP_RW_EL1 | (ATTR_NORMAL << 2) | (1 << 10) | (1 << 54);
@@ -38,14 +38,20 @@ pub const MMU_USER_DEV: u64 = AP_RW_EL0 | (ATTR_DEVICE << 2) | (1 << 10) | (1 <<
 static mut ACTIVE_TABLE: u64 = 0;
 
 /// 从虚拟地址提取各级索引
-fn l1_index(va: u64) -> usize { ((va >> 30) & 0x1ff) as usize }  // VA[38:30]
-fn l2_index(va: u64) -> usize { ((va >> 21) & 0x1ff) as usize }  // VA[29:21]
+fn l1_index(va: u64) -> usize {
+    ((va >> 30) & 0x1ff) as usize
+} // VA[38:30]
+fn l2_index(va: u64) -> usize {
+    ((va >> 21) & 0x1ff) as usize
+} // VA[29:21]
 
 /// 创建空页表, 返回 L1 表 (根页表) 的物理地址
 /// L1 表也是一个 4KB 物理页, 初始全零 (无效)
 pub fn create_table() -> u64 {
     let pa = mem::alloc_page().expect("mmu: failed to alloc L1 table");
-    unsafe { core::ptr::write_bytes(pa as *mut u8, 0, 4096); }  // 清零
+    unsafe {
+        core::ptr::write_bytes(pa as *mut u8, 0, 4096);
+    } // 清零
     pa
 }
 
@@ -66,7 +72,14 @@ pub fn map_block_2m(table_pa: u64, va: u64, pa: u64, flags: u64) {
     }
 }
 
-pub fn map_range_2m(table_pa: u64, start: u64, end: u64, flags: u64, skip_start: u64, skip_end: u64) {
+pub fn map_range_2m(
+    table_pa: u64,
+    start: u64,
+    end: u64,
+    flags: u64,
+    skip_start: u64,
+    skip_end: u64,
+) {
     let mut va = start & !0x1f_ffff;
     let end_aligned = (end + 0x1f_ffff) & !0x1f_ffff;
     while va < end_aligned {
@@ -91,9 +104,9 @@ fn map_one(table_pa: u64, va: u64, pa: u64, flags: u64) {
         if *l1e == 0 {
             let l2_pa = mem::alloc_page().expect("mmu: failed to alloc L2 table");
             core::ptr::write_bytes(l2_pa as *mut u8, 0, 4096);
-            *l1e = l2_pa | DESC_TABLE;  // bit[1:0]=11 表示"这是页表目录"
+            *l1e = l2_pa | DESC_TABLE; // bit[1:0]=11 表示"这是页表目录"
         }
-        let l2_pa = *l1e & !0xfff;  // 取 L2 表物理地址 (低 12 位是属性)
+        let l2_pa = *l1e & !0xfff; // 取 L2 表物理地址 (低 12 位是属性)
         let l2_ptr = l2_pa as *mut u64;
         let l2e = l2_ptr.add(l2_index(va));
 
@@ -107,7 +120,7 @@ fn map_one(table_pa: u64, va: u64, pa: u64, flags: u64) {
         }
         let l3_pa = *l2e & !0xfff;
         let l3_ptr = l3_pa as *mut u64;
-        let l3_idx = ((va >> 12) & 0x1ff) as usize;  // VA[20:12] 选 L3 中的哪一项
+        let l3_idx = ((va >> 12) & 0x1ff) as usize; // VA[20:12] 选 L3 中的哪一项
 
         // 填 L3 页描述符: 物理地址 + 标志 + 0b11 (有效页)
         *l3_ptr.add(l3_idx) = (pa & !0xfff) | flags | DESC_PAGE;
@@ -119,6 +132,48 @@ pub fn map(table_pa: u64, va: u64, pa: u64, flags: u64, count: u64) {
     for i in 0..count {
         map_one(table_pa, va + i * 4096, pa + i * 4096, flags);
     }
+}
+
+/// 删除一个 EL0 L3 页映射。
+///
+/// 只清 PTE，不释放它指向的物理页，也不回收 L2/L3 页表页。资源所有者必须在
+/// TLB 刷新后自行决定是否归还物理页。
+fn unmap_one(table_pa: u64, va: u64) -> bool {
+    unsafe {
+        let l1e = *((table_pa as *const u64).add(l1_index(va)));
+        if (l1e & 0b11) != DESC_TABLE {
+            return false;
+        }
+
+        let l2_pa = l1e & !0xfff;
+        let l2e = *((l2_pa as *const u64).add(l2_index(va)));
+        if (l2e & 0b11) != DESC_TABLE {
+            return false;
+        }
+
+        let l3_pa = l2e & !0xfff;
+        let l3_idx = ((va >> 12) & 0x1ff) as usize;
+        let pte = (l3_pa as *mut u64).add(l3_idx);
+        if (*pte & 0b11) != DESC_PAGE {
+            return false;
+        }
+
+        *pte = 0;
+        true
+    }
+}
+
+/// 删除连续的 4KB 用户映射，返回实际清除的 PTE 数量。
+pub fn unmap(table_pa: u64, va: u64, count: u64) -> u64 {
+    let mut removed = 0;
+    let mut i = 0;
+    while i < count {
+        if unmap_one(table_pa, va + i * 4096) {
+            removed += 1;
+        }
+        i += 1;
+    }
+    removed
 }
 
 pub fn active_table() -> u64 {

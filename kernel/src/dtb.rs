@@ -14,13 +14,13 @@ use crate::{protect, uart};
 
 // ── FDT 格式常量 ──
 // FDT header 开头是一个 32 位 magic number
-const FDT_MAGIC: u32 = 0xd00dfeed;  // FDT 魔数 (大端)
-// 遍历 structure block 时遇到的 token
-const FDT_BEGIN_NODE: u32 = 1;       // 开始一个设备节点
-const FDT_END_NODE: u32 = 2;         // 结束一个设备节点
-const FDT_PROP: u32 = 3;             // 属性 (key-value 对)
-const FDT_NOP: u32 = 4;              // 空指令 (跳过)
-const FDT_END: u32 = 9;              // 整棵树结束
+const FDT_MAGIC: u32 = 0xd00dfeed; // FDT 魔数 (大端)
+                                   // 遍历 structure block 时遇到的 token
+const FDT_BEGIN_NODE: u32 = 1; // 开始一个设备节点
+const FDT_END_NODE: u32 = 2; // 结束一个设备节点
+const FDT_PROP: u32 = 3; // 属性 (key-value 对)
+const FDT_NOP: u32 = 4; // 空指令 (跳过)
+const FDT_END: u32 = 9; // 整棵树结束
 
 #[derive(Clone, Copy)]
 pub struct RegRange {
@@ -51,6 +51,251 @@ pub fn find_pl011_reg(dtb_paddr: u64) -> Option<RegRange> {
     }
 
     find_uart_in_dtb(dtb_paddr)
+}
+
+/// 从 DTB 中找 GICv2 中断控制器的 Distributor 和 CPU Interface 物理地址。
+/// 返回 (gicd_pa, gicc_pa)。地址已经过 ranges 翻译。
+pub fn find_gic_regs(dtb_paddr: u64) -> Option<(u64, u64)> {
+    if dtb_paddr == 0 {
+        return None;
+    }
+
+    let ptr = dtb_paddr as *const u32;
+    let magic = unsafe { read_be(ptr.add(0)) };
+    if magic != FDT_MAGIC {
+        return None;
+    }
+
+    let off_struct = unsafe { read_be(ptr.add(2)) };
+    let off_strings = unsafe { read_be(ptr.add(3)) };
+    let sp = (dtb_paddr + off_struct as u64) as *const u32;
+    let ss = (dtb_paddr + off_strings as u64) as *const u8;
+
+    let mut bus_stack = [BusInfo::default(); MAX_DEPTH];
+    let mut depth = 0usize;
+    // 子节点会重置 node_is_gic/gic_reg_count，所以用栈保存父节点状态。
+    let mut gic_flag_stack: [bool; MAX_DEPTH] = [false; MAX_DEPTH];
+    let mut gic_reg_stack: [[Option<RegRange>; 4]; MAX_DEPTH] = [[None; 4]; MAX_DEPTH];
+    let mut gic_count_stack: [usize; MAX_DEPTH] = [0; MAX_DEPTH];
+    let mut node_is_gic = false;
+    let mut gic_regs: [Option<RegRange>; 4] = [None; 4];
+    let mut gic_reg_count: usize = 0;
+    let mut i = 0usize;
+
+    loop {
+        let token = unsafe { read_be(sp.add(i)) };
+        if token == FDT_END {
+            break;
+        }
+        if token == FDT_BEGIN_NODE {
+            i += 1;
+            let name_ptr = unsafe { sp.add(i) as *const u8 };
+            let mut name_len = 0usize;
+            while unsafe { *name_ptr.add(name_len) } != 0 {
+                name_len += 1;
+            }
+            if depth + 1 >= MAX_DEPTH {
+                return None;
+            }
+            // 保存父节点状态
+            gic_flag_stack[depth] = node_is_gic;
+            gic_reg_stack[depth] = gic_regs;
+            gic_count_stack[depth] = gic_reg_count;
+            if depth == 0 {
+                bus_stack[0] = BusInfo::default();
+            } else {
+                bus_stack[depth] = BusInfo::default();
+            }
+            depth += 1;
+            node_is_gic = false;
+            gic_regs = [None; 4];
+            gic_reg_count = 0;
+            i += (name_len + 4) / 4;
+        } else if token == FDT_END_NODE {
+            if node_is_gic && gic_reg_count >= 2 {
+                let gicd = gic_regs[0].unwrap();
+                let gicc = gic_regs[1].unwrap();
+                return Some((gicd.base, gicc.base));
+            }
+            i += 1;
+            if depth == 0 {
+                return None;
+            }
+            depth -= 1;
+            // 恢复父节点状态
+            node_is_gic = gic_flag_stack[depth];
+            gic_regs = gic_reg_stack[depth];
+            gic_reg_count = gic_count_stack[depth];
+        } else if token == FDT_PROP {
+            i += 1;
+            let len = unsafe { read_be(sp.add(i)) };
+            i += 1;
+            let nameoff = unsafe { read_be(sp.add(i)) };
+            i += 1;
+            let prop_name_ptr = unsafe { ss.add(nameoff as usize) };
+
+            if cstr_eq_address_cells(prop_name_ptr) && len == 4 {
+                bus_stack[depth - 1].addr_cells = unsafe { read_be(sp.add(i)) };
+                reparse_current_ranges(sp, &mut bus_stack, depth);
+            } else if cstr_eq_size_cells(prop_name_ptr) && len == 4 {
+                bus_stack[depth - 1].size_cells = unsafe { read_be(sp.add(i)) };
+                reparse_current_ranges(sp, &mut bus_stack, depth);
+            } else if cstr_eq_ranges(prop_name_ptr) {
+                bus_stack[depth - 1].ranges_word_index = i;
+                bus_stack[depth - 1].ranges_len = len;
+                parse_ranges(sp, i, len, &mut bus_stack, depth);
+            } else if cstr_eq_compatible(prop_name_ptr) {
+                node_is_gic = prop_contains_gic(unsafe { sp.add(i) } as *const u8, len as usize);
+            } else if cstr_eq_reg(prop_name_ptr) && gic_reg_count < 4 && depth >= 2 {
+                // GIC reg 属性包含多个条目 (GICD, GICC, GICH, GICV)。
+                // 子节点的 reg 格式由其父节点的 #address-cells / #size-cells 定义，
+                // 因此用 bus_stack[depth - 2] (父) 而非 bus_stack[depth - 1] (自身)。
+                let parent = bus_stack[depth - 2];
+                let entry_words = (parent.addr_cells + parent.size_cells) as usize;
+                if entry_words > 0 {
+                    let total_entries = (len / 4) as usize / entry_words;
+                    let mut e = 0usize;
+                    while e < total_entries && gic_reg_count < 4 {
+                        let off = i + e * entry_words;
+                        if let Some(r) = read_first_translated_reg(
+                            sp,
+                            off,
+                            (entry_words * 4) as u32,
+                            &bus_stack,
+                            depth,
+                        ) {
+                            gic_regs[gic_reg_count] = Some(r);
+                            gic_reg_count += 1;
+                        }
+                        e += 1;
+                    }
+                }
+            }
+
+            i += ((len + 3) / 4) as usize;
+        } else if token == FDT_NOP {
+            i += 1;
+        } else {
+            return None;
+        }
+    }
+    None
+}
+
+/// 从 DTB 中找到 stdout UART 的 GIC 中断号 (INTID)。
+///
+/// 解析 interrupts 属性, 格式为 GIC 标准 3-cell:
+///   <type hw_num trigger>
+/// INTID = hw_num + 32 (SPI) 或 hw_num + 16 (PPI)。
+pub fn find_uart_intid(dtb_paddr: u64) -> Option<u32> {
+    if dtb_paddr == 0 {
+        return None;
+    }
+
+    let ptr = dtb_paddr as *const u32;
+    let magic = unsafe { read_be(ptr.add(0)) };
+    if magic != FDT_MAGIC {
+        return None;
+    }
+
+    let off_struct = unsafe { read_be(ptr.add(2)) };
+    let off_strings = unsafe { read_be(ptr.add(3)) };
+    let sp = (dtb_paddr + off_struct as u64) as *const u32;
+    let ss = (dtb_paddr + off_strings as u64) as *const u8;
+
+    let target_path = find_stdout_target_path(sp, ss);
+
+    let mut bus_stack = [BusInfo::default(); MAX_DEPTH];
+    let mut depth = 0usize;
+    let mut path = [0u8; MAX_PATH];
+    let mut path_len_stack = [0usize; MAX_DEPTH];
+    let mut path_len = 0usize;
+    let mut node_compatible = false;
+    let mut node_disabled = false;
+    let mut node_interrupts: Option<u32> = None;
+    let mut fallback_intid: Option<u32> = None;
+    let mut i = 0usize;
+
+    loop {
+        let token = unsafe { read_be(sp.add(i)) };
+        if token == FDT_END {
+            return fallback_intid;
+        }
+
+        if token == FDT_BEGIN_NODE {
+            i += 1;
+            let name_ptr = unsafe { sp.add(i) as *const u8 };
+            let mut name_len = 0usize;
+            while unsafe { *name_ptr.add(name_len) } != 0 {
+                name_len += 1;
+            }
+            if depth + 1 >= MAX_DEPTH {
+                return None;
+            }
+            path_len_stack[depth] = path_len;
+            append_node_to_path(&mut path, &mut path_len, name_ptr, name_len);
+            if depth == 0 {
+                bus_stack[0] = BusInfo::default();
+            } else {
+                bus_stack[depth] = BusInfo::default();
+            }
+            depth += 1;
+            node_compatible = false;
+            node_disabled = false;
+            node_interrupts = None;
+            i += (name_len + 4) / 4;
+        } else if token == FDT_END_NODE {
+            if node_compatible && !node_disabled && path_matches(&path, path_len, &target_path) {
+                if let Some(intid) = node_interrupts {
+                    return Some(intid);
+                }
+            }
+            if node_compatible && !node_disabled && fallback_intid.is_none() {
+                fallback_intid = node_interrupts;
+            }
+            i += 1;
+            if depth == 0 {
+                return None;
+            }
+            depth -= 1;
+            path_len = path_len_stack[depth];
+            node_compatible = false;
+            node_disabled = false;
+            node_interrupts = None;
+        } else if token == FDT_PROP {
+            i += 1;
+            let len = unsafe { read_be(sp.add(i)) };
+            i += 1;
+            let nameoff = unsafe { read_be(sp.add(i)) };
+            i += 1;
+            let prop_name_ptr = unsafe { ss.add(nameoff as usize) };
+
+            if cstr_eq_address_cells(prop_name_ptr) && len == 4 {
+                bus_stack[depth - 1].addr_cells = unsafe { read_be(sp.add(i)) };
+                reparse_current_ranges(sp, &mut bus_stack, depth);
+            } else if cstr_eq_size_cells(prop_name_ptr) && len == 4 {
+                bus_stack[depth - 1].size_cells = unsafe { read_be(sp.add(i)) };
+                reparse_current_ranges(sp, &mut bus_stack, depth);
+            } else if cstr_eq_ranges(prop_name_ptr) {
+                bus_stack[depth - 1].ranges_word_index = i;
+                bus_stack[depth - 1].ranges_len = len;
+                parse_ranges(sp, i, len, &mut bus_stack, depth);
+            } else if cstr_eq_status(prop_name_ptr) {
+                node_disabled = prop_is_disabled(unsafe { sp.add(i) } as *const u8, len as usize);
+            } else if cstr_eq_compatible(prop_name_ptr) {
+                node_compatible =
+                    prop_contains_pl011(unsafe { sp.add(i) } as *const u8, len as usize);
+            } else if cstr_eq_interrupts(prop_name_ptr) && node_interrupts.is_none() {
+                node_interrupts = parse_gic_interrupts(sp, i, len);
+            }
+
+            i += ((len + 3) / 4) as usize;
+        } else if token == FDT_NOP {
+            i += 1;
+        } else {
+            return None;
+        }
+    }
 }
 
 const MAX_DEPTH: usize = 24;
@@ -194,7 +439,8 @@ fn find_uart_in_dtb(dtb_paddr: u64) -> Option<RegRange> {
             } else if cstr_eq_status(prop_name_ptr) {
                 node_disabled = prop_is_disabled(unsafe { sp.add(i) } as *const u8, len as usize);
             } else if cstr_eq_compatible(prop_name_ptr) {
-                node_compatible = prop_contains_pl011(unsafe { sp.add(i) } as *const u8, len as usize);
+                node_compatible =
+                    prop_contains_pl011(unsafe { sp.add(i) } as *const u8, len as usize);
             } else if cstr_eq_reg(prop_name_ptr) && node_reg.is_none() {
                 node_reg = read_first_translated_reg(sp, i, len, &bus_stack, depth);
             }
@@ -228,9 +474,9 @@ pub fn parse(dtb_paddr: u64) {
         return;
     }
 
-    let totalsize = unsafe { read_be(ptr.add(1)) };   // DTB 总字节数
-    let off_struct = unsafe { read_be(ptr.add(2)) };   // structure block 偏移
-    let off_strings = unsafe { read_be(ptr.add(3)) };  // strings block 偏移
+    let totalsize = unsafe { read_be(ptr.add(1)) }; // DTB 总字节数
+    let off_struct = unsafe { read_be(ptr.add(2)) }; // structure block 偏移
+    let off_strings = unsafe { read_be(ptr.add(3)) }; // strings block 偏移
 
     uart::puts("[dtb] FDT found, size=");
     uart::hex(totalsize as u64);
@@ -245,15 +491,15 @@ pub fn parse(dtb_paddr: u64) {
     // ss = strings block 的基址
     let sp = (dtb_paddr + off_struct as u64) as *const u32;
     let ss = (dtb_paddr + off_strings as u64) as *const u8;
-    let mut addr_cells: u32 = 2;  // 地址单元格数: 默认 2 = 64 位地址
-    let mut size_cells: u32 = 2;  // 大小单元格数: 默认 2 = 64 位大小
+    let mut addr_cells: u32 = 2; // 地址单元格数: 默认 2 = 64 位地址
+    let mut size_cells: u32 = 2; // 大小单元格数: 默认 2 = 64 位大小
     let mut current_is_memory = false;
 
-    let mut i = 0usize;  // 当前指向 structure block 的第几个 u32
+    let mut i = 0usize; // 当前指向 structure block 的第几个 u32
     loop {
         let token = unsafe { read_be(sp.add(i)) };
         if token == FDT_END {
-            break;  // 整棵树结束
+            break; // 整棵树结束
         }
         if token == FDT_BEGIN_NODE {
             i += 1;
@@ -263,7 +509,9 @@ pub fn parse(dtb_paddr: u64) {
             while unsafe { *name_ptr.add(name_len) } != 0 {
                 name_len += 1;
             }
-            let name = unsafe { core::str::from_utf8_unchecked(core::slice::from_raw_parts(name_ptr, name_len)) };
+            let name = unsafe {
+                core::str::from_utf8_unchecked(core::slice::from_raw_parts(name_ptr, name_len))
+            };
             current_is_memory = name == "memory" || name.starts_with("memory@");
             uart::puts("[dtb] node: ");
             uart::puts(name);
@@ -278,9 +526,9 @@ pub fn parse(dtb_paddr: u64) {
             current_is_memory = false;
         } else if token == FDT_PROP {
             i += 1;
-            let len = unsafe { read_be(sp.add(i)) };     // 属性值的字节数
+            let len = unsafe { read_be(sp.add(i)) }; // 属性值的字节数
             i += 1;
-            let nameoff = unsafe { read_be(sp.add(i)) };  // 属性名在 strings block 的偏移
+            let nameoff = unsafe { read_be(sp.add(i)) }; // 属性名在 strings block 的偏移
             i += 1;
             // 读属性名
             let prop_name_ptr = unsafe { ss.add(nameoff as usize) };
@@ -288,8 +536,9 @@ pub fn parse(dtb_paddr: u64) {
             while unsafe { *prop_name_ptr.add(pnl) } != 0 {
                 pnl += 1;
             }
-            let pname =
-                unsafe { core::str::from_utf8_unchecked(core::slice::from_raw_parts(prop_name_ptr, pnl)) };
+            let pname = unsafe {
+                core::str::from_utf8_unchecked(core::slice::from_raw_parts(prop_name_ptr, pnl))
+            };
 
             // ═══ 只抓两个关键属性 ═══
             // #address-cells / #size-cells: 父节点指定子节点的地址/大小格式
@@ -311,8 +560,10 @@ pub fn parse(dtb_paddr: u64) {
                         (unsafe { read_be(sp.add(base_offset)) }) as u64
                     };
                     let size: u64 = if size_cells == 2 {
-                        ((unsafe { read_be(sp.add(base_offset + addr_cells as usize)) }) as u64) << 32
-                            | (unsafe { read_be(sp.add(base_offset + addr_cells as usize + 1)) }) as u64
+                        ((unsafe { read_be(sp.add(base_offset + addr_cells as usize)) }) as u64)
+                            << 32
+                            | (unsafe { read_be(sp.add(base_offset + addr_cells as usize + 1)) })
+                                as u64
                     } else {
                         (unsafe { read_be(sp.add(base_offset + addr_cells as usize)) }) as u64
                     };
@@ -333,7 +584,7 @@ pub fn parse(dtb_paddr: u64) {
             let data_words = (len + 3) / 4;
             i += data_words as usize;
         } else if token == FDT_NOP {
-            i += 1;  // 空操作, 跳过
+            i += 1; // 空操作, 跳过
         } else {
             uart::puts("[dtb] unknown token=");
             uart::hex(token as u64);
@@ -361,7 +612,8 @@ fn read_first_translated_reg(
 
     let parent = bus_stack[depth - 2];
     let entry_words = parent.addr_cells + parent.size_cells;
-    if parent.addr_cells == 0 || parent.size_cells == 0 || entry_words == 0 || len < entry_words * 4 {
+    if parent.addr_cells == 0 || parent.size_cells == 0 || entry_words == 0 || len < entry_words * 4
+    {
         return None;
     }
 
@@ -374,7 +626,11 @@ fn read_first_translated_reg(
     translate_to_cpu(raw_base, bus_stack, depth - 2).map(|base| RegRange { base, size })
 }
 
-fn translate_to_cpu(mut addr: u64, bus_stack: &[BusInfo; MAX_DEPTH], mut bus_index: usize) -> Option<u64> {
+fn translate_to_cpu(
+    mut addr: u64,
+    bus_stack: &[BusInfo; MAX_DEPTH],
+    mut bus_index: usize,
+) -> Option<u64> {
     loop {
         let bus = bus_stack[bus_index];
         addr = translate_one_bus(addr, bus)?;
@@ -406,7 +662,13 @@ fn translate_one_bus(addr: u64, bus: BusInfo) -> Option<u64> {
     None
 }
 
-fn parse_ranges(sp: *const u32, i: usize, len: u32, bus_stack: &mut [BusInfo; MAX_DEPTH], depth: usize) {
+fn parse_ranges(
+    sp: *const u32,
+    i: usize,
+    len: u32,
+    bus_stack: &mut [BusInfo; MAX_DEPTH],
+    depth: usize,
+) {
     if depth < 2 {
         return;
     }
@@ -463,7 +725,8 @@ fn read_addr_cells(sp: *const u32, i: usize, cells: u32) -> u64 {
     // PCI 地址通常是 3 cells: flags/space + high32 + low32。
     // 地址数值只取 high32/low32, flags 不参与 CPU 物理地址计算。
     if cells == 3 {
-        return ((unsafe { read_be(sp.add(i + 1)) } as u64) << 32) | unsafe { read_be(sp.add(i + 2)) } as u64;
+        return ((unsafe { read_be(sp.add(i + 1)) } as u64) << 32)
+            | unsafe { read_be(sp.add(i + 2)) } as u64;
     }
 
     let mut value = 0u64;
@@ -552,7 +815,12 @@ fn find_stdout_target_path(sp: *const u32, ss: *const u8) -> [u8; MAX_PATH] {
     }
 }
 
-fn append_node_to_path(path: &mut [u8; MAX_PATH], path_len: &mut usize, name_ptr: *const u8, name_len: usize) {
+fn append_node_to_path(
+    path: &mut [u8; MAX_PATH],
+    path_len: &mut usize,
+    name_ptr: *const u8,
+    name_len: usize,
+) {
     if name_len == 0 {
         if *path_len == 0 {
             path[0] = b'/';
@@ -872,4 +1140,106 @@ fn prop_is_disabled(prop: *const u8, len: usize) -> bool {
             && *prop.add(6) == b'e'
             && *prop.add(7) == b'd'
     }
+}
+
+fn prop_contains_gic(prop: *const u8, len: usize) -> bool {
+    let mut off = 0usize;
+    while off < len {
+        let start = off;
+        while off < len && unsafe { *prop.add(off) } != 0 {
+            off += 1;
+        }
+        if off > start {
+            if is_gic_compatible(unsafe { prop.add(start) }, off - start) {
+                return true;
+            }
+        }
+        off += 1;
+    }
+    false
+}
+
+fn is_gic_compatible(ptr: *const u8, len: usize) -> bool {
+    // "arm,cortex-a15-gic" (18 chars + null)
+    if len == 18 {
+        unsafe {
+            if *ptr.add(0) == b'a'
+                && *ptr.add(1) == b'r'
+                && *ptr.add(2) == b'm'
+                && *ptr.add(3) == b','
+                && *ptr.add(4) == b'c'
+                && *ptr.add(5) == b'o'
+                && *ptr.add(6) == b'r'
+                && *ptr.add(7) == b't'
+                && *ptr.add(8) == b'e'
+                && *ptr.add(9) == b'x'
+                && *ptr.add(10) == b'-'
+                && *ptr.add(11) == b'a'
+                && *ptr.add(12) == b'1'
+                && *ptr.add(13) == b'5'
+                && *ptr.add(14) == b'-'
+                && *ptr.add(15) == b'g'
+                && *ptr.add(16) == b'i'
+                && *ptr.add(17) == b'c'
+            {
+                return true;
+            }
+        }
+    }
+    // "arm,gic-400" (11 chars + null) — Pi5
+    if len == 11 {
+        unsafe {
+            if *ptr.add(0) == b'a'
+                && *ptr.add(1) == b'r'
+                && *ptr.add(2) == b'm'
+                && *ptr.add(3) == b','
+                && *ptr.add(4) == b'g'
+                && *ptr.add(5) == b'i'
+                && *ptr.add(6) == b'c'
+                && *ptr.add(7) == b'-'
+                && *ptr.add(8) == b'4'
+                && *ptr.add(9) == b'0'
+                && *ptr.add(10) == b'0'
+            {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn cstr_eq_interrupts(ptr: *const u8) -> bool {
+    unsafe {
+        *ptr.add(0) == b'i'
+            && *ptr.add(1) == b'n'
+            && *ptr.add(2) == b't'
+            && *ptr.add(3) == b'e'
+            && *ptr.add(4) == b'r'
+            && *ptr.add(5) == b'r'
+            && *ptr.add(6) == b'u'
+            && *ptr.add(7) == b'p'
+            && *ptr.add(8) == b't'
+            && *ptr.add(9) == b's'
+            && *ptr.add(10) == 0
+    }
+}
+
+/// 解析 GIC 标准 3-cell interrupts 属性: <type hw_num trigger>
+/// 返回 GIC INTID。SPI: 32 + hw_num, PPI: 16 + hw_num。
+fn parse_gic_interrupts(sp: *const u32, i: usize, len: u32) -> Option<u32> {
+    if len < 12 {
+        return None;
+    }
+    let itype = unsafe { read_be(sp.add(i)) };
+    let hw_num = unsafe { read_be(sp.add(i + 1)) };
+    // trigger = unsafe { read_be(sp.add(i + 2)) }; 暂不用
+
+    let intid = if itype == 0 {
+        32 + hw_num
+    } else if itype == 1 {
+        16 + hw_num
+    } else {
+        return None;
+    };
+    Some(intid)
 }

@@ -4,16 +4,12 @@
 //! 初始化物理页分配器、解析 DTB、安装 EL1 异常向量、建立 stage-1 页表、
 //! 加载 EL0 libOS, 最后 eret 进 EL0。
 
-use crate::boot_info::BootInfo;        // EL2 boot shim 收集后传给 EL1 的启动信息
-use crate::uart;                       // PL011 串口输出, 当前所有 bring-up 日志都靠它
-use core::ptr::copy_nonoverlapping;    // 裸机 memcpy: 把 DTB/libOS 字节拷到分配出的物理页
-
-// QEMU virt 的 DTB 备份。
-//
-// QEMU 的 EDK2 默认经常只给 ACPI, 不一定在 UEFI config table 里放 FDT_GUID。
-// 如果 BootInfo.dtb == 0, EL1 就把这个编译期嵌入的 DTB 拷到普通物理页,
-// 再把那块物理地址交给 dtb::parse() 解析。
-static EMBEDDED_DTB: &[u8] = include_bytes!("../../qemu/qemu-virt.dtb");
+use crate::boot_info::BootInfo; // EL2 boot shim 收集后传给 EL1 的启动信息
+use crate::config::{
+    DTB_USER_VA, PAGE_SIZE, USER_BASE, USER_STACK_PAGES, USER_STACK_TOP, USER_WINDOW_END,
+};
+use crate::uart; // PL011 串口输出, 当前所有 bring-up 日志都靠它
+use core::ptr::copy_nonoverlapping; // 裸机 memcpy: 把 DTB/libOS 字节拷到分配出的物理页
 
 // EL0 libOS 的原始机器码。
 //
@@ -21,25 +17,6 @@ static EMBEDDED_DTB: &[u8] = include_bytes!("../../qemu/qemu-virt.dtb");
 // 编译 BOOTAA64.efi 时, include_bytes! 把 libos.bin 直接塞进 .efi 的 rodata。
 // 运行到 EL1 后, 这里的 LIBOS_BIN 就是一段内存里的 &[u8], 不是文件系统路径。
 static LIBOS_BIN: &[u8] = include_bytes!("../../libos/libos.bin");
-
-// EL0 用户虚拟地址布局。
-//
-// libos/link.ld 把 _start 链接到 0x4000_0000, 所以 EL1 必须把 libOS 代码
-// 映射到这个 VA。否则 eret 到 EL0 后, PC=0x4000_0000 会取不到正确指令。
-const USER_BASE: u64 = 0x4000_0000;
-const DTB_USER_VA: u64 = 0x4020_0000;
-
-// EL0 栈顶。AArch64 栈向低地址增长, 所以实际映射的栈页是:
-//   [USER_STACK_TOP - USER_STACK_PAGES * 4096, USER_STACK_TOP)
-const USER_STACK_TOP: u64 = 0x4100_0000;
-const USER_STACK_PAGES: u64 = 4;
-
-// EL0 用户窗口的上界。
-//
-// build_el1_stage1() 做 EL1 identity map 时会跳过 USER_BASE..USER_WINDOW_END,
-// 避免先用 2MB block 把 0x4000_0000 附近映射成 EL1-only, 之后又想在同一范围
-// 放 EL0 L3 页表映射。页表同一个 L2 entry 不能同时是 block 又是 table。
-const USER_WINDOW_END: u64 = 0x4200_0000;
 
 #[no_mangle]
 pub extern "C" fn el1_main(boot_info_addr: u64) -> ! {
@@ -65,20 +42,19 @@ pub extern "C" fn el1_main(boot_info_addr: u64) -> ! {
     // 选择 DTB 来源。
     //
     // 情况 A: UEFI config table 里提供了 FDT_GUID, bi.dtb != 0, 直接解析那块物理地址。
-    // 情况 B: QEMU EDK2 没给 DTB, bi.dtb == 0, 使用编译进 .efi 的 EMBEDDED_DTB。
+    // 情况 B: 平台配置允许 fallback 时，复制构建期嵌入的 DTB。
     let dtb_addr = if bi.dtb == 0 {
-        #[cfg(all(feature = "qemu", not(feature = "pi5")))]
-        {
-            let pages = ((EMBEDDED_DTB.len() + 4095) / 4096) as u64;
-            let pa = crate::mem::alloc_pages(pages).expect("no mem for DTB");
-            unsafe { copy_nonoverlapping(EMBEDDED_DTB.as_ptr(), pa as *mut u8, EMBEDDED_DTB.len()); }
-            pa
+        let fallback = match crate::platform::FALLBACK_DTB {
+            Some(dtb) => dtb,
+            // Pi5 没有真实 DTB 就无法可靠发现设备，此时 UART 尚未初始化。
+            None => loop {},
+        };
+        let pages = (fallback.len() as u64 + PAGE_SIZE - 1) / PAGE_SIZE;
+        let pa = crate::mem::alloc_pages(pages).expect("no mem for DTB");
+        unsafe {
+            copy_nonoverlapping(fallback.as_ptr(), pa as *mut u8, fallback.len());
         }
-        #[cfg(not(all(feature = "qemu", not(feature = "pi5"))))]
-        {
-            // Pi5 没有 DTB 无法继续 — 此时 UART 还没初始化, 无法打印, 只能死循环。
-            loop {}
-        }
+        pa
     } else {
         bi.dtb
     };
@@ -146,6 +122,45 @@ pub extern "C" fn el1_main(boot_info_addr: u64) -> ! {
     uart::hex(uart_reg.size);
     uart::puts("\r\n");
 
+    // 初始化 GICv2 中断控制器。
+    //
+    // 从 DTB 找到 GIC 的 Distributor 和 CPU Interface 物理地址，
+    // 映射为 Device memory 后初始化 GICD/GICC。后续 SYS_IRQ_BIND
+    // 等 syscall 依赖 GIC 就绪。
+    if let Some((gicd_pa, gicc_pa)) = crate::dtb::find_gic_regs(dtb_addr) {
+        // 映射 GICD 和 GICC 所在的 2MB block 为 Device memory。
+        // GICD 和 GICC 通常在同一个或相邻的 2MB block 内。
+        crate::mmu::map_block_2m(
+            root,
+            gicd_pa & !0x1f_ffff,
+            gicd_pa & !0x1f_ffff,
+            crate::mmu::MMU_DEV,
+        );
+        crate::mmu::map_block_2m(
+            root,
+            gicc_pa & !0x1f_ffff,
+            gicc_pa & !0x1f_ffff,
+            crate::mmu::MMU_DEV,
+        );
+        crate::mmu::flush_el1_tlb();
+        crate::gic::init(gicd_pa, gicc_pa);
+
+        // GIC 只能由 EL1 操作。deny 表优先于通用 DTB MMIO 登记。
+        crate::protect::deny(gicd_pa, 0x10000);
+        crate::protect::deny(gicc_pa, 0x10000);
+    } else {
+        uart::puts("[exo] WARNING: no GIC found in DTB, IRQ syscalls will fail\r\n");
+    }
+
+    // 从 DTB 获取 UART 的 GIC 中断号并登记为可绑定 IRQ。
+    if let Some(uart_intid) = crate::dtb::find_uart_intid(dtb_addr) {
+        crate::gic::authorize_uart_irq(uart_intid);
+        uart::puts("[exo] DTB UART GIC INTID=");
+        uart::hex(uart_intid as u64);
+        uart::puts("\r\n");
+        // 将来 kmain 可以预先 bind 到默认任务；当前由 EL0 自行调用 SYS_IRQ_BIND。
+    }
+
     // 解析 DTB。
     //
     // 当前 dtb::parse() 主要打印节点和 reg 地址, 后续应该在这里把 MMIO reg 范围
@@ -172,7 +187,9 @@ pub extern "C" fn el1_main(boot_info_addr: u64) -> ! {
     //
     // copy_nonoverlapping(src, dst, len) 等价于 memcpy, 但要求源和目标不重叠。
     // 这里源是 .efi 内部 rodata, 目标是刚 alloc_pages() 得到的空闲物理页, 不会重叠。
-    unsafe { copy_nonoverlapping(LIBOS_BIN.as_ptr(), code_paddr as *mut u8, code_bytes); }
+    unsafe {
+        copy_nonoverlapping(LIBOS_BIN.as_ptr(), code_paddr as *mut u8, code_bytes);
+    }
 
     uart::puts("[exo] EL0 libOS pa=");
     uart::hex(code_paddr);
@@ -204,6 +221,10 @@ pub extern "C" fn el1_main(boot_info_addr: u64) -> ! {
     uart::puts("[exo] EL1 stage-1 root=");
     uart::hex(root);
     uart::puts("\r\n");
+
+    // 登记当前 EL0 任务拥有的 RAM 和用户映射。SYS_EXIT 会根据这份记录撤销
+    // PTE，并且只回收真正属于任务的代码页和栈页。
+    crate::task::install(code_paddr, code_pages, stack_paddr, dtb_map_pages);
 
     uart::puts("[exo] enter EL0 libOS...\r\n");
 
@@ -293,7 +314,13 @@ fn complete_el1_stage1(
     //
     // MMU_USER_RX 允许 EL0 取指执行, 但不允许写。
     // 这里 code_pages 可能大于 1, 所以连续映射多个 4KB 页。
-    crate::mmu::map(root, USER_BASE, code_paddr, crate::mmu::MMU_USER_RX, code_pages);
+    crate::mmu::map(
+        root,
+        USER_BASE,
+        code_paddr,
+        crate::mmu::MMU_USER_RX,
+        code_pages,
+    );
 
     // 把 DTB 只读映射给 EL0。
     //
@@ -321,5 +348,4 @@ fn complete_el1_stage1(
         crate::mmu::MMU_USER_RW,
         USER_STACK_PAGES,
     );
-
 }

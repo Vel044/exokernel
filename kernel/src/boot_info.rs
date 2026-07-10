@@ -6,8 +6,8 @@
 //! 外核角度: 这些字段就是"内核手里有什么物理资源"——framebuffer 物理地址、
 //! 空闲物理内存数量、DTB(设备树)地址等。以后分给 libOS 的 capability 就从这里来。
 
-use uefi::boot::MemoryType;           // 内存类型枚举 (CONVENTIONAL=空闲)
-use uefi::mem::memory_map::MemoryMap;  // MemoryMap 遍历接口
+use uefi::boot::MemoryType; // 内存类型枚举 (CONVENTIONAL=空闲)
+use uefi::mem::memory_map::MemoryMap; // MemoryMap 遍历接口
 
 // ═══════════════════════════════════════════════════════════════════
 // Framebuffer —— 显卡显存描述
@@ -64,11 +64,11 @@ pub struct El2Regs {
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct BootInfo {
-    pub fb: Framebuffer,  // ① framebuffer: 显存物理地址+大小
-    pub mem: MemInfo,     // ② 空闲物理内存: 有多少可用页
-    pub el2: El2Regs,     // ③ CPU寄存器快照: 固件留下的页表/MMU配置
-    pub rsdp: u64,        // ACPI RSDP 表地址 (没有操作系统用 ACPI 就是 0)
-    pub dtb: u64,         // DeviceTree 地址 (QEMU 默认没有, Pi5 设 SystemTableMode=0x02 才有)
+    pub fb: Framebuffer, // ① framebuffer: 显存物理地址+大小
+    pub mem: MemInfo,    // ② 空闲物理内存: 有多少可用页
+    pub el2: El2Regs,    // ③ CPU寄存器快照: 固件留下的页表/MMU配置
+    pub rsdp: u64,       // ACPI RSDP 表地址 (没有操作系统用 ACPI 就是 0)
+    pub dtb: u64,        // DeviceTree 地址 (QEMU 默认没有, Pi5 设 SystemTableMode=0x02 才有)
     pub range_count: usize,
     pub ranges: [BootRange; MAX_BOOT_RANGES],
 }

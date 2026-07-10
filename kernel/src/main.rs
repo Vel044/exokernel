@@ -8,8 +8,8 @@
 //! boot_info.rs  BootInfo 结构体 (显存地址 / 空闲内存数量 / CPU状态)
 //! uart.rs       EBS 后由 DTB 初始化的 PL011 串口驱动
 
-#![no_std]      // 不用 Rust 标准库 (裸机, 没有操作系统)
-#![no_main]     // 不用 Rust 默认的 main 函数 (用 UEFI 的 #[entry])
+#![no_std] // 不用 Rust 标准库 (裸机, 没有操作系统)
+#![no_main] // 不用 Rust 默认的 main 函数 (用 UEFI 的 #[entry])
 
 // ═══════════════════════════════════════════════════════════════════
 // mrs!/msr! 宏 —— 读写 ARM 系统寄存器
@@ -41,19 +41,23 @@ macro_rules! msr {
 }
 
 // ── 加载其他模块 ──
-mod boot_info;  // BootInfo 结构体定义
-mod dtb;        // 设备树解析器
-mod kmain;      // 内核主逻辑
-mod mem;        // 物理页分配器
-mod mmu;        // EL1 stage-1 页表管理
-mod protect;    // MMIO 保护表 (谁拥有哪个物理地址)
-mod trap;       // EL2/EL1 陷入处理 + eret 函数
-mod uart;       // 串口输出
-mod vectors;    // EL2/EL1 异常向量表
+mod boot_info; // BootInfo 结构体定义
+mod config; // QEMU/Pi5 共用的 ABI 和虚拟地址布局
+mod dtb; // 设备树解析器
+mod gic; // GICv2 中断控制器驱动
+mod kmain; // 内核主逻辑
+mod mem; // 物理页分配器
+mod mmu; // EL1 stage-1 页表管理
+mod platform; // EL2 启动阶段的平台差异
+mod protect; // MMIO 保护表 (谁拥有哪个物理地址)
+mod task; // 单任务资源记录与退出回收
+mod trap; // EL2/EL1 陷入处理 + eret 函数
+mod uart; // 串口输出
+mod vectors; // EL2/EL1 异常向量表
 
 // ── 导入需要用到的外部库 ──
-use boot_info::BootInfo;                       // 启动信息结构体
-use uefi::prelude::*;                          // UEFI 标准接口
+use boot_info::BootInfo; // 启动信息结构体
+use uefi::prelude::*; // UEFI 标准接口
 use uefi::proto::console::gop::GraphicsOutput; // 显卡协议 (GOP)
 
 /// DeviceTree 在 UEFI 配置表里的标识 (GUID)
@@ -74,7 +78,9 @@ fn clean_invalidate_exec_range(start: u64, size: u64) {
         }
         p += 64;
     }
-    unsafe { core::arch::asm!("dsb sy", options(nomem, nostack)); }
+    unsafe {
+        core::arch::asm!("dsb sy", options(nomem, nostack));
+    }
 
     p = start & !63;
     while p < end {
@@ -83,7 +89,9 @@ fn clean_invalidate_exec_range(start: u64, size: u64) {
         }
         p += 64;
     }
-    unsafe { core::arch::asm!("dsb sy", "isb", options(nomem, nostack)); }
+    unsafe {
+        core::arch::asm!("dsb sy", "isb", options(nomem, nostack));
+    }
 }
 
 fn boot_alloc_page(bi: &mut BootInfo) -> u64 {
@@ -96,7 +104,9 @@ fn boot_alloc_page(bi: &mut BootInfo) -> u64 {
             if bi.mem.free_pages != 0 {
                 bi.mem.free_pages -= 1;
             }
-            unsafe { core::ptr::write_bytes(pa as *mut u8, 0, 4096); }
+            unsafe {
+                core::ptr::write_bytes(pa as *mut u8, 0, 4096);
+            }
             return pa;
         }
         i += 1;
@@ -123,10 +133,7 @@ fn boot_map_2m(root: u64, bi: &mut BootInfo, va: u64, pa: u64, flags: u64) {
         }
         let l2_pa = core::ptr::read_volatile(l1e) & !0xfff;
         let l2 = l2_pa as *mut u64;
-        core::ptr::write_volatile(
-            l2.add(boot_l2_index(va)),
-            (pa & !0x1f_ffff) | flags | 0b01,
-        );
+        core::ptr::write_volatile(l2.add(boot_l2_index(va)), (pa & !0x1f_ffff) | flags | 0b01);
         clean_invalidate_exec_range(l2_pa, 4096);
     }
 }
@@ -142,16 +149,14 @@ fn boot_map_range_2m(root: u64, bi: &mut BootInfo, start: u64, end: u64, flags: 
 
 fn install_el1_identity_stage1(root: u64) {
     msr!("ttbr0_el1", root);
-    let tcr: u64 = (0b00 << 14)
-        | (25 << 0)
-        | (0b11 << 8)
-        | (0b11 << 10)
-        | (0b11 << 12)
-        | (0b101 << 32);
+    let tcr: u64 =
+        (0b00 << 14) | (25 << 0) | (0b11 << 8) | (0b11 << 10) | (0b11 << 12) | (0b101 << 32);
     msr!("tcr_el1", tcr);
     let mair: u64 = (0xff << 0) | (0x04 << 8);
     msr!("mair_el1", mair);
-    unsafe { core::arch::asm!("dsb sy; tlbi vmalle1; dsb sy; isb", options(nostack)); }
+    unsafe {
+        core::arch::asm!("dsb sy; tlbi vmalle1; dsb sy; isb", options(nostack));
+    }
     let sctlr: u64 = (1 << 0)
         | (1 << 2)
         | (1 << 11)
@@ -162,7 +167,9 @@ fn install_el1_identity_stage1(root: u64) {
         | (1 << 28)
         | (1 << 29);
     msr!("sctlr_el1", sctlr);
-    unsafe { core::arch::asm!("isb", options(nomem, nostack)); }
+    unsafe {
+        core::arch::asm!("isb", options(nomem, nostack));
+    }
 }
 
 #[cfg(feature = "pi5")]
@@ -178,16 +185,10 @@ fn install_pi5_el1_boot_mmu(bi: &mut BootInfo) -> u64 {
     //   FDT:                0x3a10_b000
     //   BootInfo:           0x3f3f_fxxx
     // Keep it deliberately broad for bring-up, then EL1 replaces it with its own table.
-    boot_map_range_2m(
-        root,
-        bi,
-        0x3000_0000,
-        0x4200_0000,
-        crate::mmu::MMU_KERNEL,
-    );
+    boot_map_range_2m(root, bi, 0x3000_0000, 0x4200_0000, crate::mmu::MMU_KERNEL);
 
     // Pi5 debug UART from DTB: 0x107d001000. Map the containing 2MB block as Device.
-    let uart = crate::uart::PI5_DEBUG_UART_BASE & !0x1f_ffff;
+    let uart = crate::platform::EARLY_DEBUG_UART_BASE & !0x1f_ffff;
     boot_map_2m(root, bi, uart, uart, crate::mmu::MMU_DEV);
 
     clean_invalidate_exec_range(root, 4096);
@@ -277,8 +278,8 @@ fn main() -> Status {
     if let Ok(h) = uefi::boot::get_handle_for_protocol::<GraphicsOutput>() {
         if let Ok(mut gop) = uefi::boot::open_protocol_exclusive::<GraphicsOutput>(h) {
             let mut fb = gop.frame_buffer();
-            bi.fb.base = fb.as_mut_ptr() as u64;  // framebuffer 物理基址
-            bi.fb.size = fb.size();                // 总共多少字节
+            bi.fb.base = fb.as_mut_ptr() as u64; // framebuffer 物理基址
+            bi.fb.size = fb.size(); // 总共多少字节
         }
     }
 
@@ -292,15 +293,15 @@ fn main() -> Status {
         let mut dtb = 0u64;
         for e in entries {
             if e.guid == uefi::table::cfg::ACPI2_GUID {
-                rsdp = e.address as u64;   // ACPI 表地址 (高级配置与电源接口)
+                rsdp = e.address as u64; // ACPI 表地址 (高级配置与电源接口)
             } else if e.guid == FDT_GUID {
-                dtb = e.address as u64;     // DeviceTree 地址 (扁平设备树)
+                dtb = e.address as u64; // DeviceTree 地址 (扁平设备树)
             }
         }
-        (rsdp, dtb)  // 返回 (ACPI地址, DTB地址)
+        (rsdp, dtb) // 返回 (ACPI地址, DTB地址)
     });
     bi.rsdp = rsdp;
-    bi.dtb = dtb;  // 存进 BootInfo, 后面 kmain 会拿它解析硬件信息
+    bi.dtb = dtb; // 存进 BootInfo, 后面 kmain 会拿它解析硬件信息
 
     // EBS 前仍可用 UEFI console, 所以这里先用同一套 DTB parser 做一次只读预检。
     //
@@ -339,7 +340,9 @@ fn main() -> Status {
 
     if dtb == 0 {
         #[cfg(all(feature = "qemu", not(feature = "pi5")))]
-        uefi::println!("[exo] UEFI FDT not found; QEMU build will use embedded qemu-virt.dtb after EBS");
+        uefi::println!(
+            "[exo] UEFI FDT not found; QEMU build will use embedded qemu-virt.dtb after EBS"
+        );
         #[cfg(not(all(feature = "qemu", not(feature = "pi5"))))]
         uefi::println!("[exo] UEFI FDT not found; no reliable UART after EBS");
     }
@@ -352,7 +355,11 @@ fn main() -> Status {
     // 失败则重试一次(仿 Linux 的做法), 返回 MemoryMap 的所有权。
     // 诊断: 确认 EL 级别 (2=EL2 正常, 1=EL1 不正常)
     let el_raw = mrs!("CurrentEL");
-    uefi::println!("[exo] CurrentEL raw=0x{:x}, exc_level={}", el_raw, (el_raw >> 2) & 3);
+    uefi::println!(
+        "[exo] CurrentEL raw=0x{:x}, exc_level={}",
+        el_raw,
+        (el_raw >> 2) & 3
+    );
     uefi::println!("[exo] calling ExitBootServices...");
     let mmap = unsafe { uefi::boot::exit_boot_services(uefi::boot::MemoryType::LOADER_DATA) };
     // EBS 之后 UEFI console 已经失效。后续日志必须等 EL1 从 DTB 初始化 UART。

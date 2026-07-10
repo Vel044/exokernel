@@ -109,18 +109,42 @@ __vec_el1_sync:
     str x30, [sp]
     mov x3, x8
     bl el1_sync_handler
-    mov x4, x0
+    // Rust handler 按 AAPCS64 在 x0 返回 syscall 结果。把结果放到异常栈，
+    // 避免借用任意 EL0 通用寄存器作为临时值，再恢复到 eret 返回时的 x0。
+    str x0, [sp, #8]
     ldr x30, [sp]
+    ldr x0, [sp, #8]
     add sp, sp, #16
-    mov x0, x4
     eret
 
 __vec_el1_irq:
-    sub sp, sp, #16
-    str x30, [sp]
+    // 保存 caller-saved 寄存器 + x30 (AAPCS64)，确保 IRQ handler 可以
+    // 安全调用 gic::acknowledge() / task::record_iar() 等 Rust 函数。
+    sub sp, sp, #160
+    stp x0, x1, [sp, #0]
+    stp x2, x3, [sp, #16]
+    stp x4, x5, [sp, #32]
+    stp x6, x7, [sp, #48]
+    stp x8, x9, [sp, #64]
+    stp x10, x11, [sp, #80]
+    stp x12, x13, [sp, #96]
+    stp x14, x15, [sp, #112]
+    stp x16, x17, [sp, #128]
+    str x18, [sp, #144]
+    str x30, [sp, #152]
     bl el1_irq_handler
-    ldr x30, [sp]
-    add sp, sp, #16
+    ldp x0, x1, [sp, #0]
+    ldp x2, x3, [sp, #16]
+    ldp x4, x5, [sp, #32]
+    ldp x6, x7, [sp, #48]
+    ldp x8, x9, [sp, #64]
+    ldp x10, x11, [sp, #80]
+    ldp x12, x13, [sp, #96]
+    ldp x14, x15, [sp, #112]
+    ldp x16, x17, [sp, #128]
+    ldr x18, [sp, #144]
+    ldr x30, [sp, #152]
+    add sp, sp, #160
     eret
 "#
 );
