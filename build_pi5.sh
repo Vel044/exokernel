@@ -1,21 +1,27 @@
 #!/bin/bash
 set -euo pipefail
 cd "$(dirname "$0")"
+export PATH="$HOME/.cargo/bin:$PATH"
 
-echo "==> 1. 编译 libos (EL1) - 相同二进制，无需平台区分"
+source ./scripts/sudo_keychain.sh
+sudo_keychain_prepare
+
+echo "==> 1. 编译 libos (EL0) - Pi5 RP1 xHCI CDC ACM"
 cd libos
-cargo build --target aarch64-unknown-none
+LIBOS_FEATURES="${LIBOS_FEATURES:-pi5-xhci,scservo}"
+echo "    libOS features: ${LIBOS_FEATURES}"
+cargo build --release --target aarch64-unknown-none --no-default-features --features "${LIBOS_FEATURES}"
 cd ..
 
 echo ""
-echo "==> 2. objcopy → libos.bin"
-rust-objcopy -O binary target/aarch64-unknown-none/debug/libos libos/libos.bin
-echo "    libos.bin: $(wc -c < libos/libos.bin) bytes"
+echo "==> 2. strip → libos.elf"
+rust-objcopy --strip-debug target/aarch64-unknown-none/release/libos libos/libos.elf
+echo "    libos.elf: $(wc -c < libos/libos.elf) bytes"
 
 echo ""
 echo "==> 3. 编译 exokernel (EL2) - Pi5 版本"
-# Pi5 feature: 禁用默认的 qemu feature，启用 pi5
-# uart.rs 里 PI5 UART base = 0x107d_0010_00 (UART10)，不依赖 QEMU 地址
+# Pi5 feature: 禁用默认的 qemu feature，启用 pi5；libOS 同时启用 RP1 xHCI。
+# UART 和 RP1 USB 地址都由固件 DTB 发现，不依赖 QEMU 地址。
 cargo build -p exokernel --target aarch64-unknown-uefi --no-default-features --features pi5
 
 echo ""

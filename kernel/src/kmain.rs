@@ -6,17 +6,17 @@
 
 use crate::boot_info::BootInfo; // EL2 boot shim 收集后传给 EL1 的启动信息
 use crate::config::{
-    DTB_USER_VA, PAGE_SIZE, USER_BASE, USER_STACK_PAGES, USER_STACK_TOP, USER_WINDOW_END,
+    PAGE_SIZE, USER_BASE, USER_BOOT_INFO_VA, USER_HEAP_BASE, USER_HEAP_SIZE, USER_STACK_PAGES,
+    USER_STACK_TOP, USER_WINDOW_END,
 };
 use crate::uart; // PL011 串口输出, 当前所有 bring-up 日志都靠它
-use core::ptr::copy_nonoverlapping; // 裸机 memcpy: 把 DTB/libOS 字节拷到分配出的物理页
 
 // EL0 libOS 的原始机器码。
 //
 // build.sh 先把 libos ELF 用 rust-objcopy 转成 libos/libos.bin。
 // 编译 BOOTAA64.efi 时, include_bytes! 把 libos.bin 直接塞进 .efi 的 rodata。
 // 运行到 EL1 后, 这里的 LIBOS_BIN 就是一段内存里的 &[u8], 不是文件系统路径。
-static LIBOS_BIN: &[u8] = include_bytes!("../../libos/libos.bin");
+static LIBOS_ELF: &[u8] = include_bytes!("../../libos/libos.elf");
 
 #[no_mangle]
 pub extern "C" fn el1_main(boot_info_addr: u64) -> ! {
@@ -51,19 +51,13 @@ pub extern "C" fn el1_main(boot_info_addr: u64) -> ! {
         };
         let pages = (fallback.len() as u64 + PAGE_SIZE - 1) / PAGE_SIZE;
         let pa = crate::mem::alloc_pages(pages).expect("no mem for DTB");
-        unsafe {
-            copy_nonoverlapping(fallback.as_ptr(), pa as *mut u8, fallback.len());
-        }
+        unsafe { core::ptr::copy_nonoverlapping(fallback.as_ptr(), pa as *mut u8, fallback.len()) };
         pa
     } else {
         bi.dtb
     };
 
     let dtb_total_size = crate::dtb::total_size(dtb_addr).expect("bad DTB");
-    let dtb_page_pa = dtb_addr & !0xfff;
-    let dtb_page_off = dtb_addr & 0xfff;
-    let dtb_map_pages = ((dtb_page_off + dtb_total_size + 4095) / 4096) as u64;
-    let dtb_user_va = DTB_USER_VA + dtb_page_off;
 
     // 打开 EL1 identity stage-1。
     //
@@ -82,8 +76,10 @@ pub extern "C" fn el1_main(boot_info_addr: u64) -> ! {
     );
     crate::mmu::activate(root);
 
-    // 从 DTB 发现 UART 物理地址 (只读 DTB 内存, 不碰 UART MMIO)。
-    let uart_reg = crate::dtb::find_pl011_reg(dtb_addr).expect("no PL011 UART in DTB");
+    // 从完整 DTB 生成一次平台资源快照；后续 UserBootInfo、保护表和任务
+    // grant 都使用同一份结果，完整 DTB 不会映射给 EL0。
+    let platform = crate::resources::discover(dtb_addr).expect("invalid platform DTB");
+    let uart_reg = platform.uart;
 
     // 把 DTB 发现的 UART 地址所在的 2MB block 映射为 Device memory,
     // 然后初始化 UART。从这行开始, 所有日志都走 DTB 发现的 UART, 不再有硬编码地址。
@@ -111,8 +107,6 @@ pub extern "C" fn el1_main(boot_info_addr: u64) -> ! {
     }
     uart::puts("[exo] DTB pa=");
     uart::hex(dtb_addr);
-    uart::puts(" user_va=");
-    uart::hex(dtb_user_va);
     uart::puts(" size=");
     uart::hex(dtb_total_size);
     uart::puts("\r\n");
@@ -127,7 +121,9 @@ pub extern "C" fn el1_main(boot_info_addr: u64) -> ! {
     // 从 DTB 找到 GIC 的 Distributor 和 CPU Interface 物理地址，
     // 映射为 Device memory 后初始化 GICD/GICC。后续 SYS_IRQ_BIND
     // 等 syscall 依赖 GIC 就绪。
-    if let Some((gicd_pa, gicc_pa)) = crate::dtb::find_gic_regs(dtb_addr) {
+    {
+        let gicd_pa = platform.gicd_pa;
+        let gicc_pa = platform.gicc_pa;
         // 映射 GICD 和 GICC 所在的 2MB block 为 Device memory。
         // GICD 和 GICC 通常在同一个或相邻的 2MB block 内。
         crate::mmu::map_block_2m(
@@ -148,59 +144,165 @@ pub extern "C" fn el1_main(boot_info_addr: u64) -> ! {
         // GIC 只能由 EL1 操作。deny 表优先于通用 DTB MMIO 登记。
         crate::protect::deny(gicd_pa, 0x10000);
         crate::protect::deny(gicc_pa, 0x10000);
-    } else {
-        uart::puts("[exo] WARNING: no GIC found in DTB, IRQ syscalls will fail\r\n");
     }
 
-    // 从 DTB 获取 UART 的 GIC 中断号并登记为可绑定 IRQ。
-    if let Some(uart_intid) = crate::dtb::find_uart_intid(dtb_addr) {
-        crate::gic::authorize_uart_irq(uart_intid);
-        uart::puts("[exo] DTB UART GIC INTID=");
-        uart::hex(uart_intid as u64);
+    let uart_intid = platform.uart_irq.intid;
+    let pci_info = platform.pci;
+    let direct_xhci = platform.xhci;
+    let mut mmio_grants = [crate::task::MmioGrant::EMPTY; crate::task::MAX_MMIO_GRANTS];
+    let mut mmio_grant_count = 0usize;
+    mmio_grants[mmio_grant_count] = crate::task::MmioGrant {
+        base: uart_reg.base & !0xfff,
+        size: (uart_reg.size + 0xfff) & !0xfff,
+    };
+    mmio_grant_count += 1;
+    if let Some((xhci_reg, _)) = direct_xhci {
+        crate::protect::register(xhci_reg.base, xhci_reg.size);
+        if mmio_grant_count < crate::task::MAX_MMIO_GRANTS {
+            mmio_grants[mmio_grant_count] = crate::task::MmioGrant {
+                base: xhci_reg.base & !0xfff,
+                size: (xhci_reg.size + 0xfff) & !0xfff,
+            };
+            mmio_grant_count += 1;
+        }
+        uart::puts("[exo] RP1 xHCI MMIO=");
+        uart::hex(xhci_reg.base);
+        uart::puts(" size=");
+        uart::hex(xhci_reg.size);
         uart::puts("\r\n");
-        // 将来 kmain 可以预先 bind 到默认任务；当前由 EL0 自行调用 SYS_IRQ_BIND。
+    }
+    if pci_info.present != 0 {
+        crate::protect::register(pci_info.ecam_pa, pci_info.ecam_size);
+        mmio_grants[mmio_grant_count] = crate::task::MmioGrant {
+            base: pci_info.ecam_pa,
+            size: pci_info.ecam_size.min(0x0010_0000),
+        };
+        mmio_grant_count += 1;
+        let mut index = 0usize;
+        while index < pci_info.range_count as usize {
+            let range = pci_info.ranges[index];
+            let space = range.flags & 0x0300_0000;
+            if space == 0x0200_0000 || space == 0x0300_0000 {
+                crate::protect::register(range.parent_base, range.size);
+                if mmio_grant_count < crate::task::MAX_MMIO_GRANTS {
+                    mmio_grants[mmio_grant_count] = crate::task::MmioGrant {
+                        base: range.parent_base,
+                        size: range.size,
+                    };
+                    mmio_grant_count += 1;
+                }
+            }
+            index += 1;
+        }
+        uart::puts("[exo] PCI ECAM=");
+        uart::hex(pci_info.ecam_pa);
+        uart::puts(" size=");
+        uart::hex(pci_info.ecam_size);
+        uart::puts(" INTx routes=");
+        uart::hex(pci_info.intx_route_count as u64);
+        uart::puts("\r\n");
     }
 
-    // 解析 DTB。
-    //
-    // 当前 dtb::parse() 主要打印节点和 reg 地址, 后续应该在这里把 MMIO reg 范围
-    // 登记进 protect.rs, 形成 "哪些物理地址是设备寄存器" 的保护表。
-    crate::dtb::parse(dtb_addr);
+    let mut irq_grants = [crate::task::IrqGrant::EMPTY; crate::task::MAX_IRQ_GRANTS];
+    let mut irq_grant_count = 0usize;
+    irq_grants[irq_grant_count] = crate::task::IrqGrant {
+        intid: uart_intid,
+        flags: platform.uart_irq.flags,
+    };
+    irq_grant_count += 1;
+    if let Some((_, xhci_irq)) = direct_xhci {
+        if !irq_grants[..irq_grant_count]
+            .iter()
+            .any(|grant| grant.intid == xhci_irq.intid)
+            && irq_grant_count < crate::task::MAX_IRQ_GRANTS
+        {
+            irq_grants[irq_grant_count] = crate::task::IrqGrant {
+                intid: xhci_irq.intid,
+                flags: xhci_irq.flags,
+            };
+            irq_grant_count += 1;
+        }
+    }
+    let mut index = 0usize;
+    while index < pci_info.intx_route_count as usize
+        && irq_grant_count < crate::task::MAX_IRQ_GRANTS
+    {
+        let route = pci_info.intx_routes[index];
+        if !irq_grants[..irq_grant_count]
+            .iter()
+            .any(|grant| grant.intid == route.intid)
+        {
+            irq_grants[irq_grant_count] = crate::task::IrqGrant {
+                intid: route.intid,
+                flags: route.flags,
+            };
+            irq_grant_count += 1;
+        }
+        index += 1;
+    }
 
-    // 准备 EL0 libOS 的代码页。
-    //
-    // LIBOS_BIN.len() 是二进制字节数; 物理页分配器按 4KB 页工作,
-    // 所以这里向上取整得到 code_pages。
-    let code_bytes = LIBOS_BIN.len();
-    let code_pages = ((code_bytes + 4095) / 4096) as u64;
-
-    // 为 EL0 分配代码物理页和栈物理页。
-    //
-    // code_paddr 是 libOS 机器码实际放置的物理地址。
-    // stack_paddr 是 EL0 栈物理页实际放置的起始物理地址。
-    //
-    // 注意: 这两个地址都不是 EL0 看到的 VA。EL0 看到的是 USER_BASE 和 USER_STACK_TOP。
-    let code_paddr = crate::mem::alloc_pages(code_pages).expect("no mem for EL0 code");
+    // ELF loader 按 PT_LOAD 的 R/W/X 权限分别分配并映射用户段。
+    let loaded = crate::elf::load(root, LIBOS_ELF).expect("failed to load EL0 ELF");
     let stack_paddr = crate::mem::alloc_pages(USER_STACK_PAGES).expect("no mem for EL0 stack");
+    let heap_paddr =
+        crate::mem::alloc_pages(USER_HEAP_SIZE / PAGE_SIZE).expect("no mem for EL0 heap");
+    let user_boot_info_pa = crate::mem::alloc_page().expect("no mem for UserBootInfo");
+    let initial_ipc_pa = crate::mem::alloc_page().expect("no mem for initial IPC buffer");
 
-    // 把 .efi rodata 里的 libos.bin 拷贝到新分配的代码物理页。
-    //
-    // copy_nonoverlapping(src, dst, len) 等价于 memcpy, 但要求源和目标不重叠。
-    // 这里源是 .efi 内部 rodata, 目标是刚 alloc_pages() 得到的空闲物理页, 不会重叠。
     unsafe {
-        copy_nonoverlapping(LIBOS_BIN.as_ptr(), code_paddr as *mut u8, code_bytes);
+        core::ptr::write_bytes(
+            stack_paddr as *mut u8,
+            0,
+            (USER_STACK_PAGES * PAGE_SIZE) as usize,
+        );
+        core::ptr::write_bytes(heap_paddr as *mut u8, 0, USER_HEAP_SIZE as usize);
+        core::ptr::write_bytes(user_boot_info_pa as *mut u8, 0, PAGE_SIZE as usize);
+        (user_boot_info_pa as *mut exo_abi::UserBootInfo).write(exo_abi::UserBootInfo {
+            magic: exo_abi::USER_BOOT_INFO_MAGIC,
+            version: exo_abi::USER_BOOT_INFO_VERSION,
+            size: core::mem::size_of::<exo_abi::UserBootInfo>() as u16,
+            uart: exo_abi::DeviceResource {
+                base: uart_reg.base,
+                size: uart_reg.size,
+                intid: uart_intid,
+                irq_flags: platform.uart_irq.flags,
+            },
+            xhci: direct_xhci
+                .map(|(reg, irq)| exo_abi::DeviceResource {
+                    base: reg.base,
+                    size: reg.size,
+                    intid: irq.intid,
+                    irq_flags: irq.flags,
+                })
+                .unwrap_or_default(),
+            xhci_transport: if direct_xhci.is_some() {
+                exo_abi::XHCI_TRANSPORT_DIRECT
+            } else if pci_info.present != 0 {
+                exo_abi::XHCI_TRANSPORT_PCI
+            } else {
+                exo_abi::XHCI_TRANSPORT_NONE
+            },
+            reserved: 0,
+            pci: pci_info,
+            heap_base: USER_HEAP_BASE,
+            heap_size: USER_HEAP_SIZE,
+            dma_arena_base: exo_abi::DMA_ARENA_BASE,
+            dma_arena_end: exo_abi::DMA_ARENA_END,
+            frame_arena_base: exo_abi::FRAME_ARENA_BASE,
+            frame_arena_end: exo_abi::FRAME_ARENA_END,
+        });
     }
 
     uart::puts("[exo] EL0 libOS pa=");
-    uart::hex(code_paddr);
-    uart::puts(" va=");
-    uart::hex(USER_BASE);
+    uart::hex(loaded.segments[0].pa);
+    uart::puts(" entry=");
+    uart::hex(loaded.entry);
     uart::puts(" stack_pa=");
     uart::hex(stack_paddr);
     uart::puts(" stack_va=");
     uart::hex(USER_STACK_TOP);
-    uart::puts(" bytes=");
-    uart::hex(code_bytes as u64);
+    uart::puts(" segments=");
+    uart::hex(loaded.segment_count as u64);
     uart::puts("\r\n");
 
     // 建 EL1 stage-1 页表。
@@ -212,11 +314,10 @@ pub extern "C" fn el1_main(boot_info_addr: u64) -> ! {
     complete_el1_stage1(
         root,
         bi,
-        code_paddr,
-        code_pages,
         stack_paddr,
-        dtb_page_pa,
-        dtb_map_pages,
+        heap_paddr,
+        user_boot_info_pa,
+        initial_ipc_pa,
     );
     uart::puts("[exo] EL1 stage-1 root=");
     uart::hex(root);
@@ -224,7 +325,16 @@ pub extern "C" fn el1_main(boot_info_addr: u64) -> ! {
 
     // 登记当前 EL0 任务拥有的 RAM 和用户映射。SYS_EXIT 会根据这份记录撤销
     // PTE，并且只回收真正属于任务的代码页和栈页。
-    crate::task::install(code_paddr, code_pages, stack_paddr, dtb_map_pages);
+    crate::task::install(
+        &loaded.segments[..loaded.segment_count],
+        stack_paddr,
+        user_boot_info_pa,
+        heap_paddr,
+        &mmio_grants[..mmio_grant_count],
+        &irq_grants[..irq_grant_count],
+    );
+    crate::ipc::init();
+    crate::thread::install_initial(loaded.entry, USER_STACK_TOP, initial_ipc_pa);
 
     uart::puts("[exo] enter EL0 libOS...\r\n");
 
@@ -233,7 +343,7 @@ pub extern "C" fn el1_main(boot_info_addr: u64) -> ! {
     // USER_BASE 必须是 libOS 链接入口地址 0x4000_0000。
     // USER_STACK_TOP 是 SP_EL0 初值。
     // enter_el0() 内部设置 ELR_EL1/SPSR_EL1/SP_EL0 后执行 eret。
-    crate::trap::enter_el0(USER_BASE, USER_STACK_TOP, dtb_user_va);
+    crate::trap::enter_el0(loaded.entry, USER_STACK_TOP, USER_BOOT_INFO_VA);
 }
 
 fn init_allocator_from_bootinfo(bi: &BootInfo) {
@@ -272,11 +382,10 @@ fn init_allocator_from_bootinfo(bi: &BootInfo) {
 fn complete_el1_stage1(
     root: u64,
     bi: &BootInfo,
-    code_paddr: u64,
-    code_pages: u64,
     stack_paddr: u64,
-    dtb_page_pa: u64,
-    dtb_map_pages: u64,
+    heap_paddr: u64,
+    user_boot_info_pa: u64,
+    initial_ipc_pa: u64,
 ) {
     // 把 UART MMIO 所在 2MB block 映射成 Device memory。
     //
@@ -308,30 +417,21 @@ fn complete_el1_stage1(
         );
     }
 
-    // 映射 EL0 代码:
-    //
-    //   EL0 VA USER_BASE -> PA code_paddr
-    //
-    // MMU_USER_RX 允许 EL0 取指执行, 但不允许写。
-    // 这里 code_pages 可能大于 1, 所以连续映射多个 4KB 页。
+    // EL0 只看到 EL1 裁剪后的 UserBootInfo，不再直接读取完整 DTB。
     crate::mmu::map(
         root,
-        USER_BASE,
-        code_paddr,
-        crate::mmu::MMU_USER_RX,
-        code_pages,
+        USER_BOOT_INFO_VA,
+        user_boot_info_pa,
+        crate::mmu::MMU_USER_RO,
+        1,
     );
 
-    // 把 DTB 只读映射给 EL0。
-    //
-    // DTB 是硬件发现入口: EL0 libOS 可以读 compatible/reg, 自己决定要请求映射哪个设备。
-    // 权限用 MMU_USER_RO: EL0 可读不可写, 不能篡改 EL1 作为授权依据的硬件描述。
     crate::mmu::map(
         root,
-        DTB_USER_VA,
-        dtb_page_pa,
-        crate::mmu::MMU_USER_RO,
-        dtb_map_pages,
+        USER_HEAP_BASE,
+        heap_paddr,
+        crate::mmu::MMU_USER_RW,
+        USER_HEAP_SIZE / PAGE_SIZE,
     );
 
     // 映射 EL0 栈:
@@ -348,4 +448,17 @@ fn complete_el1_stage1(
         crate::mmu::MMU_USER_RW,
         USER_STACK_PAGES,
     );
+
+    // 初始线程的 IPC Buffer 位于固定线程 IPC arena；新线程由
+    // SYS_THREAD_CREATE 使用同一布局单独映射自己的页面。
+    crate::mmu::map(
+        root,
+        exo_abi::THREAD_IPC_BUFFER_BASE,
+        initial_ipc_pa,
+        crate::mmu::MMU_USER_RW,
+        1,
+    );
+    // complete_el1_stage1 在页表已经激活后补充用户映射。确保页表写入对
+    // 硬件 page-table walker 可见，并清掉此前可能缓存的无效翻译。
+    crate::mmu::flush_el1_tlb();
 }

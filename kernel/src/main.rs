@@ -40,20 +40,28 @@ macro_rules! msr {
     }};
 }
 
-// ── 加载其他模块 ──
-mod boot_info; // BootInfo 结构体定义
-mod config; // QEMU/Pi5 共用的 ABI 和虚拟地址布局
-mod dtb; // 设备树解析器
-mod gic; // GICv2 中断控制器驱动
-mod kmain; // 内核主逻辑
-mod mem; // 物理页分配器
-mod mmu; // EL1 stage-1 页表管理
-mod platform; // EL2 启动阶段的平台差异
-mod protect; // MMIO 保护表 (谁拥有哪个物理地址)
-mod task; // 单任务资源记录与退出回收
-mod trap; // EL2/EL1 陷入处理 + eret 函数
-mod uart; // 串口输出
-mod vectors; // EL2/EL1 异常向量表
+// 按机制、对象和策略分层；下面的 crate 内别名保持原有路径，
+// 让本次目录重构不改变内核行为。
+mod arch;
+mod boot;
+mod config;
+mod drivers;
+mod interrupt;
+mod kmain;
+mod memory;
+mod object;
+mod resource;
+mod scheduler;
+mod syscall;
+
+pub(crate) use arch::aarch64::vectors;
+pub(crate) use boot::{boot_info, dtb, elf, platform};
+pub(crate) use drivers::uart;
+pub(crate) use interrupt::gic;
+pub(crate) use memory::{frame, mmu, physical as mem, vspace};
+pub(crate) use object::{ipc, task, thread};
+pub(crate) use resource::{pci, protect, resources};
+pub(crate) use syscall::dispatch as trap;
 
 // ── 导入需要用到的外部库 ──
 use boot_info::BootInfo; // 启动信息结构体
@@ -152,7 +160,7 @@ fn install_el1_identity_stage1(root: u64) {
     let tcr: u64 =
         (0b00 << 14) | (25 << 0) | (0b11 << 8) | (0b11 << 10) | (0b11 << 12) | (0b101 << 32);
     msr!("tcr_el1", tcr);
-    let mair: u64 = (0xff << 0) | (0x04 << 8);
+    let mair: u64 = (0xff << 0) | (0x04 << 8) | (0x44 << 16);
     msr!("mair_el1", mair);
     unsafe {
         core::arch::asm!("dsb sy; tlbi vmalle1; dsb sy; isb", options(nostack));

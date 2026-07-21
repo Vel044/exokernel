@@ -8,7 +8,24 @@ edition = "2021"
 
 [dependencies]
 arm-pl011-uart = { path = "vendor/arm-pl011-uart", version = "=0.5.0", default-features = false }
-fdt = { path = "vendor/fdt", version = "=0.1.5" }
+exo-abi = { path = "../abi" }
+linked_list_allocator = "=0.10.5"
+crab-usb = { path = "vendor/crab-usb", version = "=0.10.2", optional = true }
+dma-api = { version = "=0.9.3", optional = true }
+spin = { version = "=0.12.0", optional = true }
+log = { version = "=0.4.33", optional = true }
+
+[features]
+default = ["qemu-xhci", "scservo"]
+qemu-xhci = ["dep:crab-usb", "dep:dma-api", "dep:spin", "dep:log"]
+pi5-xhci = ["dep:crab-usb", "dep:dma-api", "dep:spin", "dep:log"]
+scservo = []
+scservo-move = ["scservo"]
+usb-echo = []
+uart-echo = []
+frame-smoke = []
+frame-fault-test = ["frame-smoke"]
+thread-ipc-smoke = []
 
 [profile.dev]
 panic = "abort"

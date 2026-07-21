@@ -1,0 +1,691 @@
+//! 单 EL0 任务的资源记录与退出回收。
+//!
+//! 这是后续 capability/task table 的最小前身。EL1 记录哪些物理页属于当前
+//! libOS，以及向它开放了哪些用户 VA、绑定了哪些 IRQ；EL0 不能自行伪造或释放这些资源。
+//!
+//! IRQ 模型：
+//!   - 旧路径使用 SYS_IRQ_WAIT/ACK，由调用线程等待 IRQ 并显式完成 EOI。
+//!   - 新路径把 IRQ 绑定到 Notification；硬件中断到达后由 EL1 投递 badge，
+//!     等待线程被唤醒，用户处理完成后仍通过 SYS_IRQ_ACK 完成 EOI。
+//!   - 每个 IRQ binding 单独保存 active IAR，多个设备 IRQ 可以同时存在。
+
+use crate::config::{
+    USER_BOOT_INFO_VA, USER_HEAP_BASE, USER_HEAP_SIZE, USER_STACK_PAGES, USER_STACK_TOP,
+};
+use crate::{gic, mem, mmu, uart};
+
+const MAX_MMIO_MAPPINGS: usize = 16;
+const MAX_IRQ_BINDINGS: usize = 16;
+const MAX_OWNED_MAPPINGS: usize = 12;
+const MAX_DMA_MAPPINGS: usize = 64;
+pub const MAX_MMIO_GRANTS: usize = 8;
+pub const MAX_IRQ_GRANTS: usize = 32;
+
+/// EL1 从 DTB 资源快照中授予当前任务的一段 MMIO 物理地址范围。
+#[derive(Clone, Copy)]
+pub struct MmioGrant {
+    pub base: u64,
+    pub size: u64,
+}
+
+impl MmioGrant {
+    pub const EMPTY: Self = Self { base: 0, size: 0 };
+}
+
+/// 当前任务可绑定的 GIC SPI，以及 DTB interrupt specifier 中的触发标志。
+#[derive(Clone, Copy)]
+pub struct IrqGrant {
+    pub intid: u32,
+    pub flags: u32,
+}
+
+impl IrqGrant {
+    pub const EMPTY: Self = Self { intid: 0, flags: 0 };
+}
+
+#[derive(Clone, Copy)]
+pub struct OwnedPages {
+    pub va: u64,
+    pub pa: u64,
+    pub pages: u64,
+    pub executable: bool,
+}
+
+impl OwnedPages {
+    pub const EMPTY: Self = Self {
+        va: 0,
+        pa: 0,
+        pages: 0,
+        executable: false,
+    };
+}
+
+#[derive(Clone, Copy)]
+struct UserMapping {
+    va: u64,
+    pages: u64,
+}
+
+#[derive(Clone, Copy)]
+struct DmaMapping {
+    va: u64,
+    pa: u64,
+    pages: u64,
+}
+
+impl DmaMapping {
+    const EMPTY: Self = Self {
+        va: 0,
+        pa: 0,
+        pages: 0,
+    };
+}
+
+impl UserMapping {
+    const EMPTY: Self = Self { va: 0, pages: 0 };
+}
+
+#[derive(Clone, Copy)]
+struct IrqBinding {
+    intid: u32,
+    notification: u64,
+    badge: u64,
+    active_iar: u32,
+}
+
+impl IrqBinding {
+    const EMPTY: Self = Self {
+        intid: 0,
+        notification: 0,
+        badge: 0,
+        active_iar: 0,
+    };
+}
+
+struct TaskResources {
+    active: bool,
+    mmio_grants: [MmioGrant; MAX_MMIO_GRANTS],
+    mmio_grant_count: usize,
+    irq_grants: [IrqGrant; MAX_IRQ_GRANTS],
+    irq_grant_count: usize,
+    owned: [OwnedPages; MAX_OWNED_MAPPINGS],
+    owned_count: usize,
+    stack_pa: u64,
+    boot_info_pa: u64,
+    heap_pa: u64,
+    mmio: [UserMapping; MAX_MMIO_MAPPINGS],
+    mmio_count: usize,
+    dma: [DmaMapping; MAX_DMA_MAPPINGS],
+    dma_count: usize,
+    // IRQ state
+    irq_bindings: [IrqBinding; MAX_IRQ_BINDINGS],
+    irq_binding_count: usize,
+}
+
+static mut CURRENT: TaskResources = TaskResources {
+    active: false,
+    mmio_grants: [MmioGrant::EMPTY; MAX_MMIO_GRANTS],
+    mmio_grant_count: 0,
+    irq_grants: [IrqGrant::EMPTY; MAX_IRQ_GRANTS],
+    irq_grant_count: 0,
+    owned: [OwnedPages::EMPTY; MAX_OWNED_MAPPINGS],
+    owned_count: 0,
+    stack_pa: 0,
+    boot_info_pa: 0,
+    heap_pa: 0,
+    mmio: [UserMapping::EMPTY; MAX_MMIO_MAPPINGS],
+    mmio_count: 0,
+    dma: [DmaMapping::EMPTY; MAX_DMA_MAPPINGS],
+    dma_count: 0,
+    irq_bindings: [IrqBinding::EMPTY; MAX_IRQ_BINDINGS],
+    irq_binding_count: 0,
+};
+
+/// v1只有一个资源域；0始终表示没有活动任务。
+pub fn current_owner() -> u32 {
+    unsafe {
+        if CURRENT.active {
+            1
+        } else {
+            0
+        }
+    }
+}
+
+/// 在第一次 eret 到 EL0 前登记该任务拥有的内存和设备授权。
+pub fn install(
+    segments: &[OwnedPages],
+    stack_pa: u64,
+    boot_info_pa: u64,
+    heap_pa: u64,
+    mmio_grants: &[MmioGrant],
+    irq_grants: &[IrqGrant],
+) {
+    unsafe {
+        CURRENT = TaskResources {
+            active: true,
+            mmio_grants: [MmioGrant::EMPTY; MAX_MMIO_GRANTS],
+            mmio_grant_count: 0,
+            irq_grants: [IrqGrant::EMPTY; MAX_IRQ_GRANTS],
+            irq_grant_count: 0,
+            owned: [OwnedPages::EMPTY; MAX_OWNED_MAPPINGS],
+            owned_count: 0,
+            stack_pa,
+            boot_info_pa,
+            heap_pa,
+            mmio: [UserMapping::EMPTY; MAX_MMIO_MAPPINGS],
+            mmio_count: 0,
+            dma: [DmaMapping::EMPTY; MAX_DMA_MAPPINGS],
+            dma_count: 0,
+            irq_bindings: [IrqBinding::EMPTY; MAX_IRQ_BINDINGS],
+            irq_binding_count: 0,
+        };
+        let mut index = 0usize;
+        while index < segments.len() && index < MAX_OWNED_MAPPINGS {
+            CURRENT.owned[index] = segments[index];
+            index += 1;
+        }
+        CURRENT.owned_count = index;
+
+        index = 0;
+        while index < mmio_grants.len() && index < MAX_MMIO_GRANTS {
+            CURRENT.mmio_grants[index] = mmio_grants[index];
+            index += 1;
+        }
+        CURRENT.mmio_grant_count = index;
+
+        index = 0;
+        while index < irq_grants.len() && index < MAX_IRQ_GRANTS {
+            CURRENT.irq_grants[index] = irq_grants[index];
+            index += 1;
+        }
+        CURRENT.irq_grant_count = index;
+    }
+}
+
+/// 检查完整物理范围是否属于当前任务的一项 MMIO grant。
+pub fn is_mmio_granted(base: u64, size: u64) -> bool {
+    if size == 0 {
+        return false;
+    }
+    let Some(end) = base.checked_add(size) else {
+        return false;
+    };
+    unsafe {
+        if !CURRENT.active {
+            return false;
+        }
+        let mut index = 0usize;
+        while index < CURRENT.mmio_grant_count {
+            let grant = CURRENT.mmio_grants[index];
+            if let Some(grant_end) = grant.base.checked_add(grant.size) {
+                if base >= grant.base && end <= grant_end {
+                    return true;
+                }
+            }
+            index += 1;
+        }
+    }
+    false
+}
+
+/// 在真正修改页表前确认资源表还能记录这次 MMIO 映射。
+pub fn can_record_mmio() -> bool {
+    unsafe { CURRENT.active && CURRENT.mmio_count < MAX_MMIO_MAPPINGS }
+}
+
+/// 记录已经成功建立的 EL0 MMIO 虚拟映射。
+pub fn record_mmio(user_va: u64, pages: u64) {
+    unsafe {
+        let index = CURRENT.mmio_count;
+        CURRENT.mmio[index] = UserMapping { va: user_va, pages };
+        CURRENT.mmio_count += 1;
+    }
+}
+
+pub fn remove_mmio(user_va: u64, pages: u64) -> bool {
+    unsafe {
+        let mut index = 0usize;
+        while index < CURRENT.mmio_count {
+            let mapping = CURRENT.mmio[index];
+            if mapping.va == user_va && mapping.pages == pages {
+                CURRENT.mmio_count -= 1;
+                CURRENT.mmio[index] = CURRENT.mmio[CURRENT.mmio_count];
+                CURRENT.mmio[CURRENT.mmio_count] = UserMapping::EMPTY;
+                return true;
+            }
+            index += 1;
+        }
+    }
+    false
+}
+
+pub fn range_available(va: u64, pages: u64) -> bool {
+    if pages == 0 {
+        return false;
+    }
+    let Some(end) = va.checked_add(pages * 4096) else {
+        return false;
+    };
+    if va < exo_abi::USER_BASE || end > exo_abi::USER_WINDOW_END {
+        return false;
+    }
+    unsafe {
+        if !CURRENT.active {
+            return false;
+        }
+        let overlaps = |start: u64, count: u64| {
+            let other_end = start.saturating_add(count * 4096);
+            va < other_end && end > start
+        };
+        let mut index = 0usize;
+        while index < CURRENT.owned_count {
+            let item = CURRENT.owned[index];
+            if overlaps(item.va, item.pages) {
+                return false;
+            }
+            index += 1;
+        }
+        if overlaps(USER_BOOT_INFO_VA, 1)
+            || overlaps(USER_HEAP_BASE, USER_HEAP_SIZE / 4096)
+            || overlaps(USER_STACK_TOP - USER_STACK_PAGES * 4096, USER_STACK_PAGES)
+        {
+            return false;
+        }
+        index = 0;
+        while index < CURRENT.mmio_count {
+            let item = CURRENT.mmio[index];
+            if overlaps(item.va, item.pages) {
+                return false;
+            }
+            index += 1;
+        }
+        index = 0;
+        while index < CURRENT.dma_count {
+            let item = CURRENT.dma[index];
+            if overlaps(item.va, item.pages) {
+                return false;
+            }
+            index += 1;
+        }
+    }
+    true
+}
+
+/// 线程入口必须位于 ELF 的可执行 PT_LOAD 中，不能跳入可写数据区。
+pub fn is_user_executable(va: u64) -> bool {
+    unsafe {
+        if !CURRENT.active {
+            return false;
+        }
+        let mut index = 0usize;
+        while index < CURRENT.owned_count {
+            let item = CURRENT.owned[index];
+            let end = item.va.saturating_add(item.pages * exo_abi::PAGE_SIZE);
+            if item.executable && va >= item.va && va < end {
+                return true;
+            }
+            index += 1;
+        }
+    }
+    false
+}
+
+pub fn record_dma(va: u64, pa: u64, pages: u64) -> bool {
+    unsafe {
+        if !CURRENT.active || CURRENT.dma_count == MAX_DMA_MAPPINGS {
+            return false;
+        }
+        CURRENT.dma[CURRENT.dma_count] = DmaMapping { va, pa, pages };
+        CURRENT.dma_count += 1;
+    }
+    true
+}
+
+pub fn take_dma(va: u64, pages: u64) -> Option<u64> {
+    unsafe {
+        let mut index = 0usize;
+        while index < CURRENT.dma_count {
+            let item = CURRENT.dma[index];
+            if item.va == va && item.pages == pages {
+                CURRENT.dma_count -= 1;
+                CURRENT.dma[index] = CURRENT.dma[CURRENT.dma_count];
+                CURRENT.dma[CURRENT.dma_count] = DmaMapping::EMPTY;
+                return Some(item.pa);
+            }
+            index += 1;
+        }
+    }
+    None
+}
+
+// ── IRQ 绑定管理 ──
+
+/// 返回当前任务获授权 IRQ 的 DTB flags；未授权时返回 None。
+pub fn irq_flags(intid: u32) -> Option<u32> {
+    unsafe {
+        if !CURRENT.active {
+            return None;
+        }
+        let mut index = 0usize;
+        while index < CURRENT.irq_grant_count {
+            let grant = CURRENT.irq_grants[index];
+            if grant.intid == intid {
+                return Some(grant.flags);
+            }
+            index += 1;
+        }
+    }
+    None
+}
+
+/// 绑定一个 IRQ 到当前任务。绑定后该 IRQ 可在 SYS_IRQ_WAIT 中使能。
+/// 返回 true 表示成功；false 表示已绑定或超出容量。
+pub fn bind_irq(intid: u32, notification: u64, badge: u64) -> bool {
+    unsafe {
+        if !CURRENT.active || CURRENT.irq_binding_count >= MAX_IRQ_BINDINGS {
+            return false;
+        }
+        // 检查是否已绑定
+        let mut i = 0;
+        while i < CURRENT.irq_binding_count {
+            if CURRENT.irq_bindings[i].intid == intid {
+                return false;
+            }
+            i += 1;
+        }
+        CURRENT.irq_bindings[CURRENT.irq_binding_count] = IrqBinding {
+            intid,
+            notification,
+            badge,
+            active_iar: 0,
+        };
+        CURRENT.irq_binding_count += 1;
+        true
+    }
+}
+
+/// 解除绑定并禁用该 IRQ。
+pub fn unbind_irq(intid: u32) -> bool {
+    unsafe {
+        if !CURRENT.active {
+            return false;
+        }
+        let mut i = 0;
+        while i < CURRENT.irq_binding_count {
+            if CURRENT.irq_bindings[i].intid == intid {
+                gic::disable_spi(intid);
+                // active IRQ 不能直接丢弃，必须把原始 IAR token 写回 EOIR。
+                if CURRENT.irq_bindings[i].active_iar != 0 {
+                    gic::write_eoir(CURRENT.irq_bindings[i].active_iar);
+                }
+                // 从数组中移除
+                CURRENT.irq_binding_count -= 1;
+                CURRENT.irq_bindings[i] = CURRENT.irq_bindings[CURRENT.irq_binding_count];
+                return true;
+            }
+            i += 1;
+        }
+        false
+    }
+}
+
+/// 检查给定 INTID 是否已被当前任务绑定。
+pub fn has_binding(intid: u32) -> bool {
+    unsafe {
+        let mut i = 0;
+        while i < CURRENT.irq_binding_count {
+            if CURRENT.irq_bindings[i].intid == intid {
+                return true;
+            }
+            i += 1;
+        }
+        false
+    }
+}
+
+/// 返回 IRQ 绑定的异步通知对象和 badge；None 表示旧版 IRQ_WAIT 绑定。
+pub fn irq_notification(intid: u32) -> Option<(u64, u64)> {
+    unsafe {
+        let mut index = 0usize;
+        while index < CURRENT.irq_binding_count {
+            let binding = CURRENT.irq_bindings[index];
+            if binding.intid == intid {
+                return if binding.notification == 0 {
+                    None
+                } else {
+                    Some((binding.notification, binding.badge))
+                };
+            }
+            index += 1;
+        }
+    }
+    None
+}
+
+/// 检查 Notification 是否仍被某个 IRQ 使用，避免用户先销毁通知对象，
+/// 再让硬件 IRQ 到达后把事件投递到一个过期 Handle。
+pub fn notification_is_bound(notification: u64) -> bool {
+    unsafe {
+        let mut index = 0usize;
+        while index < CURRENT.irq_binding_count {
+            if CURRENT.irq_bindings[index].notification == notification {
+                return true;
+            }
+            index += 1;
+        }
+    }
+    false
+}
+
+/// 第一个绑定的 INTID (v1 单 IRQ 场景)。
+pub fn first_bound_intid() -> Option<u32> {
+    unsafe {
+        if CURRENT.irq_binding_count > 0 {
+            Some(CURRENT.irq_bindings[0].intid)
+        } else {
+            None
+        }
+    }
+}
+
+pub fn enable_bound_irqs() {
+    unsafe {
+        let mut i = 0;
+        while i < CURRENT.irq_binding_count {
+            gic::enable_spi(CURRENT.irq_bindings[i].intid);
+            i += 1;
+        }
+    }
+}
+
+pub fn disable_bound_irqs() {
+    unsafe {
+        let mut i = 0;
+        while i < CURRENT.irq_binding_count {
+            gic::disable_spi(CURRENT.irq_bindings[i].intid);
+            i += 1;
+        }
+    }
+}
+
+// ── IAR token 管理 (由 IRQ handler 写入，WAIT/ACK 消费) ──
+
+/// 由 EL1 IRQ handler 调用，保存完整 GICC_IAR token。
+pub fn record_iar(iar_token: u32) {
+    unsafe {
+        let intid = gic::intid(iar_token);
+        let mut index = 0usize;
+        while index < CURRENT.irq_binding_count {
+            if CURRENT.irq_bindings[index].intid == intid {
+                CURRENT.irq_bindings[index].active_iar = iar_token;
+                return;
+            }
+            index += 1;
+        }
+    }
+}
+
+/// 检查是否有未确认的 active IRQ。
+pub fn has_active_iar() -> bool {
+    unsafe {
+        let mut index = 0usize;
+        while index < CURRENT.irq_binding_count {
+            if CURRENT.irq_bindings[index].active_iar != 0 {
+                return true;
+            }
+            index += 1;
+        }
+        false
+    }
+}
+
+/// 获取 active IAR 不清零（给 ACK 校验用）。
+pub fn active_iar() -> u32 {
+    unsafe {
+        let mut index = 0usize;
+        while index < CURRENT.irq_binding_count {
+            if CURRENT.irq_bindings[index].active_iar != 0 {
+                return CURRENT.irq_bindings[index].active_iar;
+            }
+            index += 1;
+        }
+        0
+    }
+}
+
+/// 确认 IRQ 已完成处理：校验 INTID 匹配当前 active token，写 GICC_EOIR。
+/// 返回 true 表示成功。
+pub fn ack_irq(intid: u32) -> bool {
+    unsafe {
+        let mut index = 0usize;
+        while index < CURRENT.irq_binding_count {
+            if CURRENT.irq_bindings[index].intid == intid {
+                let iar = CURRENT.irq_bindings[index].active_iar;
+                if iar == 0 {
+                    return false;
+                }
+                gic::write_eoir(iar);
+                CURRENT.irq_bindings[index].active_iar = 0;
+                gic::enable_spi(intid);
+                return true;
+            }
+            index += 1;
+        }
+        false
+    }
+}
+
+/// 退出时清理所有 IRQ：禁用并清除 IAR。
+pub fn cleanup_irqs() {
+    unsafe {
+        let mut i = 0;
+        while i < CURRENT.irq_binding_count {
+            gic::disable_spi(CURRENT.irq_bindings[i].intid);
+            i += 1;
+        }
+        let mut j = 0usize;
+        while j < CURRENT.irq_binding_count {
+            if CURRENT.irq_bindings[j].active_iar != 0 {
+                gic::write_eoir(CURRENT.irq_bindings[j].active_iar);
+                CURRENT.irq_bindings[j].active_iar = 0;
+            }
+            j += 1;
+        }
+        CURRENT.irq_binding_count = 0;
+    }
+}
+
+/// 结束当前 EL0 任务。该函数不会返回。
+pub fn exit_current(code: u64) -> ! {
+    uart::puts("\r\n[exo] EL0 exit code=");
+    uart::hex(code);
+    uart::puts("\r\n");
+
+    unsafe {
+        if !CURRENT.active {
+            uart::puts("[exo] no active EL0 task\r\n");
+            halt();
+        }
+
+        cleanup_irqs();
+
+        let root = mmu::active_table();
+        let owner = current_owner();
+
+        // Endpoint、Reply 和 Notification 都属于任务；先使所有 Handle
+        // 失效，避免线程表回收后留下指向旧线程 slot 的等待关系。
+        crate::ipc::cleanup_owner(owner);
+
+        // 线程栈和 IPC Buffer 属于线程对象，先撤销并回收，随后再清理
+        // 任务级的 ELF、heap、Frame、MMIO、DMA 和其他设备资源。
+        crate::thread::cleanup_all(root);
+
+        // 先撤销所有用户映射。此时 CPU 已因 SVC 位于 EL1，不再从 EL0 页面取指。
+        crate::vspace::cleanup_owner(owner, root);
+        let mut owned_index = 0usize;
+        while owned_index < CURRENT.owned_count {
+            let mapping = CURRENT.owned[owned_index];
+            mmu::unmap(root, mapping.va, mapping.pages);
+            owned_index += 1;
+        }
+        mmu::unmap(
+            root,
+            USER_STACK_TOP - USER_STACK_PAGES * 4096,
+            USER_STACK_PAGES,
+        );
+        mmu::unmap(root, USER_BOOT_INFO_VA, 1);
+        mmu::unmap(root, USER_HEAP_BASE, USER_HEAP_SIZE / 4096);
+
+        let mut i = 0;
+        while i < CURRENT.mmio_count {
+            let mapping = CURRENT.mmio[i];
+            mmu::unmap(root, mapping.va, mapping.pages);
+            i += 1;
+        }
+        i = 0;
+        while i < CURRENT.dma_count {
+            let mapping = CURRENT.dma[i];
+            mmu::unmap(root, mapping.va, mapping.pages);
+            i += 1;
+        }
+
+        // Break-before-reuse：清除 PTE 后先让旧 TLB 项失效，再把 RAM 归还分配器。
+        mmu::flush_el1_tlb();
+        let free_before_frame_cleanup = mem::free_pages_total();
+        crate::frame::cleanup_owner(owner);
+        let reclaimed_frame_pages =
+            mem::free_pages_total().saturating_sub(free_before_frame_cleanup);
+        uart::puts("[exo] Frame exit cleanup reclaimed pages=");
+        uart::hex(reclaimed_frame_pages);
+        uart::puts("\r\n");
+        owned_index = 0;
+        while owned_index < CURRENT.owned_count {
+            let mapping = CURRENT.owned[owned_index];
+            mem::free_pages(mapping.pa, mapping.pages);
+            owned_index += 1;
+        }
+        mem::free_pages(CURRENT.stack_pa, USER_STACK_PAGES);
+        mem::free_page(CURRENT.boot_info_pa);
+        mem::free_pages(CURRENT.heap_pa, USER_HEAP_SIZE / 4096);
+        i = 0;
+        while i < CURRENT.dma_count {
+            let mapping = CURRENT.dma[i];
+            mem::free_pages(mapping.pa, mapping.pages);
+            i += 1;
+        }
+
+        CURRENT.active = false;
+        CURRENT.mmio_grant_count = 0;
+        CURRENT.irq_grant_count = 0;
+        uart::puts("[exo] EL0 mappings revoked, code/stack pages reclaimed\r\n");
+    }
+
+    halt()
+}
+
+fn halt() -> ! {
+    loop {
+        unsafe { core::arch::asm!("wfe", options(nomem, nostack)) };
+    }
+}

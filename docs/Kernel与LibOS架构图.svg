@@ -1,0 +1,165 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="1120" viewBox="0 0 1500 1120" role="img" aria-labelledby="title desc">
+  <title id="title">Exokernel Kernel 与 libOS 架构图</title>
+  <desc id="desc">上层为 EL0 libOS 驱动与协议，下层把 EL1 Kernel 分为功能模块和系统调用接口两部分。</desc>
+
+  <defs>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="3" stdDeviation="4" flood-color="#263238" flood-opacity="0.13"/>
+    </filter>
+    <style>
+      text { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; fill: #172126; }
+      .title { font-size: 34px; font-weight: 700; }
+      .subtitle { font-size: 16px; fill: #52636b; }
+      .layer-title { font-size: 23px; font-weight: 700; fill: #ffffff; }
+      .section-title { font-size: 21px; font-weight: 700; }
+      .card-title { font-size: 17px; font-weight: 700; }
+      .body { font-size: 14px; fill: #34454d; }
+      .small { font-size: 13px; fill: #52636b; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+    </style>
+  </defs>
+
+  <rect width="1500" height="1120" fill="#f4f7f8"/>
+  <text x="60" y="57" class="title">Exokernel：Kernel 与 libOS 架构</text>
+  <text x="60" y="87" class="subtitle">EL1 提供资源保护机制；EL0 直接实现设备驱动、协议栈与应用策略</text>
+
+  <!-- EL0 libOS -->
+  <g filter="url(#shadow)">
+    <rect x="55" y="120" width="1390" height="300" rx="8" fill="#ffffff" stroke="#1565c0" stroke-width="2"/>
+    <rect x="55" y="120" width="185" height="300" rx="8" fill="#1565c0"/>
+    <rect x="232" y="120" width="8" height="300" fill="#1565c0"/>
+  </g>
+  <text x="85" y="170" class="layer-title">EL0 libOS</text>
+  <text x="85" y="199" style="font-size:14px;fill:#d8eaff">驱动与策略</text>
+  <text x="85" y="242" style="font-size:14px;fill:#ffffff">• UART</text>
+  <text x="85" y="269" style="font-size:14px;fill:#ffffff">• PCI</text>
+  <text x="85" y="296" style="font-size:14px;fill:#ffffff">• xHCI</text>
+  <text x="85" y="323" style="font-size:14px;fill:#ffffff">• CDC ACM</text>
+  <text x="85" y="350" style="font-size:14px;fill:#ffffff">• SCServo</text>
+
+  <g>
+    <rect x="275" y="165" width="210" height="190" rx="7" fill="#e8f2fc" stroke="#90caf9"/>
+    <text x="295" y="202" class="card-title">UART</text>
+    <text x="295" y="234" class="body">UserBootInfo.uart</text>
+    <text x="295" y="260" class="body">映射 PL011 MMIO</text>
+    <text x="295" y="286" class="body">TX 日志 / RX 回显</text>
+    <text x="295" y="312" class="body">IRQ WAIT / ACK</text>
+
+    <rect x="500" y="165" width="210" height="190" rx="7" fill="#e8f2fc" stroke="#90caf9"/>
+    <text x="520" y="202" class="card-title">PCI</text>
+    <text x="520" y="234" class="body">UserBootInfo.pci</text>
+    <text x="520" y="260" class="body">映射 ECAM / 扫描 BDF</text>
+    <text x="520" y="286" class="body">解析 BAR 与 INTx</text>
+    <text x="520" y="312" class="body">启用 Bus Master</text>
+
+    <rect x="725" y="165" width="210" height="190" rx="7" fill="#e8f2fc" stroke="#90caf9"/>
+    <text x="745" y="202" class="card-title">xHCI</text>
+    <text x="745" y="234" class="body">CrabUSB Host Controller</text>
+    <text x="745" y="260" class="body">Command / Event Ring</text>
+    <text x="745" y="286" class="body">枚举与 Endpoint</text>
+    <text x="745" y="312" class="body">QEMU PCI / Pi5 RP1</text>
+
+    <rect x="950" y="165" width="210" height="190" rx="7" fill="#e8f2fc" stroke="#90caf9"/>
+    <text x="970" y="202" class="card-title">CDC ACM</text>
+    <text x="970" y="234" class="body">控制与数据接口</text>
+    <text x="970" y="260" class="body">1 Mbps / 8N1</text>
+    <text x="970" y="286" class="body">Control Request</text>
+    <text x="970" y="312" class="body">Bulk IN / Bulk OUT</text>
+
+    <rect x="1175" y="165" width="210" height="190" rx="7" fill="#e3f4e8" stroke="#81c784"/>
+    <text x="1195" y="202" class="card-title">SCServo</text>
+    <text x="1195" y="234" class="body">Protocol 0</text>
+    <text x="1195" y="260" class="body">FeetechMotorsBus</text>
+    <text x="1195" y="286" class="body">STS3215：ID 1–6</text>
+    <text x="1195" y="312" class="body">PING / READ / WRITE</text>
+  </g>
+
+  <!-- EL1 Kernel: function modules and syscall modules -->
+  <g filter="url(#shadow)">
+    <rect x="55" y="485" width="1390" height="570" rx="8" fill="#ffffff" stroke="#37474f" stroke-width="2"/>
+  </g>
+
+  <!-- Left: kernel functions -->
+  <path d="M63 493 H650 V1047 H63 Q55 1047 55 1039 V501 Q55 493 63 493 Z" fill="#e8f1f3"/>
+  <rect x="55" y="485" width="185" height="570" rx="8" fill="#37474f"/>
+  <rect x="232" y="485" width="8" height="570" fill="#37474f"/>
+  <text x="85" y="535" class="layer-title">EL1 Kernel</text>
+  <text x="85" y="564" style="font-size:14px;fill:#dbe3e6">功能模块</text>
+  <text x="85" y="607" style="font-size:14px;fill:#ffffff">• 启动与加载</text>
+  <text x="85" y="634" style="font-size:14px;fill:#ffffff">• 设备发现</text>
+  <text x="85" y="661" style="font-size:14px;fill:#ffffff">• 资源保护</text>
+
+  <text x="275" y="528" class="section-title" style="fill:#29434e">功能模块</text>
+
+  <rect x="275" y="560" width="330" height="112" rx="7" fill="#ffffff" stroke="#90a4ae"/>
+  <text x="295" y="583" class="card-title">启动与 ELF Loader</text>
+  <text x="295" y="609" class="body">UEFI / EL2 → EL1 → EL0</text>
+  <text x="295" y="632" class="body">PT_LOAD / BSS / 页权限</text>
+
+  <rect x="275" y="698" width="330" height="112" rx="7" fill="#ffffff" stroke="#90a4ae"/>
+  <text x="295" y="729" class="card-title">DTB 与设备发现</text>
+  <text x="295" y="755" class="body">PL011 / GICv2 / PCI host</text>
+  <text x="295" y="778" class="body">RP1 xHCI / UserBootInfo</text>
+
+  <rect x="275" y="836" width="330" height="112" rx="7" fill="#ffffff" stroke="#90a4ae"/>
+  <text x="295" y="867" class="card-title">资源授权与回收</text>
+  <text x="295" y="893" class="body">MMIO / IRQ grant / ownership</text>
+  <text x="295" y="916" class="body">退出时撤销映射并回收</text>
+
+  <!-- Right: kernel syscall interface -->
+  <path d="M650 493 H1437 Q1445 493 1445 501 V1039 Q1445 1047 1437 1047 H650 Z" fill="#fff2d8"/>
+  <line x1="650" y1="500" x2="650" y2="1040" stroke="#f0a43a" stroke-width="2"/>
+  <text x="685" y="528" class="section-title" style="fill:#a84b00">系统调用接口</text>
+  <text x="685" y="552" class="small">EL0 通过 svc #0 申请资源；EL1 校验授权与所有权</text>
+
+  <!-- Memory-related interfaces share one resource family but retain distinct semantics. -->
+  <rect x="675" y="570" width="745" height="172" rx="7" fill="#fff9ee" stroke="#f0a43a" stroke-width="1.5"/>
+  <text x="695" y="598" class="card-title" style="fill:#a84b00">内存与映射</text>
+
+  <rect x="690" y="612" width="260" height="112" rx="6" fill="#ffffff" stroke="#ffb74d"/>
+  <text x="708" y="638" style="font-size:16px;font-weight:700">Frame + VSpace</text>
+  <text x="708" y="660" class="mono">FRAME_ALLOC → FrameHandle</text>
+  <text x="708" y="678" class="mono">FRAME_MAP → MappingHandle</text>
+  <text x="708" y="696" class="mono">FRAME_UNMAP(mapping)</text>
+  <text x="708" y="714" class="mono">FRAME_FREE(FrameHandle)</text>
+
+  <rect x="965" y="612" width="215" height="112" rx="6" fill="#ffffff" stroke="#ffb74d"/>
+  <text x="983" y="638" style="font-size:16px;font-weight:700">MMIO</text>
+  <text x="983" y="672" class="mono">MAP_MMIO   映射设备寄存器</text>
+  <text x="983" y="698" class="mono">UNMAP_MMIO 撤销MMIO映射</text>
+
+  <rect x="1195" y="612" width="205" height="112" rx="6" fill="#ffffff" stroke="#ffb74d"/>
+  <text x="1213" y="638" style="font-size:16px;font-weight:700">DMA</text>
+  <text x="1213" y="672" class="mono">DMA_ALLOC 分配设备可见页</text>
+  <text x="1213" y="698" class="mono">DMA_FREE  解除并回收</text>
+
+  <rect x="675" y="756" width="360" height="94" rx="7" fill="#ffffff" stroke="#ffb74d"/>
+  <text x="695" y="782" class="card-title">IRQ</text>
+  <text x="695" y="805" class="mono">IRQ_BIND      绑定获授权 IRQ</text>
+  <text x="695" y="823" class="mono">IRQ_UNBIND    解除 IRQ 绑定</text>
+  <text x="695" y="841" class="mono">IRQ→Notification / ACK</text>
+
+  <rect x="1050" y="756" width="370" height="94" rx="7" fill="#ffffff" stroke="#ffb74d"/>
+  <text x="1070" y="782" class="card-title">Thread + Scheduler</text>
+  <text x="1070" y="805" class="mono">THREAD_CREATE  创建线程</text>
+  <text x="1070" y="823" class="mono">THREAD_EXIT    退出线程</text>
+  <text x="1070" y="841" class="mono">THREAD_YIELD   主动让出 CPU</text>
+
+  <!-- Endpoint与Notification都属于广义IPC/Event机制，外框表达共同归属。 -->
+  <rect x="675" y="864" width="745" height="166" rx="7" fill="#fff9ee" stroke="#f0a43a" stroke-width="1.5"/>
+  <text x="695" y="892" class="card-title" style="fill:#a84b00">IPC / Event（进程间通信与事件）</text>
+
+  <rect x="690" y="906" width="345" height="106" rx="6" fill="#ffffff" stroke="#ffb74d"/>
+  <text x="708" y="932" class="card-title">Notification（异步通知）</text>
+  <text x="708" y="955" class="mono">SIGNAL  发送异步事件</text>
+  <text x="708" y="973" class="mono">WAIT    阻塞等待事件</text>
+  <text x="708" y="991" class="mono">POLL    非阻塞查询事件</text>
+
+  <rect x="1050" y="906" width="350" height="106" rx="6" fill="#ffffff" stroke="#ffb74d"/>
+  <text x="1068" y="932" class="card-title">Endpoint + Reply（同步消息）</text>
+  <text x="1068" y="955" class="mono">SEND/RECV   发送或接收请求</text>
+  <text x="1068" y="973" class="mono">CALL/REPLY  请求并等待一次回复</text>
+  <text x="1068" y="991" class="mono">REPLY_RECV  回复后继续接收</text>
+
+  <text x="1440" y="1095" text-anchor="end" class="small">蓝色：libOS 模块　灰蓝：Kernel 功能　橙色：Kernel 系统调用接口</text>
+</svg>

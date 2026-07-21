@@ -1,0 +1,10 @@
+[package]
+name = "scservo-serial-bridge"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+libc = "0.2.185"
+
+[workspace]
