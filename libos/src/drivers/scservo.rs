@@ -1,13 +1,12 @@
 //! Feetech STS/SMS Protocol 0 与 SO101 电机总线。
 //!
 //! 这一层只处理 CDC ACM 已经提供的串行字节流；xHCI、DMA、IRQ 和 USB
-//! descriptor 都留在 `usb_app`，因此同一套协议可以运行在 QEMU PCI xHCI
+//! descriptor 都留在 `usb_serial`，因此同一套协议可以运行在 QEMU PCI xHCI
 //! 和 Pi5 直连 xHCI 两条后端上。
 
 use alloc::vec::Vec;
 
-use crate::usb_app::CdcAcmTransport;
-use crab_usb::EventHandler;
+use crate::drivers::usb_serial::UsbSerialTransport;
 
 pub const BROADCAST_ID: u8 = 0xfe;
 pub const INST_PING: u8 = 1;
@@ -55,13 +54,13 @@ impl StatusPacket {
 
 /// Protocol 0 的收发器。`rx` 保留上一次 USB bulk transfer 的半包和粘包。
 pub struct Protocol0<'a> {
-    transport: &'a mut CdcAcmTransport,
+    transport: &'a mut UsbSerialTransport,
     rx: Vec<u8>,
     input: [u8; 512],
 }
 
 impl<'a> Protocol0<'a> {
-    pub fn new(transport: &'a mut CdcAcmTransport) -> Self {
+    pub fn new(transport: &'a mut UsbSerialTransport) -> Self {
         Self {
             transport,
             rx: Vec::new(),
@@ -527,7 +526,7 @@ pub struct FeetechMotorsBus<'a> {
 }
 
 impl<'a> FeetechMotorsBus<'a> {
-    pub fn so101(transport: &'a mut CdcAcmTransport) -> Self {
+    pub fn so101(transport: &'a mut UsbSerialTransport) -> Self {
         Self {
             protocol: Protocol0::new(transport),
             motors: [
@@ -938,137 +937,4 @@ fn encode_sign_magnitude(value: i32, sign_bit: u8) -> Result<u32, ScservoError> 
         return Err(ScservoError::InvalidArgument);
     }
     Ok(magnitude | if value < 0 { 1u32 << sign_bit } else { 0 })
-}
-
-/// 默认应用：连接后只做探测和读取，故障时退出并由 EL1 回收资源。
-pub fn run(
-    transport: &mut CdcAcmTransport,
-    handler: &EventHandler,
-    intid: u32,
-    notification: &crate::notification::Notification,
-) -> ! {
-    let mut bus = FeetechMotorsBus::so101(transport);
-    let result = crate::usb_app::block_on_usb(startup(&mut bus), handler, intid, notification);
-    match result {
-        Ok(()) => {
-            #[cfg(feature = "scservo-move")]
-            {
-                if let Err(error) = crate::usb_app::block_on_usb(
-                    move_to_neutral(&mut bus),
-                    handler,
-                    intid,
-                    notification,
-                ) {
-                    // 运动失败也尽力释放六个舵机，避免错误退出后继续保持扭矩。
-                    let _ = crate::usb_app::block_on_usb(
-                        bus.disable_torque(None),
-                        handler,
-                        intid,
-                        notification,
-                    );
-                    crate::runtime::puts(b"[libos] neutral move failed code=");
-                    crate::runtime::hex(error_code(error));
-                    crate::runtime::puts(b"\r\n");
-                    crate::runtime::exit(0x301);
-                }
-                crate::runtime::puts(b"[libos] SCServo motion startup complete\r\n");
-            }
-            #[cfg(not(feature = "scservo-move"))]
-            {
-                crate::runtime::puts(b"[libos] SCServo read-only startup complete\r\n");
-            }
-            loop {
-                crate::runtime::delay_ns(1_000_000_000);
-            }
-        }
-        Err(error) => {
-            crate::runtime::puts(b"[libos] SCServo startup failed code=");
-            crate::runtime::hex(error_code(error));
-            crate::runtime::puts(b"\r\n");
-            crate::runtime::exit(0x300);
-        }
-    }
-}
-
-async fn startup(bus: &mut FeetechMotorsBus<'_>) -> Result<(), ScservoError> {
-    crate::runtime::puts(b"[libos] SCServo baudrate=1000000\r\n");
-    bus.connect().await?;
-    // 读取实际保存的标定范围，让归一化位置使用硬件当前配置。
-    bus.read_calibration().await?;
-    for motor in MotorName::ALL {
-        let position = bus.read_position(motor).await?;
-        let status = bus.read_status(motor).await?;
-        crate::runtime::puts(b"[libos] READ Present_Position ");
-        crate::runtime::puts(motor.label());
-        crate::runtime::puts(b" value=");
-        crate::runtime::hex(position as u64);
-        crate::runtime::puts(b" status=");
-        crate::runtime::hex(status.error as u64);
-        crate::runtime::puts(b" success\r\n");
-    }
-    Ok(())
-}
-
-#[cfg(feature = "scservo-move")]
-async fn move_to_neutral(bus: &mut FeetechMotorsBus<'_>) -> Result<(), ScservoError> {
-    // LeRobot 的标定流程把每个关节的中点作为安全初始姿态；前五个
-    // 关节的归一化中点是 0，夹爪中点是 50%。
-    let neutral = [Some(0), Some(0), Some(0), Some(0), Some(0), Some(50)];
-    let mut current = bus.sync_read(ControlTable::PresentPosition, true).await?;
-
-    bus.enable_torque(None).await?;
-    crate::runtime::puts(b"[libos] moving to calibrated neutral pose\r\n");
-
-    // 每轮最多移动 5 个归一化单位，并等待 100 ms，避免大幅跳转。
-    let mut round = 0;
-    let mut neutral_reached = false;
-    while round < 40 {
-        let mut command = [None; 6];
-        let mut reached = true;
-        for index in 0..6 {
-            let present = current[index].ok_or(ScservoError::Timeout)?;
-            let target = neutral[index].unwrap();
-            let delta = target - present;
-            // STS3215的机械死区和整数归一化可能让反馈稳定在目标附近3个单位。
-            if delta.unsigned_abs() > 3 {
-                reached = false;
-            }
-            command[index] = Some(if delta > 5 {
-                present + 5
-            } else if delta < -5 {
-                present - 5
-            } else {
-                target
-            });
-        }
-        bus.sync_write(ControlTable::GoalPosition, command, true)
-            .await?;
-        if reached {
-            neutral_reached = true;
-            break;
-        }
-        crate::runtime::delay_ns(100_000_000);
-        current = bus.sync_read(ControlTable::PresentPosition, true).await?;
-        round += 1;
-    }
-    if !neutral_reached {
-        return Err(ScservoError::Timeout);
-    }
-
-    bus.disable_torque(None).await?;
-    crate::runtime::puts(b"[libos] calibrated neutral pose reached; torque disabled\r\n");
-    Ok(())
-}
-
-fn error_code(error: ScservoError) -> u64 {
-    match error {
-        ScservoError::Transport => 1,
-        ScservoError::Timeout => 2,
-        ScservoError::MalformedPacket => 3,
-        ScservoError::Checksum => 4,
-        ScservoError::WrongId => 5,
-        ScservoError::Device(value) => 0x100 + value as u64,
-        ScservoError::InvalidArgument => 6,
-        ScservoError::NotConnected => 7,
-    }
 }

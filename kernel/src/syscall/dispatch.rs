@@ -1,8 +1,21 @@
-//! trap.rs —— EL 切换与异常处理
+//! EL切换、异常入口和系统调用分发。
 //!
 //! 当前启动链:
 //!   EL2 boot shim -> enter_el1_kernel() -> EL1 外核
 //!   EL1 外核      -> enter_el0()        -> EL0 libOS
+//!
+//! xHCI驱动涉及的保护边界：
+//!
+//! ```text
+//! SYS_MAP_MMIO   校验grant并建立Device页表映射
+//! SYS_DMA_ALLOC  分配连续物理页并建立Non-cacheable映射
+//! SYS_IRQ_BIND   校验INTID并把GIC SPI绑定到Notification
+//! NOTIFY_WAIT    只阻塞当前驱动线程
+//! SYS_IRQ_ACK    驱动消费Event Ring后重新允许SPI
+//! ```
+//!
+//! Kernel不解析PCI配置寄存器、xHCI TRB、USB descriptor或FTDI数据包。
+//! 这些对象都由EL0在获授权映射上直接管理。
 
 use crate::uart;
 
@@ -35,6 +48,8 @@ pub const SYS_NOTIFICATION_SIGNAL: u64 = 29;
 pub const SYS_NOTIFICATION_WAIT: u64 = 30;
 pub const SYS_NOTIFICATION_POLL: u64 = 31;
 pub const SYS_NOTIFICATION_DESTROY: u64 = 32;
+pub const SYS_THREAD_RUNTIME: u64 = 33;
+pub const SYS_ENDPOINT_DESTROY: u64 = 34;
 
 #[derive(Clone, Copy)]
 #[repr(C)]
@@ -43,6 +58,9 @@ pub struct TrapFrame {
     pub sp_el0: u64,
     pub elr_el1: u64,
     pub spsr_el1: u64,
+    /// EL0的32个128位FP/SIMD寄存器。Rust/LLVM会用NEON搬运结构体并
+    /// 保存普通局部变量；SVC和1ms抢占都必须完整保存，不能只保护GPR。
+    pub q: [u128; 32],
 }
 
 impl TrapFrame {
@@ -51,8 +69,14 @@ impl TrapFrame {
         sp_el0: 0,
         elr_el1: 0,
         spsr_el1: 0,
+        q: [0; 32],
     };
 }
+
+// 异常向量汇编硬编码这些偏移；结构布局变化必须在编译期失败，不能等到
+// 抢占后才以随机寄存器损坏暴露。
+const _: () = assert!(core::mem::offset_of!(TrapFrame, q) == 272);
+const _: () = assert!(core::mem::size_of::<TrapFrame>() == 784);
 
 /// EL2 boot shim 进入 EL1 外核。
 pub fn enter_el1_kernel(entry_pc: u64, stack_top: u64, boot_info_ptr: u64, next_pc: u64) -> ! {
@@ -80,6 +104,9 @@ pub fn enter_el1_kernel(entry_pc: u64, stack_top: u64, boot_info_ptr: u64, next_
     let new_hcr = (old_hcr | (1u64 << 31))
         & !((1u64 << 27) | (1u64 << 20) | (1u64 << 5) | (1u64 << 4) | (1u64 << 3));
     msr!("hcr_el2", new_hcr);
+    // 允许EL1读取physical counter并使用CNTP_*定时器。时间片抢占由
+    // EL1负责，不能让这些访问继续trap回仅用于启动的EL2 shim。
+    msr!("cnthctl_el2", mrs!("cnthctl_el2") | 0b11);
     uart::puts("[exo] new HCR_EL2=");
     uart::hex(new_hcr);
     uart::puts("\r\n");
@@ -209,6 +236,7 @@ pub extern "C" fn el2_irq_handler() {
 
 #[no_mangle]
 pub extern "C" fn el1_sync_handler_frame(frame: *mut TrapFrame) -> *mut TrapFrame {
+    // vectors.S已经把EL0的x0..x30、q0..q31、SP、返回PC和PSTATE保存进TrapFrame。
     let frame = unsafe { &mut *frame };
     let esr = mrs!("esr_el1");
     let far = mrs!("far_el1");
@@ -226,20 +254,62 @@ pub extern "C" fn el1_sync_handler_frame(frame: *mut TrapFrame) -> *mut TrapFram
     }
     // AArch64 SVC 异常进入 EL1 时，ELR_EL1 已指向 SVC 后的下一条指令。
     // 返回地址不能再次增加，否则会跳过用户态系统调用封装中的一条指令。
+    // SVC编号位于保存的x8，参数位于x0..x4。分发完成后返回的TrapFrame
+    // 会由异常返回汇编恢复，并通过eret回到EL0的SVC下一条指令。
     handle_svc_frame(frame)
 }
 
 #[no_mangle]
 pub extern "C" fn el1_irq_handler_frame(frame: *mut TrapFrame) -> *mut TrapFrame {
+    let frame = unsafe { &mut *frame };
     if let Some(iar_token) = crate::gic::acknowledge() {
         let intid = crate::gic::intid(iar_token);
-        if crate::task::has_binding(intid) {
+        if intid == crate::gic::SGI_RESCHEDULE {
+            // SGI0只表示“本核Ready集合发生变化”。先EOI，再由调度器判断：
+            // 从EL0被打断时可能抢占低优先级线程；从EL1 idle被打断时可直接
+            // 返回新线程保存的TrapFrame，异常返回汇编随后eret进入该EL0线程。
+            crate::gic::write_eoir(iar_token);
+            if frame.spsr_el1 & 0xf == 0 {
+                return crate::scheduler::preempt_if_needed(frame);
+            }
+            return crate::scheduler::priority::activate_if_idle(frame);
+        } else if intid == crate::gic::SGI_TLB_SHOOTDOWN {
+            // 当前映射路径使用体系结构广播TLBI；保留该SGI处理入口，便于
+            // 后续加入按ASID/VA的软件shootdown mailbox。
+            crate::mmu::flush_el1_tlb_local();
+            crate::gic::write_eoir(iar_token);
+        } else if intid == crate::gic::SGI_TASK_STOP {
+            crate::gic::write_eoir(iar_token);
+            // v1只有一个共享VSpace和一个任务。目标核一旦确认SGI2便永久
+            // 停在EL1，发起退出的调用核随后才可以撤销页表并释放线程栈/DMA。
+            crate::arch::aarch64::smp::acknowledge_stop_and_park();
+        } else if crate::scheduler::timer::is_timer_irq(intid) {
+            crate::scheduler::timer::disarm();
+            crate::gic::write_eoir(iar_token);
+            // M[3:0]=0表示异常来自EL0t。所有线程Blocked时Kernel会在
+            // EL1 WFI并短暂打开IRQ；此时若收到旧pending timer，只完成
+            // 中断，绝不能把EL1临时栈帧保存成某个EL0线程上下文。
+            if frame.spsr_el1 & 0xf == 0 {
+                return crate::scheduler::on_timer(frame);
+            }
+        } else if crate::task::has_binding(intid) {
             // IRQHandler 只负责接收并暂时屏蔽该 SPI；真正的设备处理仍在
-            // EL0 线程里完成，ACK 时才写回原始 IAR token。
+            // EL0线程里完成。Notification模式必须在这里先EOI，否则当前
+            // active设备IRQ会阻挡Generic Timer，已唤醒的驱动线程无法获得CPU。
             crate::gic::disable_spi(intid);
-            crate::task::record_iar(iar_token);
             if let Some((notification, badge)) = crate::task::irq_notification(intid) {
+                crate::gic::write_eoir(iar_token);
+                crate::task::record_iar_eoi_done(iar_token);
                 let _ = crate::ipc::notification_signal(notification, badge);
+                // Notification可能唤醒本核更高优先级线程。设备协议仍完全在
+                // EL0处理，Kernel这里只决定是否切换TrapFrame。
+                if frame.spsr_el1 & 0xf == 0 {
+                    return crate::scheduler::preempt_if_needed(frame);
+                }
+                return crate::scheduler::priority::activate_if_idle(frame);
+            } else {
+                // 旧IRQ_WAIT模式仍由SYS_IRQ_ACK延迟EOI。
+                crate::task::record_iar(iar_token);
             }
         } else {
             crate::gic::write_eoir(iar_token);
@@ -269,7 +339,7 @@ fn handle_svc_frame(frame: &mut TrapFrame) -> *mut TrapFrame {
     let arg4 = frame.x[4];
 
     match sysno {
-        SYS_THREAD_CREATE => finish(frame, crate::thread::create(arg0, arg1, arg2)),
+        SYS_THREAD_CREATE => finish(frame, crate::thread::create(arg0, arg1, arg2, arg3, arg4)),
         SYS_THREAD_EXIT => match crate::thread::exit_current(frame) {
             Some(next) => next,
             None => crate::task::exit_current(arg0),
@@ -280,21 +350,46 @@ fn handle_svc_frame(frame: &mut TrapFrame) -> *mut TrapFrame {
         }
         SYS_THREAD_SET_PRIORITY => finish(frame, crate::thread::set_priority(arg0, arg1)),
         SYS_ENDPOINT_CREATE => finish(frame, crate::ipc::endpoint_create()),
-        SYS_ENDPOINT_SEND => ipc_result(frame, crate::ipc::endpoint_send(arg0, frame)),
-        SYS_ENDPOINT_RECV => ipc_result(frame, crate::ipc::endpoint_recv(arg0, frame)),
-        SYS_ENDPOINT_CALL => ipc_result(frame, crate::ipc::endpoint_call(arg0, frame)),
-        SYS_ENDPOINT_REPLY => ipc_result(frame, crate::ipc::endpoint_reply(arg0, frame)),
-        SYS_ENDPOINT_REPLY_RECV => {
-            ipc_result(frame, crate::ipc::endpoint_reply_recv(arg0, arg1, frame))
+        SYS_ENDPOINT_SEND => {
+            let result = crate::ipc::endpoint_send(arg0, frame);
+            ipc_result(frame, result)
         }
+        SYS_ENDPOINT_RECV => {
+            let result = crate::ipc::endpoint_recv(arg0, frame);
+            ipc_result(frame, result)
+        }
+        SYS_ENDPOINT_CALL => {
+            let result = crate::ipc::endpoint_call(arg0, frame);
+            ipc_result(frame, result)
+        }
+        SYS_ENDPOINT_REPLY => {
+            let result = crate::ipc::endpoint_reply(arg0, frame);
+            ipc_result(frame, result)
+        }
+        SYS_ENDPOINT_REPLY_RECV => {
+            let result = crate::ipc::endpoint_reply_recv(arg0, arg1, frame);
+            ipc_result(frame, result)
+        }
+        SYS_ENDPOINT_DESTROY => finish(frame, crate::ipc::endpoint_destroy(arg0)),
         SYS_NOTIFICATION_CREATE => finish(frame, crate::ipc::notification_create()),
-        SYS_NOTIFICATION_SIGNAL => finish(frame, crate::ipc::notification_signal(arg0, arg1)),
+        SYS_NOTIFICATION_SIGNAL => {
+            let result = crate::ipc::notification_signal(arg0, arg1);
+            frame.x[0] = result;
+            if result == 0 {
+                // Signal可能让本核更高优先级线程从Blocked变为Ready；静态
+                // 优先级语义要求在返回发送者之前立即检查抢占。
+                crate::scheduler::preempt_if_needed(frame)
+            } else {
+                frame
+            }
+        }
         SYS_NOTIFICATION_WAIT => {
             let result = crate::ipc::notification_wait(arg0, frame);
             ipc_result(frame, result)
         }
         SYS_NOTIFICATION_POLL => finish(frame, crate::ipc::notification_poll(arg0)),
         SYS_NOTIFICATION_DESTROY => finish(frame, crate::ipc::notification_destroy(arg0)),
+        SYS_THREAD_RUNTIME => finish(frame, crate::thread::runtime(arg0)),
         _ => {
             let result = handle_svc(frame.elr_el1, sysno, arg0, arg1, arg2, arg3, arg4);
             finish(frame, result)
@@ -310,9 +405,11 @@ fn handle_svc(elr: u64, sysno: u64, arg0: u64, arg1: u64, arg2: u64, arg3: u64, 
             print_user_str(arg0, arg1);
             0
         }
+        // 驱动传入的PA、VA、size和INTID全部不可信，具体函数必须再次
+        // 对照Kernel保存的task grant和对象owner进行检查。
         SYS_MAP_MMIO => sys_map_mmio(arg0, arg1, arg2),
         SYS_EXIT => crate::task::exit_current(arg0),
-        SYS_IRQ_BIND => sys_irq_bind(arg0, arg1, arg2),
+        SYS_IRQ_BIND => sys_irq_bind(arg0, arg1, arg2, arg3),
         SYS_IRQ_WAIT => sys_irq_wait(),
         SYS_IRQ_ACK => sys_irq_ack(arg0),
         SYS_IRQ_UNBIND => sys_irq_unbind(arg0),
@@ -335,6 +432,7 @@ fn handle_svc(elr: u64, sysno: u64, arg0: u64, arg1: u64, arg2: u64, arg3: u64, 
 }
 
 fn sys_map_mmio(paddr: u64, size: u64, user_va: u64) -> u64 {
+    // 物理地址和目标VA必须页对齐；size随后向上取整到完整页。
     if (paddr & 0xfff) != 0 || (user_va & 0xfff) != 0 || size == 0 {
         return 1;
     }
@@ -355,6 +453,8 @@ fn sys_map_mmio(paddr: u64, size: u64, user_va: u64) -> u64 {
         return 2;
     }
 
+    // 取得当前单VSpace的stage-1根页表。EL0只给出“想映射到哪里”，
+    // 无法提供或修改页表本身。
     let root = crate::mmu::active_table();
     if root == 0 {
         return 3;
@@ -364,10 +464,15 @@ fn sys_map_mmio(paddr: u64, size: u64, user_va: u64) -> u64 {
     }
 
     let pages = size_rounded / 4096;
+    // 防止覆盖ELF、heap、stack、BootInfo、DMA arena或已有设备映射。
     if !crate::task::range_available(user_va, pages) {
         return 5;
     }
+
+    // MMU_USER_DEV设置EL0可访问、不可执行和Device-nGnRE属性。之后EL0的
+    // volatile load/store经过页表翻译，直接到达物理设备寄存器。
     crate::mmu::map(root, user_va, paddr, crate::mmu::MMU_USER_DEV, pages);
+    // 页表改变后使旧TLB缓存失效，再把映射登记到task资源表供unmap/exit回收。
     crate::mmu::flush_el1_tlb();
     crate::task::record_mmio(user_va, pages);
 
@@ -401,6 +506,7 @@ fn sys_unmap_mmio(user_va: u64, size: u64) -> u64 {
 }
 
 fn sys_dma_alloc(size: u64, alignment: u64, user_va: u64) -> u64 {
+    // DMA接口比普通Frame多出“连续、设备可见、指定对齐”的要求。
     if size == 0
         || alignment == 0
         || !alignment.is_power_of_two()
@@ -417,14 +523,17 @@ fn sys_dma_alloc(size: u64, alignment: u64, user_va: u64) -> u64 {
         return u64::MAX;
     }
     let align_pages = ((alignment + 4095) / 4096).max(1);
+    // 物理分配器返回连续PA。EL0不能指定PA，因此不能借DMA接口映射任意内存。
     let Some(pa) = crate::mem::alloc_pages_aligned(pages, align_pages.next_power_of_two()) else {
         return u64::MAX;
     };
+    // 清零避免把上一个所有者的数据泄露给当前libOS或设备。
     unsafe { core::ptr::write_bytes(pa as *mut u8, 0, size_rounded as usize) };
     if !crate::task::record_dma(user_va, pa, pages) {
         crate::mem::free_pages(pa, pages);
         return u64::MAX;
     }
+    // CPU端映射为Normal Non-cacheable；xHCI端在v1无IOMMU时直接使用PA。
     crate::mmu::map(
         crate::mmu::active_table(),
         user_va,
@@ -433,6 +542,7 @@ fn sys_dma_alloc(size: u64, alignment: u64, user_va: u64) -> u64 {
         pages,
     );
     crate::mmu::flush_el1_tlb();
+    // 返回给EL0的是DMA address，不是允许任意物理访问的FrameHandle。
     pa
 }
 
@@ -457,11 +567,19 @@ fn sys_dma_free(user_va: u64, size: u64) -> u64 {
 
 // ── IRQ syscalls ──
 
-fn sys_irq_bind(intid: u64, notification: u64, badge: u64) -> u64 {
+fn sys_irq_bind(intid: u64, notification: u64, badge: u64, target_cpu: u64) -> u64 {
     if intid > u32::MAX as u64 {
         return 1;
     }
     let intid = intid as u32;
+    let target_cpu = if target_cpu == exo_abi::IRQ_TARGET_CURRENT {
+        crate::arch::aarch64::cpu::id()
+    } else {
+        target_cpu as usize
+    };
+    if target_cpu >= crate::arch::aarch64::smp::cpu_count() {
+        return exo_abi::SYS_ERR_INVALID;
+    }
     if intid < 32 {
         // 只允许 SPI (INTID >= 32)
         uart::puts("\r\n[exo] SYS_IRQ_BIND rejected: INTID must be >= 32 (got ");
@@ -469,21 +587,26 @@ fn sys_irq_bind(intid: u64, notification: u64, badge: u64) -> u64 {
         uart::puts(")\r\n");
         return 1;
     }
+    // INTID必须来自EL1根据DTB/PCI INTx建立的当前任务IRQ grant。
+    // UserBootInfo中看见一个数字并不等于可以绑定任意GIC中断。
     let Some(flags) = crate::task::irq_flags(intid) else {
         uart::puts("\r\n[exo] SYS_IRQ_BIND rejected: IRQ not granted to task\r\n");
         return 2;
     };
+    // Handle中包含slot+generation；notification_valid同时校验对象存在、
+    // generation未过期且owner是当前任务。
     if notification != 0 && (!crate::ipc::notification_valid(notification) || badge == 0) {
         return exo_abi::SYS_ERR_INVALID;
     }
-    if !crate::task::bind_irq(intid, notification, badge) {
+    if !crate::task::bind_irq(intid, notification, badge, target_cpu) {
         uart::puts("\r\n[exo] SYS_IRQ_BIND failed: already bound or full\r\n");
         return 3;
     }
 
     // GIC DT binding: 1/2 表示边沿，4/8 表示电平；缺省按电平处理。
     let trigger_level = flags & 0x3 == 0;
-    crate::gic::configure_spi(intid, trigger_level);
+    // GIC MMIO永远留在EL1。驱动只能请求绑定，不能直接改Distributor。
+    crate::gic::configure_spi(intid, trigger_level, target_cpu);
     if notification != 0 {
         // Notification 绑定不经过旧的 SYS_IRQ_WAIT，因此绑定成功后直接
         // 允许该 SPI 进入 EL1 IRQ handler；handler 会在 ACK 前暂时禁用它。
@@ -492,6 +615,8 @@ fn sys_irq_bind(intid: u64, notification: u64, badge: u64) -> u64 {
 
     uart::puts("\r\n[exo] SYS_IRQ_BIND intid=");
     uart::hex(intid as u64);
+    uart::puts(" target_cpu=");
+    uart::hex(target_cpu as u64);
     uart::puts("\r\n");
     0
 }
@@ -581,6 +706,9 @@ fn print_user_str(ptr: u64, len: u64) {
 }
 
 fn print_el1_exception(esr: u64, elr: u64, far: u64, ec: u64) {
+    uart::puts("  CPU=");
+    uart::hex(crate::arch::aarch64::cpu::id() as u64);
+    uart::puts("\r\n");
     uart::puts("  ESR_EL1=");
     uart::hex(esr);
     uart::puts(" EC=");

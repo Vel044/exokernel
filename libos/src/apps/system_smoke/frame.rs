@@ -1,14 +1,36 @@
-//! QEMU上的Frame/VSpace验收程序。
+//! 综合实验中的Frame/VSpace子测试。
+//!
+//! 本文件检查普通内存资源接口及共享VSpace的跨核TLB失效，不操作设备。
+//! 成功后返回统一runner继续执行IPC、静态优先级和机器人并发测试。
 
 use crate::memory::{Frame, Rights};
+use core::sync::atomic::{AtomicU64, Ordering};
 
 const TEST_VA: u64 = exo_abi::FRAME_ARENA_BASE;
 const SECOND_VA: u64 = TEST_VA + 0x20_000;
+const SHOOTDOWN_VA: u64 = TEST_VA + 0x40_000;
+const OLD_VALUE: u64 = 0x1111_2222_3333_4444;
+const NEW_VALUE: u64 = 0xaaaa_bbbb_cccc_dddd;
+
+static SHOOTDOWN_PHASE: AtomicU64 = AtomicU64::new(0);
+static REMOTE_FIRST: AtomicU64 = AtomicU64::new(0);
+static REMOTE_SECOND: AtomicU64 = AtomicU64::new(0);
 
 fn expect_error<T>(result: Result<T, u64>, wanted: u64, stage: u64) -> Result<(), u64> {
     match result {
         Err(error) if error == wanted => Ok(()),
-        _ => Err(stage),
+        Err(error) => {
+            crate::runtime::puts(b"[libos] Frame error mismatch wanted=");
+            crate::runtime::hex(wanted);
+            crate::runtime::puts(b" actual=");
+            crate::runtime::hex(error);
+            crate::runtime::puts(b"\r\n");
+            Err(stage)
+        }
+        Ok(_) => {
+            crate::runtime::puts(b"[libos] Frame expected rejection but syscall succeeded\r\n");
+            Err(stage)
+        }
     }
 }
 
@@ -176,7 +198,9 @@ fn smoke() -> Result<(), u64> {
     )?;
     expect_error(
         crate::runtime::frame_free(exo_abi::FrameHandle(0x1234_5678)),
-        exo_abi::SYS_ERR_NOT_FOUND,
+        // 该伪造值没有高32位generation，不是“曾经存在但已过期”的
+        // Handle，而是连编码格式都不合法，因此应返回INVALID。
+        exo_abi::SYS_ERR_INVALID,
         19,
     )?;
 
@@ -189,7 +213,100 @@ fn smoke() -> Result<(), u64> {
     Ok(())
 }
 
-#[cfg(not(feature = "frame-fault-test"))]
+/// CPU1先访问旧映射，把`SHOOTDOWN_VA`的地址翻译装入本地TLB。
+///
+/// phase=2由CPU0在同一VA换成不同物理Frame后发布；第二次读取必须经过
+/// 新页表翻译得到NEW_VALUE。这里使用volatile，防止编译器复用第一次读取值。
+extern "C" fn shootdown_reader(_arg: u64, _thread: u64, _ipc: u64) -> ! {
+    let actual_cpu = crate::thread::current_cpu();
+    if actual_cpu != 1 {
+        REMOTE_FIRST.store(u64::MAX, Ordering::Release);
+        SHOOTDOWN_PHASE.store(3, Ordering::Release);
+        crate::thread::exit(1);
+    }
+
+    let pointer = SHOOTDOWN_VA as *const u64;
+    REMOTE_FIRST.store(unsafe { pointer.read_volatile() }, Ordering::Release);
+    SHOOTDOWN_PHASE.store(1, Ordering::Release);
+    while SHOOTDOWN_PHASE.load(Ordering::Acquire) < 2 {
+        core::hint::spin_loop();
+    }
+    REMOTE_SECOND.store(unsafe { pointer.read_volatile() }, Ordering::Release);
+    SHOOTDOWN_PHASE.store(3, Ordering::Release);
+    crate::thread::exit(0)
+}
+
+fn wait_phase(wanted: u64, stage: u64) -> Result<(), u64> {
+    let deadline = crate::runtime::counter()
+        .wrapping_add(crate::runtime::counter_frequency().saturating_div(2));
+    while SHOOTDOWN_PHASE.load(Ordering::Acquire) < wanted
+        && (crate::runtime::counter().wrapping_sub(deadline) as i64) < 0
+    {
+        core::hint::spin_loop();
+    }
+    if SHOOTDOWN_PHASE.load(Ordering::Acquire) < wanted {
+        Err(stage)
+    } else {
+        Ok(())
+    }
+}
+
+fn smp_tlb_shootdown() -> Result<(), u64> {
+    SHOOTDOWN_PHASE.store(0, Ordering::Release);
+    REMOTE_FIRST.store(0, Ordering::Release);
+    REMOTE_SECOND.store(0, Ordering::Release);
+
+    let old_frame = Frame::allocate(1, 1).map_err(|_| 33u64)?;
+    let old_mapping = old_frame
+        .map(0, 1, SHOOTDOWN_VA, Rights::READ_WRITE)
+        .map_err(|_| 34u64)?;
+    unsafe { (old_mapping.as_ptr() as *mut u64).write_volatile(OLD_VALUE) };
+
+    let reader = crate::thread::Thread::spawn(
+        shootdown_reader,
+        0,
+        crate::thread::ThreadConfig::new(1, 45, 45),
+    )
+    .map_err(|_| 35u64)?;
+    wait_phase(1, 36)?;
+    if REMOTE_FIRST.load(Ordering::Acquire) != OLD_VALUE {
+        return Err(37);
+    }
+
+    // 只撤销旧映射，不释放old_frame，保证下面new_frame得到不同PA。
+    // FRAME_UNMAP和FRAME_MAP都会执行Inner Shareable TLBI；CPU1不能继续
+    // 使用第一次读取时缓存的VA到旧PA翻译。
+    old_mapping.unmap().map_err(|_| 38u64)?;
+    let new_frame = Frame::allocate(1, 1).map_err(|_| 39u64)?;
+    let new_mapping = new_frame
+        .map(0, 1, SHOOTDOWN_VA, Rights::READ_WRITE)
+        .map_err(|_| 40u64)?;
+    unsafe { (new_mapping.as_ptr() as *mut u64).write_volatile(NEW_VALUE) };
+    SHOOTDOWN_PHASE.store(2, Ordering::Release);
+    wait_phase(3, 41)?;
+    if REMOTE_SECOND.load(Ordering::Acquire) != NEW_VALUE {
+        return Err(42);
+    }
+
+    // 等待线程对象进入Exited并被Kernel回收，避免后续测试过早复用线程slot。
+    let deadline = crate::runtime::counter()
+        .wrapping_add(crate::runtime::counter_frequency().saturating_div(2));
+    while reader.runtime_ticks() != Err(exo_abi::SYS_ERR_NOT_FOUND)
+        && (crate::runtime::counter().wrapping_sub(deadline) as i64) < 0
+    {
+        core::hint::spin_loop();
+    }
+    if reader.runtime_ticks() != Err(exo_abi::SYS_ERR_NOT_FOUND) {
+        return Err(43);
+    }
+
+    new_mapping.unmap().map_err(|_| 44u64)?;
+    new_frame.free().map_err(|_| 45u64)?;
+    old_frame.free().map_err(|_| 46u64)?;
+    crate::runtime::puts(b"[libos] SMP TLB shootdown passed\r\n");
+    Ok(())
+}
+
 fn leave_resources_for_exit_cleanup() -> Result<(), u64> {
     let frame = Frame::allocate(3, 1).map_err(|_| 26u64)?;
     let mapping = frame
@@ -204,7 +321,7 @@ fn leave_resources_for_exit_cleanup() -> Result<(), u64> {
     Ok(())
 }
 
-pub fn run() -> ! {
+pub fn run() {
     if let Err(stage) = smoke() {
         crate::runtime::puts(b"[libos] Frame smoke failed stage=");
         crate::runtime::hex(stage);
@@ -212,28 +329,17 @@ pub fn run() -> ! {
         crate::runtime::exit(0x400 + stage);
     }
 
-    #[cfg(feature = "frame-fault-test")]
-    {
-        let frame = Frame::allocate(1, 1).expect("fault-test frame");
-        let mapping = frame
-            .map(0, 1, TEST_VA, Rights::READ_WRITE)
-            .expect("fault-test mapping");
-        let stale_ptr = mapping.as_ptr();
-        unsafe { stale_ptr.write_volatile(0x33) };
-        mapping.unmap().expect("fault-test unmap");
-        crate::runtime::puts(b"[libos] expecting Data Abort at Frame VA\r\n");
-        unsafe { core::ptr::read_volatile(stale_ptr) };
-        crate::runtime::exit(0x4ff);
+    if let Err(stage) = smp_tlb_shootdown() {
+        crate::runtime::puts(b"[libos] SMP TLB shootdown failed stage=");
+        crate::runtime::hex(stage);
+        crate::runtime::puts(b"\r\n");
+        crate::runtime::exit(0x400 + stage);
     }
 
-    #[cfg(not(feature = "frame-fault-test"))]
-    {
-        if let Err(stage) = leave_resources_for_exit_cleanup() {
-            crate::runtime::puts(b"[libos] Frame exit-cleanup setup failed stage=");
-            crate::runtime::hex(stage);
-            crate::runtime::puts(b"\r\n");
-            crate::runtime::exit(0x400 + stage);
-        }
-        crate::runtime::exit(0)
+    if let Err(stage) = leave_resources_for_exit_cleanup() {
+        crate::runtime::puts(b"[libos] Frame exit-cleanup setup failed stage=");
+        crate::runtime::hex(stage);
+        crate::runtime::puts(b"\r\n");
+        crate::runtime::exit(0x400 + stage);
     }
 }

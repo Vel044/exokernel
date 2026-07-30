@@ -33,6 +33,17 @@ impl Endpoint {
         self.handle
     }
 
+    /// 销毁当前任务拥有的空闲Endpoint。
+    ///
+    /// Kernel会拒绝仍有Sender、Receiver或未完成Call/Reply的对象；成功后
+    /// generation递增，因此其他位置保存的同一数值Handle不能再次使用。
+    pub fn destroy(&self) -> Result<(), u64> {
+        match crate::runtime::svc(exo_abi::SYS_ENDPOINT_DESTROY, self.handle.0, 0, 0) {
+            0 => Ok(()),
+            error => Err(error),
+        }
+    }
+
     pub fn send(&self) -> Result<(), u64> {
         match crate::runtime::svc(exo_abi::SYS_ENDPOINT_SEND, self.handle.0, 0, 0) {
             0 => Ok(()),

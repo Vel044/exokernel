@@ -5,6 +5,20 @@
 
 use crate::dtb::{IrqSpec, RegRange};
 use exo_abi::PciHostInfo;
+use fdt::Fdt;
+
+#[derive(Clone, Copy)]
+pub struct CpuTopology {
+    pub count: usize,
+    pub mpidrs: [u64; exo_abi::MAX_CPUS],
+}
+
+impl CpuTopology {
+    const EMPTY: Self = Self {
+        count: 0,
+        mpidrs: [0; exo_abi::MAX_CPUS],
+    };
+}
 
 pub struct PlatformResources {
     pub uart: RegRange,
@@ -13,6 +27,8 @@ pub struct PlatformResources {
     pub gicc_pa: u64,
     pub pci: PciHostInfo,
     pub xhci: Option<(RegRange, IrqSpec)>,
+    pub timer_irq: IrqSpec,
+    pub cpus: CpuTopology,
 }
 
 pub fn discover(dtb_pa: u64) -> Option<PlatformResources> {
@@ -25,5 +41,64 @@ pub fn discover(dtb_pa: u64) -> Option<PlatformResources> {
         gicc_pa,
         pci: crate::pci::from_dtb(dtb_pa).unwrap_or_default(),
         xhci: crate::dtb::find_rp1_xhci(dtb_pa),
+        timer_irq: crate::dtb::find_nonsecure_physical_timer_irq(dtb_pa)?,
+        cpus: discover_cpus(dtb_pa)?,
     })
+}
+
+/// QEMU virt和Pi5都通过PSCI SMC启动辅助核。这里只解析CPU硬件ID，
+/// PSCI调用和辅助核入口属于AArch64架构层，不放进DTB解析器。
+fn discover_cpus(dtb_pa: u64) -> Option<CpuTopology> {
+    let tree = unsafe { Fdt::from_ptr(dtb_pa as *const u8) }.ok()?;
+    let psci = tree.find_node("/psci")?;
+    if psci.property("method")?.value != b"smc\0" {
+        return None;
+    }
+    let cpus = tree.find_node("/cpus")?;
+    let address_cells = cpus
+        .property("#address-cells")
+        .and_then(|property| read_be_u32(property.value))
+        .unwrap_or(1) as usize;
+    if address_cells == 0 || address_cells > 2 {
+        return None;
+    }
+
+    let mut topology = CpuTopology::EMPTY;
+    for node in cpus.children() {
+        if !node.name.starts_with("cpu@") {
+            continue;
+        }
+        if let Some(status) = node.property("status") {
+            if status.value != b"okay\0" && status.value != b"ok\0" {
+                continue;
+            }
+        }
+        if let Some(method) = node.property("enable-method") {
+            if method.value != b"psci\0" {
+                return None;
+            }
+        }
+        let reg = node.property("reg")?.value;
+        if reg.len() < address_cells * 4 || topology.count == exo_abi::MAX_CPUS {
+            return None;
+        }
+        let mut mpidr = 0u64;
+        let mut cell = 0usize;
+        while cell < address_cells {
+            let start = cell * 4;
+            mpidr = (mpidr << 32) | read_be_u32(&reg[start..start + 4])? as u64;
+            cell += 1;
+        }
+        topology.mpidrs[topology.count] = mpidr;
+        topology.count += 1;
+    }
+    if topology.count == exo_abi::MAX_CPUS {
+        Some(topology)
+    } else {
+        None
+    }
+}
+
+fn read_be_u32(bytes: &[u8]) -> Option<u32> {
+    Some(u32::from_be_bytes(bytes.get(..4)?.try_into().ok()?))
 }

@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="960" viewBox="0 0 1400 960">
+  <title>四核静态优先级抢占调度</title>
+  <desc>libOS配置线程CPU与优先级，Kernel执行每核优先级队列、抢占和同级轮转。</desc>
+  <style>
+    .bg { fill:#f8fafc; }
+    .title { font:700 30px sans-serif; fill:#172033; }
+    .subtitle { font:16px sans-serif; fill:#59677a; }
+    .heading { font:700 21px sans-serif; fill:#172033; }
+    .card-title { font:700 17px sans-serif; fill:#172033; }
+    .body { font:15px sans-serif; fill:#334155; }
+    .mono { font:14px ui-monospace,monospace; fill:#263547; }
+    .libos { fill:#fff0d8; stroke:#c98932; stroke-width:2; }
+    .kernel { fill:#deebff; stroke:#4e7fb5; stroke-width:2; }
+    .queue { fill:#e7f5e9; stroke:#4f9160; stroke-width:2; }
+    .outer { fill:none; stroke:#293548; stroke-width:3; }
+    .arrow { stroke:#516174; stroke-width:2.5; fill:none; marker-end:url(#arrow); }
+  </style>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L9,3 z" fill="#516174"/>
+    </marker>
+  </defs>
+  <rect class="bg" width="1400" height="960"/>
+  <text x="55" y="58" class="title">四核静态优先级抢占调度</text>
+  <text x="55" y="88" class="subtitle">libOS决定线程布局；Kernel验证MCP并保证高优先级Ready线程立即运行</text>
+
+  <rect x="45" y="120" width="1310" height="180" rx="8" class="outer"/>
+  <text x="70" y="158" class="heading">libOS：创建机器人线程并选择策略</text>
+  <rect x="75" y="180" width="285" height="85" rx="7" class="libos"/>
+  <text x="95" y="210" class="card-title">Main</text>
+  <text x="95" y="238" class="mono">CPU0 / priority 32</text>
+  <rect x="385" y="180" width="285" height="85" rx="7" class="libos"/>
+  <text x="405" y="210" class="card-title">Control</text>
+  <text x="405" y="238" class="mono">CPU1 / priority 56</text>
+  <rect x="695" y="180" width="285" height="85" rx="7" class="libos"/>
+  <text x="715" y="210" class="card-title">USB / xHCI</text>
+  <text x="715" y="238" class="mono">CPU2 / priority 48</text>
+  <rect x="1005" y="180" width="305" height="85" rx="7" class="libos"/>
+  <text x="1025" y="210" class="card-title">Inference</text>
+  <text x="1025" y="238" class="mono">CPU3 / priority 16</text>
+
+  <path d="M700 300 L700 345" class="arrow"/>
+  <rect x="150" y="345" width="1100" height="130" rx="8" class="kernel"/>
+  <text x="180" y="380" class="heading">Thread系统调用</text>
+  <text x="180" y="413" class="mono">THREAD_CREATE(entry, arg, cpu, priority, max_control_priority) → ThreadHandle</text>
+  <text x="180" y="442" class="mono">THREAD_SET_PRIORITY / THREAD_YIELD / THREAD_EXIT / THREAD_RUNTIME</text>
+  <text x="180" y="466" class="body">错误CPU、越界优先级和超过调用线程MCP的控制请求由Kernel拒绝</text>
+
+  <path d="M700 475 L700 520" class="arrow"/>
+  <rect x="45" y="520" width="1310" height="245" rx="8" class="outer"/>
+  <text x="70" y="558" class="heading">Kernel：每核64级Ready Queue</text>
+
+  <rect x="75" y="585" width="285" height="135" rx="7" class="queue"/>
+  <text x="95" y="615" class="card-title">CPU0</text>
+  <text x="95" y="643" class="mono">P63 ... P32:[Main] ... P0</text>
+  <text x="95" y="672" class="body">当前：Main</text>
+  <text x="95" y="697" class="body">无任务时进入WFI</text>
+
+  <rect x="385" y="585" width="285" height="135" rx="7" class="queue"/>
+  <text x="405" y="615" class="card-title">CPU1</text>
+  <text x="405" y="643" class="mono">P63 ... P56:[Control] ... P0</text>
+  <text x="405" y="672" class="body">当前：Control</text>
+  <text x="405" y="697" class="body">控制任务最高默认优先级</text>
+
+  <rect x="695" y="585" width="285" height="135" rx="7" class="queue"/>
+  <text x="715" y="615" class="card-title">CPU2</text>
+  <text x="715" y="643" class="mono">P63 ... P48:[USB] ... P0</text>
+  <text x="715" y="672" class="body">xHCI IRQ直接投递本核</text>
+  <text x="715" y="697" class="body">Notification唤醒后立即调度</text>
+
+  <rect x="1005" y="585" width="305" height="135" rx="7" class="queue"/>
+  <text x="1025" y="615" class="card-title">CPU3</text>
+  <text x="1025" y="643" class="mono">P63 ... P16:[Inference] ... P0</text>
+  <text x="1025" y="672" class="body">当前：Inference</text>
+  <text x="1025" y="697" class="body">低优先级后台计算</text>
+
+  <rect x="45" y="800" width="410" height="120" rx="8" class="kernel"/>
+  <text x="70" y="833" class="card-title">高优先级抢占</text>
+  <text x="70" y="862" class="body">P56 Ready时立即抢占同核P32</text>
+  <text x="70" y="888" class="body">跨核唤醒通过SGI0请求重调度</text>
+
+  <rect x="495" y="800" width="410" height="120" rx="8" class="kernel"/>
+  <text x="520" y="833" class="card-title">同优先级轮转</text>
+  <text x="520" y="862" class="body">同级多个Ready线程每1ms移到FIFO队尾</text>
+  <text x="520" y="888" class="body">只有一个Ready线程时继续运行</text>
+
+  <rect x="945" y="800" width="410" height="120" rx="8" class="kernel"/>
+  <text x="970" y="833" class="card-title">Endpoint优先级继承</text>
+  <text x="970" y="862" class="body">Call把Caller有效优先级传给Server</text>
+  <text x="970" y="888" class="body">Reply、取消或退出后恢复</text>
+</svg>

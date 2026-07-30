@@ -321,6 +321,91 @@ pub fn find_uart_intid(dtb_paddr: u64) -> Option<u32> {
     find_uart_irq(dtb_paddr).map(|irq| irq.intid)
 }
 
+/// 找到 ARM Generic Timer 的 non-secure physical timer PPI。
+///
+/// `arm,armv8-timer` 的 interrupts 顺序由 binding 固定为 secure physical、
+/// non-secure physical、virtual、hypervisor。EL1 使用第二项，对应
+/// CNTP_* 寄存器；QEMU virt 和 Pi5 上通常都是 GIC INTID 30。
+pub fn find_nonsecure_physical_timer_irq(dtb_paddr: u64) -> Option<IrqSpec> {
+    if dtb_paddr == 0 {
+        return None;
+    }
+    let ptr = dtb_paddr as *const u32;
+    if unsafe { read_be(ptr) } != FDT_MAGIC {
+        return None;
+    }
+    let off_struct = unsafe { read_be(ptr.add(2)) };
+    let off_strings = unsafe { read_be(ptr.add(3)) };
+    let sp = (dtb_paddr + off_struct as u64) as *const u32;
+    let ss = (dtb_paddr + off_strings as u64) as *const u8;
+    let mut compatible = [false; MAX_DEPTH];
+    let mut disabled = [false; MAX_DEPTH];
+    let mut irq = [None; MAX_DEPTH];
+    let mut depth = 0usize;
+    let mut i = 0usize;
+
+    loop {
+        let token = unsafe { read_be(sp.add(i)) };
+        match token {
+            FDT_BEGIN_NODE => {
+                i += 1;
+                let name = unsafe { sp.add(i) as *const u8 };
+                let mut len = 0usize;
+                while unsafe { *name.add(len) } != 0 {
+                    len += 1;
+                }
+                if depth >= MAX_DEPTH {
+                    return None;
+                }
+                compatible[depth] = false;
+                disabled[depth] = false;
+                irq[depth] = None;
+                depth += 1;
+                i += (len + 4) / 4;
+            }
+            FDT_END_NODE => {
+                if depth == 0 {
+                    return None;
+                }
+                let node = depth - 1;
+                if compatible[node] && !disabled[node] {
+                    if let Some(spec) = irq[node] {
+                        return Some(spec);
+                    }
+                }
+                depth -= 1;
+                i += 1;
+            }
+            FDT_PROP => {
+                if depth == 0 {
+                    return None;
+                }
+                i += 1;
+                let len = unsafe { read_be(sp.add(i)) };
+                i += 1;
+                let nameoff = unsafe { read_be(sp.add(i)) };
+                i += 1;
+                let name = unsafe { ss.add(nameoff as usize) };
+                let node = depth - 1;
+                if cstr_eq_compatible(name) {
+                    compatible[node] =
+                        prop_contains_armv8_timer(unsafe { sp.add(i) } as *const u8, len as usize);
+                } else if cstr_eq_status(name) {
+                    disabled[node] =
+                        prop_is_disabled(unsafe { sp.add(i) } as *const u8, len as usize);
+                } else if cstr_eq_interrupts(name) && len >= 24 {
+                    // 跳过第一组三个cell，解析第二组non-secure physical PPI。
+                    irq[node] = parse_gic_interrupts(sp, i + 3, len - 12);
+                }
+                i += ((len + 3) / 4) as usize;
+            }
+            FDT_NOP => i += 1,
+            FDT_END => return None,
+            _ => return None,
+        }
+    }
+}
+
 /// 查找 Pi5 RP1 下的 DWC3/xHCI 控制器。
 ///
 /// RP1 的 USB 节点使用两 cell 的本地中断号，而不是 GIC 的三 cell
@@ -1375,6 +1460,31 @@ fn cstr_eq_interrupts(ptr: *const u8) -> bool {
             && *ptr.add(9) == b's'
             && *ptr.add(10) == 0
     }
+}
+
+fn prop_contains_armv8_timer(ptr: *const u8, len: usize) -> bool {
+    prop_contains_string(ptr, len, b"arm,armv8-timer")
+}
+
+fn prop_contains_string(ptr: *const u8, len: usize, expected: &[u8]) -> bool {
+    let mut start = 0usize;
+    while start < len {
+        let mut end = start;
+        while end < len && unsafe { *ptr.add(end) } != 0 {
+            end += 1;
+        }
+        if end - start == expected.len() {
+            let mut index = 0usize;
+            while index < expected.len() && unsafe { *ptr.add(start + index) } == expected[index] {
+                index += 1;
+            }
+            if index == expected.len() {
+                return true;
+            }
+        }
+        start = end.saturating_add(1);
+    }
+    false
 }
 
 /// 解析 GIC 标准 3-cell interrupts 属性: <type hw_num trigger>

@@ -85,26 +85,39 @@
   <rect x="232" y="485" width="8" height="570" fill="#37474f"/>
   <text x="85" y="535" class="layer-title">EL1 Kernel</text>
   <text x="85" y="564" style="font-size:14px;fill:#dbe3e6">功能模块</text>
-  <text x="85" y="607" style="font-size:14px;fill:#ffffff">• 启动与加载</text>
+  <text x="85" y="607" style="font-size:14px;fill:#ffffff">• 四核启动</text>
   <text x="85" y="634" style="font-size:14px;fill:#ffffff">• 设备发现</text>
-  <text x="85" y="661" style="font-size:14px;fill:#ffffff">• 资源保护</text>
+  <text x="85" y="661" style="font-size:14px;fill:#ffffff">• 内存保护</text>
+  <text x="85" y="688" style="font-size:14px;fill:#ffffff">• 中断与 SGI</text>
+  <text x="85" y="715" style="font-size:14px;fill:#ffffff">• 调度与 IPC</text>
 
   <text x="275" y="528" class="section-title" style="fill:#29434e">功能模块</text>
 
-  <rect x="275" y="560" width="330" height="112" rx="7" fill="#ffffff" stroke="#90a4ae"/>
-  <text x="295" y="583" class="card-title">启动与 ELF Loader</text>
-  <text x="295" y="609" class="body">UEFI / EL2 → EL1 → EL0</text>
-  <text x="295" y="632" class="body">PT_LOAD / BSS / 页权限</text>
+  <rect x="275" y="560" width="330" height="82" rx="7" fill="#ffffff" stroke="#90a4ae"/>
+  <text x="295" y="583" class="card-title">启动、ELF 与四核 SMP</text>
+  <text x="295" y="607" class="body">UEFI/EL2 → EL1；加载EL0 ELF</text>
+  <text x="295" y="628" class="body">DTB CPU节点 → PSCI CPU_ON</text>
 
-  <rect x="275" y="698" width="330" height="112" rx="7" fill="#ffffff" stroke="#90a4ae"/>
-  <text x="295" y="729" class="card-title">DTB 与设备发现</text>
-  <text x="295" y="755" class="body">PL011 / GICv2 / PCI host</text>
-  <text x="295" y="778" class="body">RP1 xHCI / UserBootInfo</text>
+  <rect x="275" y="652" width="330" height="82" rx="7" fill="#ffffff" stroke="#90a4ae"/>
+  <text x="295" y="675" class="card-title">DTB 与设备发现</text>
+  <text x="295" y="699" class="body">PL011 / GICv2 / PCI / RP1 xHCI</text>
+  <text x="295" y="720" class="body">生成资源grant与UserBootInfo</text>
 
-  <rect x="275" y="836" width="330" height="112" rx="7" fill="#ffffff" stroke="#90a4ae"/>
-  <text x="295" y="867" class="card-title">资源授权与回收</text>
-  <text x="295" y="893" class="body">MMIO / IRQ grant / ownership</text>
-  <text x="295" y="916" class="body">退出时撤销映射并回收</text>
+  <rect x="275" y="744" width="330" height="82" rx="7" fill="#ffffff" stroke="#90a4ae"/>
+  <text x="295" y="767" class="card-title">内存、VSpace 与资源保护</text>
+  <text x="295" y="791" class="body">物理页 / Frame / 页表 / W^X</text>
+  <text x="295" y="812" class="body">MMIO / DMA所有权、映射与回收</text>
+
+  <rect x="275" y="836" width="330" height="82" rx="7" fill="#ffffff" stroke="#90a4ae"/>
+  <text x="295" y="859" class="card-title">GICv2、IRQ 与核间 SGI</text>
+  <text x="295" y="883" class="body">IRQ路由、Notification、ACK / EOI</text>
+  <text x="295" y="904" class="body">SGI0重调度 / SGI1 TLBI / SGI2停止</text>
+
+  <rect x="275" y="928" width="330" height="102" rx="7" fill="#ffffff" stroke="#90a4ae"/>
+  <text x="295" y="951" class="card-title">Thread、Scheduler 与 IPC</text>
+  <text x="295" y="975" class="body">每核64级队列；静态优先级抢占</text>
+  <text x="295" y="996" class="body">同优先级1ms FIFO；固定CPU亲和性</text>
+  <text x="295" y="1017" class="body">Endpoint优先级继承 / Notification</text>
 
   <!-- Right: kernel syscall interface -->
   <path d="M650 493 H1437 Q1445 493 1445 501 V1039 Q1445 1047 1437 1047 H650 Z" fill="#fff2d8"/>
@@ -133,33 +146,36 @@
   <text x="1213" y="672" class="mono">DMA_ALLOC 分配设备可见页</text>
   <text x="1213" y="698" class="mono">DMA_FREE  解除并回收</text>
 
-  <rect x="675" y="756" width="360" height="94" rx="7" fill="#ffffff" stroke="#ffb74d"/>
+  <rect x="675" y="756" width="360" height="132" rx="7" fill="#ffffff" stroke="#ffb74d"/>
   <text x="695" y="782" class="card-title">IRQ</text>
-  <text x="695" y="805" class="mono">IRQ_BIND      绑定获授权 IRQ</text>
-  <text x="695" y="823" class="mono">IRQ_UNBIND    解除 IRQ 绑定</text>
-  <text x="695" y="841" class="mono">IRQ→Notification / ACK</text>
+  <text x="695" y="805" class="mono">IRQ_BIND    绑定IRQ、Notification和CPU</text>
+  <text x="695" y="828" class="mono">IRQ_WAIT    兼容路径，阻塞等待IRQ</text>
+  <text x="695" y="851" class="mono">IRQ_ACK     EOI并重新开放IRQ</text>
+  <text x="695" y="874" class="mono">IRQ_UNBIND  禁用并解除IRQ绑定</text>
 
-  <rect x="1050" y="756" width="370" height="94" rx="7" fill="#ffffff" stroke="#ffb74d"/>
+  <rect x="1050" y="756" width="370" height="132" rx="7" fill="#ffffff" stroke="#ffb74d"/>
   <text x="1070" y="782" class="card-title">Thread + Scheduler</text>
-  <text x="1070" y="805" class="mono">THREAD_CREATE  创建线程</text>
-  <text x="1070" y="823" class="mono">THREAD_EXIT    退出线程</text>
-  <text x="1070" y="841" class="mono">THREAD_YIELD   主动让出 CPU</text>
+  <text x="1070" y="805" class="mono">THREAD_CREATE        创建线程并设置CPU/优先级</text>
+  <text x="1070" y="822" class="mono">THREAD_SET_PRIORITY  修改线程优先级</text>
+  <text x="1070" y="839" class="mono">THREAD_RUNTIME       查询线程运行时间</text>
+  <text x="1070" y="856" class="mono">THREAD_YIELD         让出同级时间片</text>
+  <text x="1070" y="873" class="mono">THREAD_EXIT          退出当前线程</text>
 
   <!-- Endpoint与Notification都属于广义IPC/Event机制，外框表达共同归属。 -->
-  <rect x="675" y="864" width="745" height="166" rx="7" fill="#fff9ee" stroke="#f0a43a" stroke-width="1.5"/>
-  <text x="695" y="892" class="card-title" style="fill:#a84b00">IPC / Event（进程间通信与事件）</text>
+  <rect x="675" y="902" width="745" height="143" rx="7" fill="#fff9ee" stroke="#f0a43a" stroke-width="1.5"/>
+  <text x="695" y="928" class="card-title" style="fill:#a84b00">IPC / Event（进程间通信与事件）</text>
 
-  <rect x="690" y="906" width="345" height="106" rx="6" fill="#ffffff" stroke="#ffb74d"/>
-  <text x="708" y="932" class="card-title">Notification（异步通知）</text>
-  <text x="708" y="955" class="mono">SIGNAL  发送异步事件</text>
-  <text x="708" y="973" class="mono">WAIT    阻塞等待事件</text>
-  <text x="708" y="991" class="mono">POLL    非阻塞查询事件</text>
+  <rect x="690" y="942" width="345" height="88" rx="6" fill="#ffffff" stroke="#ffb74d"/>
+  <text x="708" y="964" class="card-title">Notification（异步通知）</text>
+  <text x="708" y="983" class="mono">CREATE / DESTROY  创建或销毁对象</text>
+  <text x="708" y="998" class="mono">SIGNAL            发送并合并badge</text>
+  <text x="708" y="1013" class="mono">WAIT / POLL       阻塞等待 / 非阻塞查询</text>
 
-  <rect x="1050" y="906" width="350" height="106" rx="6" fill="#ffffff" stroke="#ffb74d"/>
-  <text x="1068" y="932" class="card-title">Endpoint + Reply（同步消息）</text>
-  <text x="1068" y="955" class="mono">SEND/RECV   发送或接收请求</text>
-  <text x="1068" y="973" class="mono">CALL/REPLY  请求并等待一次回复</text>
-  <text x="1068" y="991" class="mono">REPLY_RECV  回复后继续接收</text>
+  <rect x="1050" y="942" width="350" height="88" rx="6" fill="#ffffff" stroke="#ffb74d"/>
+  <text x="1068" y="964" class="card-title">Endpoint + Reply（同步消息）</text>
+  <text x="1068" y="983" class="mono">CREATE / DESTROY  创建或销毁Endpoint</text>
+  <text x="1068" y="998" class="mono">SEND / RECV  单向发送 / 阻塞接收</text>
+  <text x="1068" y="1013" class="mono">CALL / REPLY / REPLY_RECV  请求与回复</text>
 
   <text x="1440" y="1095" text-anchor="end" class="small">蓝色：libOS 模块　灰蓝：Kernel 功能　橙色：Kernel 系统调用接口</text>
 </svg>

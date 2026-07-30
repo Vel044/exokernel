@@ -33,7 +33,8 @@ impl MappingEntry {
     };
 }
 
-static mut MAPPINGS: [MappingEntry; MAX_FRAME_MAPPINGS] = [MappingEntry::EMPTY; MAX_FRAME_MAPPINGS];
+static MAPPINGS: crate::sync::SpinLock<[MappingEntry; MAX_FRAME_MAPPINGS]> =
+    crate::sync::SpinLock::new([MappingEntry::EMPTY; MAX_FRAME_MAPPINGS]);
 
 fn next_generation(generation: u32) -> u32 {
     if generation >= MAX_GENERATION {
@@ -82,26 +83,6 @@ fn va_in_frame_arena(va: u64, pages: u64) -> bool {
     va >= exo_abi::FRAME_ARENA_BASE && end <= exo_abi::FRAME_ARENA_END
 }
 
-fn violates_wx(frame_handle: u64, rights: u64) -> bool {
-    let wants_write = rights & exo_abi::FRAME_RIGHT_WRITE != 0;
-    let wants_execute = rights & exo_abi::FRAME_RIGHT_EXECUTE != 0;
-    unsafe {
-        let mut index = 0usize;
-        while index < MAX_FRAME_MAPPINGS {
-            let mapping = MAPPINGS[index];
-            if mapping.owner != 0 && mapping.frame_handle == frame_handle {
-                let has_write = mapping.rights & exo_abi::FRAME_RIGHT_WRITE != 0;
-                let has_execute = mapping.rights & exo_abi::FRAME_RIGHT_EXECUTE != 0;
-                if (wants_write && has_execute) || (wants_execute && has_write) {
-                    return true;
-                }
-            }
-            index += 1;
-        }
-    }
-    false
-}
-
 pub fn map_frame(
     owner: u32,
     frame_handle: u64,
@@ -116,9 +97,6 @@ pub fn map_frame(
     let Some(flags) = mapping_flags(rights) else {
         return exo_abi::SYS_ERR_DENIED;
     };
-    if violates_wx(frame_handle, rights) {
-        return exo_abi::SYS_ERR_DENIED;
-    }
     let Ok((_, frame_pa, frame_pages)) = frame::resolve(owner, frame_handle) else {
         return exo_abi::SYS_ERR_NOT_FOUND;
     };
@@ -129,24 +107,39 @@ pub fn map_frame(
         return exo_abi::SYS_ERR_INVALID;
     }
 
-    let slot = unsafe {
+    // W^X检查与槽位保留必须在同一个锁临界区内，否则两个CPU可以同时
+    // 为同一Frame建立RW和RX别名并分别通过检查。
+    let (slot, generation) = {
+        let mut mappings = MAPPINGS.lock();
+        let wants_write = rights & exo_abi::FRAME_RIGHT_WRITE != 0;
+        let wants_execute = rights & exo_abi::FRAME_RIGHT_EXECUTE != 0;
         let mut found = None;
         let mut index = 0usize;
         while index < MAX_FRAME_MAPPINGS {
-            if MAPPINGS[index].owner == 0 {
+            let mapping = mappings[index];
+            if mapping.owner != 0 && mapping.frame_handle == frame_handle {
+                let has_write = mapping.rights & exo_abi::FRAME_RIGHT_WRITE != 0;
+                let has_execute = mapping.rights & exo_abi::FRAME_RIGHT_EXECUTE != 0;
+                if (wants_write && has_execute) || (wants_execute && has_write) {
+                    return exo_abi::SYS_ERR_DENIED;
+                }
+            }
+            if mapping.owner == 0 && found.is_none() {
                 found = Some(index);
-                break;
             }
             index += 1;
         }
-        found
-    };
-    let Some(slot) = slot else {
-        return exo_abi::SYS_ERR_NO_SLOT;
+        let Some(slot) = found else {
+            return exo_abi::SYS_ERR_NO_SLOT;
+        };
+        let generation = mappings[slot].generation;
+        mappings[slot].owner = u32::MAX;
+        (slot, generation)
     };
     let pa = frame_pa + offset_pages * exo_abi::PAGE_SIZE;
     let root = mmu::active_table();
     if root == 0 {
+        MAPPINGS.lock()[slot].owner = 0;
         return exo_abi::SYS_ERR_INVALID;
     }
     if rights & exo_abi::FRAME_RIGHT_EXECUTE != 0 {
@@ -154,56 +147,66 @@ pub fn map_frame(
     }
     match mmu::map_checked(root, va, pa, flags, pages) {
         Ok(()) => {}
-        Err(mmu::MapError::Conflict) => return exo_abi::SYS_ERR_CONFLICT,
-        Err(mmu::MapError::NoMemory) => return exo_abi::SYS_ERR_NO_MEMORY,
+        Err(mmu::MapError::Conflict) => {
+            MAPPINGS.lock()[slot].owner = 0;
+            return exo_abi::SYS_ERR_CONFLICT;
+        }
+        Err(mmu::MapError::NoMemory) => {
+            MAPPINGS.lock()[slot].owner = 0;
+            return exo_abi::SYS_ERR_NO_MEMORY;
+        }
     }
     if let Err(error) = frame::add_mapping(owner, frame_handle) {
         mmu::unmap(root, va, pages);
         mmu::flush_el1_tlb_range(va, pages);
+        MAPPINGS.lock()[slot].owner = 0;
         return error;
     }
 
-    unsafe {
-        let generation = MAPPINGS[slot].generation;
-        MAPPINGS[slot] = MappingEntry {
-            owner,
-            generation,
-            frame_handle,
-            frame_pa,
-            offset_pages,
-            pages,
-            va,
-            rights,
-        };
-        make_handle(slot, generation)
-    }
+    MAPPINGS.lock()[slot] = MappingEntry {
+        owner,
+        generation,
+        frame_handle,
+        frame_pa,
+        offset_pages,
+        pages,
+        va,
+        rights,
+    };
+    make_handle(slot, generation)
 }
 
 pub fn unmap_handle(owner: u32, mapping_handle: u64) -> u64 {
     let Some((slot, generation)) = decode_handle(mapping_handle) else {
         return exo_abi::SYS_ERR_INVALID;
     };
-    let entry = unsafe { MAPPINGS[slot] };
-    if entry.owner == 0 || entry.owner != owner || entry.generation != generation {
-        return exo_abi::SYS_ERR_NOT_FOUND;
-    }
+    let entry = {
+        let mut mappings = MAPPINGS.lock();
+        let entry = mappings[slot];
+        if entry.owner == 0 || entry.owner != owner || entry.generation != generation {
+            return exo_abi::SYS_ERR_NOT_FOUND;
+        }
+        // 暂时保留该槽，阻止另一CPU重复UNMAP或在完成前复用。
+        mappings[slot].owner = u32::MAX;
+        entry
+    };
 
     let expected_pa = entry.frame_pa + entry.offset_pages * exo_abi::PAGE_SIZE;
     let root = mmu::active_table();
     if !mmu::unmap_matching(root, entry.va, expected_pa, entry.pages) {
+        MAPPINGS.lock()[slot].owner = entry.owner;
         return exo_abi::SYS_ERR_CONFLICT;
     }
     mmu::flush_el1_tlb_range(entry.va, entry.pages);
     if frame::remove_mapping(owner, entry.frame_handle).is_err() {
+        MAPPINGS.lock()[slot].owner = entry.owner;
         return exo_abi::SYS_ERR_INVALID;
     }
 
-    unsafe {
-        MAPPINGS[slot] = MappingEntry {
-            generation: next_generation(entry.generation),
-            ..MappingEntry::EMPTY
-        };
-    }
+    MAPPINGS.lock()[slot] = MappingEntry {
+        generation: next_generation(entry.generation),
+        ..MappingEntry::EMPTY
+    };
     0
 }
 
@@ -212,19 +215,27 @@ pub fn cleanup_owner(owner: u32, root: u64) {
     if owner == 0 {
         return;
     }
-    unsafe {
+    let mut removed = [MappingEntry::EMPTY; MAX_FRAME_MAPPINGS];
+    let mut removed_count = 0usize;
+    {
+        let mut mappings = MAPPINGS.lock();
         let mut slot = 0usize;
         while slot < MAX_FRAME_MAPPINGS {
-            let entry = MAPPINGS[slot];
+            let entry = mappings[slot];
             if entry.owner == owner {
-                mmu::unmap(root, entry.va, entry.pages);
-                let _ = frame::remove_mapping(owner, entry.frame_handle);
-                MAPPINGS[slot] = MappingEntry {
+                removed[removed_count] = entry;
+                removed_count += 1;
+                mappings[slot] = MappingEntry {
                     generation: next_generation(entry.generation),
                     ..MappingEntry::EMPTY
                 };
             }
             slot += 1;
         }
+    }
+    // 不持VSpace表锁调用MMU和Frame，避免扩大IRQ关闭临界区。
+    for entry in &removed[..removed_count] {
+        mmu::unmap(root, entry.va, entry.pages);
+        let _ = frame::remove_mapping(owner, entry.frame_handle);
     }
 }

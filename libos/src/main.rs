@@ -14,26 +14,23 @@
 // xHCI/CrabUSB 会使用 Vec、Box 等堆类型，因此显式链接 `alloc` crate。
 extern crate alloc;
 
-mod apps;
-mod drivers;
-mod kernel_api;
-mod runtime;
+mod apps; // 可执行实验和机器人应用，main只负责选择其中一个入口。
+mod drivers; // PCI、DMA、USB、CDC ACM和SCServo等用户态驱动。
+mod kernel_api; // Thread、Endpoint、Notification、Frame等系统调用安全封装。
+mod runtime; // 裸机heap、SVC入口、日志和计时器等基础运行时。
 
-// crate 内兼容别名：先完成职责分层，不在同一次改动里重写驱动逻辑。
-#[cfg(feature = "frame-smoke")]
+// crate 内兼容别名：驱动与Kernel接口保持独立，应用入口只负责组合模块。
+#[cfg(feature = "system-smoke")]
 #[allow(unused_imports)]
-pub(crate) use apps::frame_smoke as frame_test;
-#[cfg(feature = "thread-ipc-smoke")]
-#[allow(unused_imports)]
-pub(crate) use apps::thread_ipc_smoke as thread_test;
+pub(crate) use apps::system_smoke;
 #[allow(unused_imports)]
 pub(crate) use apps::uart_echo;
-#[cfg(all(any(feature = "qemu-xhci", feature = "pi5-xhci"), feature = "scservo"))]
-#[allow(unused_imports)]
-pub(crate) use drivers::scservo;
 #[cfg(any(feature = "qemu-xhci", feature = "pi5-xhci"))]
 #[allow(unused_imports)]
-pub(crate) use drivers::{dma, pci, usb as usb_app};
+pub(crate) use apps::usb_task;
+#[cfg(any(feature = "qemu-xhci", feature = "pi5-xhci"))]
+#[allow(unused_imports)]
+pub(crate) use drivers::{dma, pci};
 #[allow(unused_imports)]
 pub(crate) use kernel_api::{endpoint as ipc, frame as memory, notification, thread};
 #[cfg(any(feature = "qemu-xhci", feature = "pi5-xhci"))]
@@ -66,16 +63,23 @@ pub extern "C" fn _start(boot_info_va: u64) -> ! {
     // 初始化后 alloc crate 才能安全使用该固定用户态堆。
     unsafe { runtime::init_heap(info) };
 
-    #[cfg(feature = "thread-ipc-smoke")]
-    thread_test::run();
-
-    #[cfg(feature = "frame-smoke")]
-    frame_test::run();
+    // 唯一综合实验入口。带xHCI时先接管UART，随后把内存、IPC、调度和
+    // USB/推理/控制线程放在同一次运行中验证；无设备构建继续使用SYS_PUTS。
+    #[cfg(feature = "system-smoke")]
+    {
+        #[cfg(any(feature = "qemu-xhci", feature = "pi5-xhci"))]
+        if let Err(error) = uart_echo::smoke_test(info) {
+            runtime::puts(b"[libos] UART smoke failed=");
+            runtime::hex(error);
+            runtime::puts(b"\r\n");
+            runtime::exit(0x103);
+        }
+        system_smoke::run(info)
+    }
 
     // QEMU 综合测试路径：先验证 EL0 UART，再启动 PCI/xHCI/FTDI USB 栈。
     #[cfg(all(
-        not(feature = "frame-smoke"),
-        not(feature = "thread-ipc-smoke"),
+        not(feature = "system-smoke"),
         any(feature = "qemu-xhci", feature = "pi5-xhci")
     ))]
     {
@@ -92,13 +96,12 @@ pub extern "C" fn _start(boot_info_va: u64) -> ! {
         // 从这里开始，libOS 与 CrabUSB 日志都由已初始化的 EL0 UART 输出；
         // xHCI 仍通过 MMIO、IRQ、DMA syscall 向 EL1申请受保护资源。
         runtime::puts(b"[libos] 2. xHCI/CDC ACM application\r\n");
-        usb_app::run(info)
+        usb_task::run_dedicated(info)
     }
 
     // Pi5/纯 UART 构建路径：不编译 PCI/xHCI，直接进入 IRQ 驱动的回显循环。
     #[cfg(all(
-        not(feature = "frame-smoke"),
-        not(feature = "thread-ipc-smoke"),
+        not(feature = "system-smoke"),
         not(any(feature = "qemu-xhci", feature = "pi5-xhci"))
     ))]
     {

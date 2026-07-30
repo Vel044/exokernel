@@ -140,6 +140,9 @@ struct Reply {
     generation: u32,
     caller: u8,
     server: u8,
+    /// 产生本次Call的Endpoint槽位。Endpoint销毁时据此检查是否仍有
+    /// 服务线程持有未消费的ReplyHandle，避免销毁正在处理请求的对象。
+    endpoint: u8,
 }
 
 impl Reply {
@@ -148,6 +151,7 @@ impl Reply {
         generation: 1,
         caller: 0xff,
         server: 0xff,
+        endpoint: 0xff,
     };
 }
 
@@ -155,10 +159,15 @@ static mut ENDPOINTS: [Endpoint; MAX_ENDPOINTS] = [Endpoint::EMPTY; MAX_ENDPOINT
 static mut NOTIFICATIONS: [Notification; MAX_NOTIFICATIONS] =
     [Notification::EMPTY; MAX_NOTIFICATIONS];
 static mut REPLIES: [Reply; MAX_REPLIES] = [Reply::EMPTY; MAX_REPLIES];
+// Endpoint、Reply和Notification存在跨核生产者/消费者。该粗粒度锁保证
+// “检查状态并入队/取队”是一个原子事务；任何会阻塞或切换线程的路径都在
+// 调度前显式释放锁，避免把睡眠线程留成锁拥有者。
+static IPC_LOCK: crate::sync::SpinLock<()> = crate::sync::SpinLock::new(());
 
 /// 任务启动或退出后重置 IPC 对象表，同时保留每个 slot 的 generation，
 /// 让旧 Handle 即使在 slot 复用后也不会重新获得访问权限。
 pub fn init() {
+    let _guard = IPC_LOCK.lock();
     unsafe {
         let mut slot = 0usize;
         while slot < MAX_ENDPOINTS {
@@ -240,10 +249,12 @@ fn notification_slot(handle: u64) -> Result<usize, u64> {
 }
 
 pub fn notification_valid(handle: u64) -> bool {
+    let _guard = IPC_LOCK.lock();
     notification_slot(handle).is_ok()
 }
 
 pub fn endpoint_create() -> u64 {
+    let _guard = IPC_LOCK.lock();
     unsafe {
         let Some(slot) = (0..MAX_ENDPOINTS).find(|&slot| ENDPOINTS[slot].owner == 0) else {
             return exo_abi::SYS_ERR_NO_SLOT;
@@ -258,7 +269,39 @@ pub fn endpoint_create() -> u64 {
     }
 }
 
-fn allocate_reply(caller: usize, server: usize) -> Option<u64> {
+/// 销毁一个已经空闲的Endpoint。
+///
+/// Handle中的owner和generation先由`endpoint_slot`校验。只要仍有等待中的
+/// Sender、Receiver或由该Endpoint产生的一次性Reply，销毁就返回BUSY；
+/// 成功后递增generation，使EL0保存的旧Handle立即失效。
+pub fn endpoint_destroy(handle: u64) -> u64 {
+    let _guard = IPC_LOCK.lock();
+    let endpoint_slot = match endpoint_slot(handle) {
+        Ok(slot) => slot,
+        Err(error) => return error,
+    };
+    unsafe {
+        let endpoint = ENDPOINTS[endpoint_slot];
+        if endpoint.sender_count != 0 || endpoint.receivers.count != 0 {
+            return exo_abi::SYS_ERR_BUSY;
+        }
+        let mut reply_slot = 0usize;
+        while reply_slot < MAX_REPLIES {
+            let reply = REPLIES[reply_slot];
+            if reply.owner != 0 && reply.endpoint as usize == endpoint_slot {
+                return exo_abi::SYS_ERR_BUSY;
+            }
+            reply_slot += 1;
+        }
+        ENDPOINTS[endpoint_slot] = Endpoint {
+            generation: next_generation(endpoint.generation),
+            ..Endpoint::EMPTY
+        };
+    }
+    0
+}
+
+fn allocate_reply(caller: usize, server: usize, endpoint: usize) -> Option<u64> {
     unsafe {
         let slot = (0..MAX_REPLIES).find(|&slot| REPLIES[slot].owner == 0)?;
         let generation = REPLIES[slot].generation;
@@ -267,15 +310,17 @@ fn allocate_reply(caller: usize, server: usize) -> Option<u64> {
             generation,
             caller: caller as u8,
             server: server as u8,
+            endpoint: endpoint as u8,
         };
+        recompute_inherited_priorities_locked();
         Some(make_handle(slot, generation))
     }
 }
 
-fn deliver(sender: PendingSender, receiver: usize) -> Result<(), u64> {
+fn deliver(sender: PendingSender, receiver: usize, endpoint: usize) -> Result<(), u64> {
     let mut message = sender.message;
     if sender.is_call {
-        let Some(reply) = allocate_reply(sender.slot as usize, receiver) else {
+        let Some(reply) = allocate_reply(sender.slot as usize, receiver, endpoint) else {
             return Err(exo_abi::SYS_ERR_NO_SLOT);
         };
         message.reply = exo_abi::ReplyHandle(reply);
@@ -288,7 +333,8 @@ fn deliver(sender: PendingSender, receiver: usize) -> Result<(), u64> {
     Ok(())
 }
 
-fn send_common(handle: u64, is_call: bool, frame: &TrapFrame) -> Result<*mut TrapFrame, u64> {
+fn send_common(handle: u64, is_call: bool, frame: &mut TrapFrame) -> Result<*mut TrapFrame, u64> {
+    let guard = IPC_LOCK.lock();
     let endpoint_slot = endpoint_slot(handle)?;
     let sender = PendingSender {
         slot: thread::current_slot() as u8,
@@ -297,50 +343,55 @@ fn send_common(handle: u64, is_call: bool, frame: &TrapFrame) -> Result<*mut Tra
     };
     unsafe {
         if let Some(receiver) = ENDPOINTS[endpoint_slot].receivers.pop() {
-            if let Err(error) = deliver(sender, receiver) {
+            if let Err(error) = deliver(sender, receiver, endpoint_slot) {
                 // deliver 可能因为 Reply 表已满失败；此时不能丢掉已经
                 // 从接收队列取出的 receiver，否则后续消息会永久失配。
                 let _ = ENDPOINTS[endpoint_slot].receivers.push(receiver);
                 return Err(error);
             }
+            // 直接修改异常向量在EL1栈上建立的真实TrapFrame。绝不能返回
+            // 指向本函数局部副本的指针，否则函数退栈后ELR/SP等字段会失效。
+            frame.x[0] = 0;
             if is_call {
+                drop(guard);
                 Ok(thread::block_current(frame))
             } else {
-                let mut return_frame = *frame;
-                return_frame.x[0] = 0;
-                thread::save_current(&return_frame);
-                Ok(thread::yield_current(&return_frame))
+                drop(guard);
+                Ok(crate::scheduler::preempt_if_needed(frame))
             }
         } else {
             if !ENDPOINTS[endpoint_slot].push_sender(sender) {
                 return Err(exo_abi::SYS_ERR_NO_SLOT);
             }
+            drop(guard);
             Ok(thread::block_current(frame))
         }
     }
 }
 
-pub fn endpoint_send(handle: u64, frame: &TrapFrame) -> Result<*mut TrapFrame, u64> {
+pub fn endpoint_send(handle: u64, frame: &mut TrapFrame) -> Result<*mut TrapFrame, u64> {
     send_common(handle, false, frame)
 }
 
-pub fn endpoint_call(handle: u64, frame: &TrapFrame) -> Result<*mut TrapFrame, u64> {
+pub fn endpoint_call(handle: u64, frame: &mut TrapFrame) -> Result<*mut TrapFrame, u64> {
     send_common(handle, true, frame)
 }
 
-pub fn endpoint_recv(handle: u64, frame: &TrapFrame) -> Result<*mut TrapFrame, u64> {
+pub fn endpoint_recv(handle: u64, frame: &mut TrapFrame) -> Result<*mut TrapFrame, u64> {
+    let guard = IPC_LOCK.lock();
     let endpoint_slot = endpoint_slot(handle)?;
     unsafe {
         if let Some(sender) = ENDPOINTS[endpoint_slot].pop_sender() {
             let receiver = thread::current_slot();
-            if let Err(error) = deliver(sender, receiver) {
+            if let Err(error) = deliver(sender, receiver, endpoint_slot) {
                 let _ = ENDPOINTS[endpoint_slot].push_sender(sender);
                 return Err(error);
             }
-            let mut return_frame = *frame;
-            return_frame.x[0] = 0;
-            thread::save_current(&return_frame);
-            Ok(thread::yield_current(&return_frame))
+            frame.x[0] = 0;
+            // Receiver本来就在当前CPU上运行，消息复制完成后可直接
+            // 返回EL0处理，不再为了协作式调度强制yield。
+            drop(guard);
+            Ok(frame as *mut TrapFrame)
         } else {
             if !ENDPOINTS[endpoint_slot]
                 .receivers
@@ -348,20 +399,21 @@ pub fn endpoint_recv(handle: u64, frame: &TrapFrame) -> Result<*mut TrapFrame, u
             {
                 return Err(exo_abi::SYS_ERR_BUSY);
             }
+            drop(guard);
             Ok(thread::block_current(frame))
         }
     }
 }
 
-pub fn endpoint_reply(handle: u64, frame: &TrapFrame) -> Result<*mut TrapFrame, u64> {
-    reply_inner(handle)?;
-    let mut return_frame = *frame;
-    return_frame.x[0] = 0;
-    thread::save_current(&return_frame);
-    Ok(thread::yield_current(&return_frame))
+pub fn endpoint_reply(handle: u64, frame: &mut TrapFrame) -> Result<*mut TrapFrame, u64> {
+    let guard = IPC_LOCK.lock();
+    let _caller = reply_inner(handle)?;
+    frame.x[0] = 0;
+    drop(guard);
+    Ok(crate::scheduler::preempt_if_needed(frame))
 }
 
-fn reply_inner(handle: u64) -> Result<(), u64> {
+fn reply_inner(handle: u64) -> Result<usize, u64> {
     let Some((slot, generation)) = decode_handle(handle, MAX_REPLIES) else {
         return Err(exo_abi::SYS_ERR_INVALID);
     };
@@ -379,28 +431,32 @@ fn reply_inner(handle: u64) -> Result<(), u64> {
             generation: next_generation(reply.generation),
             ..Reply::EMPTY
         };
+        recompute_inherited_priorities_locked();
+        Ok(reply.caller as usize)
     }
-    Ok(())
 }
 
 pub fn endpoint_reply_recv(
     endpoint: u64,
     reply: u64,
-    frame: &TrapFrame,
+    frame: &mut TrapFrame,
 ) -> Result<*mut TrapFrame, u64> {
-    reply_inner(reply)?;
+    let guard = IPC_LOCK.lock();
+    // 组合操作必须先验证全部对象，再产生“回复Caller”这一不可逆副作用。
+    // 否则伪造Endpoint会先消耗一次性ReplyHandle，随后才返回Endpoint错误。
     let endpoint_slot = endpoint_slot(endpoint)?;
+    let caller = reply_inner(reply)?;
     unsafe {
         if let Some(sender) = ENDPOINTS[endpoint_slot].pop_sender() {
             let receiver = thread::current_slot();
-            if let Err(error) = deliver(sender, receiver) {
+            if let Err(error) = deliver(sender, receiver, endpoint_slot) {
                 let _ = ENDPOINTS[endpoint_slot].push_sender(sender);
                 return Err(error);
             }
-            let mut return_frame = *frame;
-            return_frame.x[0] = 0;
-            thread::save_current(&return_frame);
-            Ok(thread::yield_current(&return_frame))
+            frame.x[0] = 0;
+            let _ = caller;
+            drop(guard);
+            Ok(crate::scheduler::preempt_if_needed(frame))
         } else {
             if !ENDPOINTS[endpoint_slot]
                 .receivers
@@ -408,12 +464,15 @@ pub fn endpoint_reply_recv(
             {
                 return Err(exo_abi::SYS_ERR_BUSY);
             }
+            let _ = caller;
+            drop(guard);
             Ok(thread::block_current(frame))
         }
     }
 }
 
 pub fn notification_create() -> u64 {
+    let _guard = IPC_LOCK.lock();
     unsafe {
         let Some(slot) = (0..MAX_NOTIFICATIONS).find(|&slot| NOTIFICATIONS[slot].owner == 0) else {
             return exo_abi::SYS_ERR_NO_SLOT;
@@ -432,6 +491,7 @@ pub fn notification_signal(handle: u64, badge: u64) -> u64 {
     if badge == 0 {
         return exo_abi::SYS_ERR_INVALID;
     }
+    let _guard = IPC_LOCK.lock();
     let Ok(slot) = notification_slot(handle) else {
         return exo_abi::SYS_ERR_NOT_FOUND;
     };
@@ -447,6 +507,7 @@ pub fn notification_signal(handle: u64, badge: u64) -> u64 {
 }
 
 pub fn notification_wait(handle: u64, frame: &mut TrapFrame) -> Result<*mut TrapFrame, u64> {
+    let guard = IPC_LOCK.lock();
     let slot = notification_slot(handle)?;
     unsafe {
         if NOTIFICATIONS[slot].pending != 0 {
@@ -455,16 +516,19 @@ pub fn notification_wait(handle: u64, frame: &mut TrapFrame) -> Result<*mut Trap
             // 没有发生调度时必须返回本次异常的真实帧；线程表里的
             // context 可能仍是上一次切换前的旧 PC。
             frame.x[0] = pending;
+            drop(guard);
             return Ok(frame as *mut TrapFrame);
         }
         if !NOTIFICATIONS[slot].waiters.push(thread::current_slot()) {
             return Err(exo_abi::SYS_ERR_BUSY);
         }
     }
+    drop(guard);
     Ok(thread::block_current(frame))
 }
 
 pub fn notification_poll(handle: u64) -> u64 {
+    let _guard = IPC_LOCK.lock();
     let Ok(slot) = notification_slot(handle) else {
         return exo_abi::SYS_ERR_NOT_FOUND;
     };
@@ -480,6 +544,7 @@ pub fn notification_poll(handle: u64) -> u64 {
 }
 
 pub fn notification_destroy(handle: u64) -> u64 {
+    let _guard = IPC_LOCK.lock();
     let Ok(slot) = notification_slot(handle) else {
         return exo_abi::SYS_ERR_NOT_FOUND;
     };
@@ -500,6 +565,7 @@ pub fn notification_destroy(handle: u64) -> u64 {
 }
 
 pub fn cancel_thread(slot: usize) {
+    let _guard = IPC_LOCK.lock();
     unsafe {
         let mut object_slot = 0usize;
         while object_slot < MAX_ENDPOINTS {
@@ -524,7 +590,13 @@ pub fn cancel_thread(slot: usize) {
         object_slot = 0;
         while object_slot < MAX_REPLIES {
             let reply = REPLIES[object_slot];
-            if reply.owner != 0 && reply.caller as usize == slot {
+            if reply.owner != 0 && (reply.caller as usize == slot || reply.server as usize == slot)
+            {
+                // Server在回复前退出时，Caller仍阻塞在CALL中。把错误写入
+                // Caller保存的异常帧并唤醒它，避免永久阻塞和Reply表泄漏。
+                if reply.server as usize == slot && reply.caller as usize != slot {
+                    thread::wake(reply.caller as usize, exo_abi::SYS_ERR_NOT_FOUND);
+                }
                 REPLIES[object_slot] = Reply {
                     generation: next_generation(reply.generation),
                     ..Reply::EMPTY
@@ -533,9 +605,64 @@ pub fn cancel_thread(slot: usize) {
             object_slot += 1;
         }
     }
+    recompute_inherited_priorities_locked();
+}
+
+/// 根据仍然存活的Call/Reply关系重新计算可传递的优先级继承。
+///
+/// 线程数固定为16，因此最多迭代16轮即可覆盖整条调用链，同时避免环形
+/// IPC关系让Kernel陷入无界循环。
+pub fn recompute_inherited_priorities() {
+    let _guard = IPC_LOCK.lock();
+    recompute_inherited_priorities_locked();
+}
+
+fn recompute_inherited_priorities_locked() {
+    let mut old_priorities = [0u8; thread::MAX_THREADS];
+    let mut slot = 0usize;
+    while slot < thread::MAX_THREADS {
+        old_priorities[slot] = thread::effective_priority(slot);
+        thread::set_effective_priority(slot, thread::base_priority(slot));
+        slot += 1;
+    }
+    let mut pass = 0usize;
+    while pass < thread::MAX_THREADS {
+        let mut changed = false;
+        unsafe {
+            let mut reply_slot = 0usize;
+            while reply_slot < MAX_REPLIES {
+                let reply = REPLIES[reply_slot];
+                if reply.owner != 0 {
+                    let caller = reply.caller as usize;
+                    let server = reply.server as usize;
+                    let inherited = thread::effective_priority(caller);
+                    if inherited > thread::effective_priority(server) {
+                        thread::set_effective_priority(server, inherited);
+                        changed = true;
+                    }
+                }
+                reply_slot += 1;
+            }
+        }
+        if !changed {
+            break;
+        }
+        pass += 1;
+    }
+    slot = 0;
+    while slot < thread::MAX_THREADS {
+        // 只有effective priority实际变化才需要改Ready Queue或发送远程
+        // 重调度SGI。对所有16个槽无条件通知会在每次Reply/线程退出时
+        // 制造SGI风暴，并让无关CPU反复进入Kernel。
+        if old_priorities[slot] != thread::effective_priority(slot) {
+            crate::scheduler::priority_changed(slot);
+        }
+        slot += 1;
+    }
 }
 
 pub fn cleanup_owner(owner: u32) {
+    let _guard = IPC_LOCK.lock();
     unsafe {
         let mut slot = 0usize;
         while slot < MAX_ENDPOINTS {

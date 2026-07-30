@@ -5,12 +5,12 @@ source ./config.sh
 
 ROOT_DIR="$(cd .. && pwd)"
 
-# 同一个 esp.img 和物理 USB 设备不能被多个 QEMU 实例同时占用。终端被
-# 中断时 sudo 子进程可能继续存活，因此启动前显式拒绝重复实例。
-EXISTING_QEMU="$(pgrep -x qemu-system-aarch64 2>/dev/null || true)"
+# 同一个esp.img不能被两个本项目实例同时写入。只检查当前镜像的打开者，
+# 避免把机器上运行的其他、互不相关的QEMU虚拟机误判为冲突。
+EXISTING_QEMU="$(lsof -t "$PWD/esp.img" 2>/dev/null || true)"
 if [ -n "$EXISTING_QEMU" ]; then
-  echo "ERROR: qemu-system-aarch64 is already running (PID: $(echo "$EXISTING_QEMU" | tr '\n' ' '))" >&2
-  echo "Stop the old QEMU instance before running this script again." >&2
+  echo "ERROR: exokernel esp.img is already in use (PID: $(echo "$EXISTING_QEMU" | tr '\n' ' '))" >&2
+  echo "Stop the old exokernel QEMU instance before running this script again." >&2
   exit 1
 fi
 
@@ -76,7 +76,9 @@ if [ ! -f "$VARS" ] || [ "$(wc -c < "$VARS")" -ne "$(wc -c < "$VARS_TEMPLATE")" 
 fi
 
 USB_SOCKET=/tmp/exokernel-usb.sock
+MONITOR_SOCKET=/tmp/exokernel-monitor.sock
 rm -f "$USB_SOCKET"
+rm -f "$MONITOR_SOCKET"
 QEMU_USB_MODE="${QEMU_USB_MODE:-host}"
 QEMU_USB_ARGS=()
 QEMU_LAUNCH=(qemu-system-aarch64)
@@ -165,7 +167,10 @@ elif [ "$QEMU_USB_MODE" = "host" ] || [ "$QEMU_USB_MODE" = "hub-host" ]; then
   # 两个 CH34x CDC ACM 转接器可能具有相同 VID/PID，必须用 serial
   # 选择实际连接 SO101 舵机总线的设备。
   QEMU_USB_SERIAL="${QEMU_USB_SERIAL:-5A7C119177}"
-  QEMU_USB_PCAP="${QEMU_USB_PCAP:-/tmp/exokernel-usb.pcap}"
+  # 文件名包含调用者UID，避免不同用户或sudo/non-sudo运行互相继承权限。
+  # 启动QEMU前先以普通用户身份创建文件；随后即使root QEMU执行O_TRUNC，
+  # 现有inode的所有者仍是当前用户，下一次普通运行也可以直接删除。
+  QEMU_USB_PCAP="${QEMU_USB_PCAP:-/tmp/exokernel-usb-${UID}.pcap}"
   echo "USB host passthrough: VID=$QEMU_USB_VENDOR_ID PID=$QEMU_USB_PRODUCT_ID"
   echo "The physical USB device must be a CDC ACM device."
   # SCServo 是严格的半双工请求/应答协议。关闭 QEMU usb-host 的 Bulk
@@ -177,11 +182,8 @@ elif [ "$QEMU_USB_MODE" = "host" ] || [ "$QEMU_USB_MODE" = "hub-host" ]; then
     USB_HOST_DEVICE+=",serial=$QEMU_USB_SERIAL"
   fi
   if [ -n "$QEMU_USB_PCAP" ]; then
-    if [ "${QEMU_SUDO:-0}" = "1" ]; then
-      sudo rm -f "$QEMU_USB_PCAP"
-    else
-      rm -f "$QEMU_USB_PCAP"
-    fi
+    rm -f "$QEMU_USB_PCAP"
+    : > "$QEMU_USB_PCAP"
     echo "USB packet capture: $QEMU_USB_PCAP"
     USB_HOST_DEVICE+=",pcap=$QEMU_USB_PCAP"
   fi
@@ -215,11 +217,11 @@ echo ""
 
 
 "${QEMU_LAUNCH[@]}" \
-  -M "$QEMU_MACHINE" -cpu "$QEMU_CPU" -m "$QEMU_MEMORY" \
+  -M "$QEMU_MACHINE" -cpu "$QEMU_CPU" -smp 4 -m "$QEMU_MEMORY" \
   -drive if=pflash,format=raw,unit=0,file="$QEMU_CODE",readonly=on \
   -drive if=pflash,format=raw,unit=1,file="$VARS" \
   -drive file=esp.img,format=raw,if=none,id=drive0 \
   -device virtio-blk-device,drive=drive0 \
   "${QEMU_USB_ARGS[@]}" \
-  -serial stdio -monitor none -display none \
+  -serial stdio -monitor "unix:$MONITOR_SOCKET,server=on,wait=off" -display none \
   -nographic -no-reboot

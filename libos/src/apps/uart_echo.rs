@@ -1,5 +1,8 @@
 use core::ptr::NonNull;
 
+/// UART硬件中断在Notification中使用的事件位。
+const UART_IRQ_BADGE: u64 = 1;
+
 /// QEMU xHCI 模式启动前的 UART 回归检查。
 ///
 /// 这里不能进入永久 IRQ echo 循环，否则后续 xHCI 永远没有机会运行。
@@ -32,6 +35,7 @@ pub fn smoke_test(info: &exo_abi::UserBootInfo) -> Result<(), u64> {
 
 pub fn run(info: &exo_abi::UserBootInfo) -> ! {
     let uart = info.uart;
+    let uart_intid = uart.intid;
     crate::runtime::puts(b"[libos] UART pa=");
     crate::runtime::hex(uart.base);
     crate::runtime::puts(b" INTID=");
@@ -43,7 +47,15 @@ pub fn run(info: &exo_abi::UserBootInfo) -> ! {
         crate::runtime::hex(error);
         crate::runtime::exit(error);
     }
-    if let Err(error) = crate::runtime::irq_bind(uart.intid) {
+    // 永久回显必须使用可阻塞的Notification路径。线程等待期间，Kernel可以
+    // 阻塞等待不会占用CPU；UART到达后Notification把线程恢复为Ready，
+    // Kernel再按静态优先级判断是否立即抢占当前线程。
+    let irq_notification = crate::notification::Notification::create().unwrap_or_else(|error| {
+        crate::runtime::puts(b"[libos] UART Notification create failed=");
+        crate::runtime::hex(error);
+        crate::runtime::exit(error);
+    });
+    if let Err(error) = irq_notification.bind_irq(uart.intid, UART_IRQ_BADGE) {
         crate::runtime::puts(b"[libos] UART bind failed=");
         crate::runtime::hex(error);
         crate::runtime::exit(error);
@@ -57,7 +69,14 @@ pub fn run(info: &exo_abi::UserBootInfo) -> ! {
     crate::runtime::puts(b"[libos] UART echo ready\r\n");
 
     loop {
-        let intid = crate::runtime::irq_wait();
+        let badge = irq_notification.wait().unwrap_or_else(|error| {
+            crate::runtime::puts(b"[libos] UART Notification wait failed=");
+            crate::runtime::hex(error);
+            crate::runtime::exit(error);
+        });
+        if badge & UART_IRQ_BADGE == 0 {
+            continue;
+        }
         while let Ok(Some(byte)) = uart.read_word() {
             while uart.is_tx_fifo_full() {
                 core::hint::spin_loop();
@@ -72,7 +91,7 @@ pub fn run(info: &exo_abi::UserBootInfo) -> ! {
                 | Interrupts::PEI
                 | Interrupts::FEI,
         );
-        crate::runtime::irq_ack(intid);
+        crate::runtime::irq_ack(uart_intid);
     }
 }
 

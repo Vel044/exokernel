@@ -30,7 +30,8 @@ impl FrameEntry {
     };
 }
 
-static mut FRAMES: [FrameEntry; MAX_FRAMES] = [FrameEntry::EMPTY; MAX_FRAMES];
+static FRAMES: crate::sync::SpinLock<[FrameEntry; MAX_FRAMES]> =
+    crate::sync::SpinLock::new([FrameEntry::EMPTY; MAX_FRAMES]);
 
 fn next_generation(generation: u32) -> u32 {
     if generation >= MAX_GENERATION {
@@ -64,57 +65,71 @@ pub fn allocate(owner: u32, pages: u64, align_pages: u64) -> u64 {
         return exo_abi::SYS_ERR_INVALID;
     }
 
-    let slot = unsafe {
+    // 先在Frame表中保留槽位，再分配物理页。owner使用u32::MAX表示
+    // 尚未发布给EL0，其他CPU不能把同一槽位重复用于另一个Frame。
+    let (slot, generation) = {
+        let mut frames = FRAMES.lock();
         let mut found = None;
         let mut index = 0usize;
         while index < MAX_FRAMES {
-            if FRAMES[index].owner == 0 {
+            if frames[index].owner == 0 {
                 found = Some(index);
                 break;
             }
             index += 1;
         }
-        found
-    };
-    let Some(slot) = slot else {
-        return exo_abi::SYS_ERR_NO_SLOT;
+        let Some(slot) = found else {
+            return exo_abi::SYS_ERR_NO_SLOT;
+        };
+        let generation = frames[slot].generation;
+        frames[slot].owner = u32::MAX;
+        (slot, generation)
     };
     let Some(pa) = mem::alloc_pages_aligned(pages, align_pages) else {
+        FRAMES.lock()[slot].owner = 0;
         return exo_abi::SYS_ERR_NO_MEMORY;
     };
 
     let Some(bytes) = pages.checked_mul(exo_abi::PAGE_SIZE) else {
         mem::free_pages(pa, pages);
+        FRAMES.lock()[slot].owner = 0;
         return exo_abi::SYS_ERR_INVALID;
     };
     unsafe {
         core::ptr::write_bytes(pa as *mut u8, 0, bytes as usize);
-        let generation = FRAMES[slot].generation;
-        FRAMES[slot] = FrameEntry {
-            owner,
-            generation,
-            pa,
-            pages,
-            mapping_count: 0,
-        };
-        make_handle(slot, generation)
     }
+    FRAMES.lock()[slot] = FrameEntry {
+        owner,
+        generation,
+        pa,
+        pages,
+        mapping_count: 0,
+    };
+    make_handle(slot, generation)
 }
 
 pub fn free(owner: u32, handle: u64) -> u64 {
-    let Ok((slot, pa, pages)) = resolve(owner, handle) else {
+    if owner == 0 {
         return exo_abi::SYS_ERR_NOT_FOUND;
+    }
+    let Some((slot, generation)) = decode_handle(handle) else {
+        return exo_abi::SYS_ERR_INVALID;
     };
-    unsafe {
-        if FRAMES[slot].mapping_count != 0 {
+    let (pa, pages) = {
+        let mut frames = FRAMES.lock();
+        let entry = frames[slot];
+        if entry.owner != owner || entry.generation != generation {
+            return exo_abi::SYS_ERR_NOT_FOUND;
+        }
+        if entry.mapping_count != 0 {
             return exo_abi::SYS_ERR_BUSY;
         }
-        let generation = next_generation(FRAMES[slot].generation);
-        FRAMES[slot] = FrameEntry {
-            generation,
+        frames[slot] = FrameEntry {
+            generation: next_generation(entry.generation),
             ..FrameEntry::EMPTY
         };
-    }
+        (entry.pa, entry.pages)
+    };
     mem::free_pages(pa, pages);
     0
 }
@@ -123,34 +138,42 @@ pub fn resolve(owner: u32, handle: u64) -> Result<(usize, u64, u64), u64> {
     let Some((slot, generation)) = decode_handle(handle) else {
         return Err(exo_abi::SYS_ERR_INVALID);
     };
-    unsafe {
-        let entry = FRAMES[slot];
-        if entry.owner == 0 || entry.owner != owner || entry.generation != generation {
-            return Err(exo_abi::SYS_ERR_NOT_FOUND);
-        }
-        Ok((slot, entry.pa, entry.pages))
+    let entry = FRAMES.lock()[slot];
+    if entry.owner == 0 || entry.owner != owner || entry.generation != generation {
+        return Err(exo_abi::SYS_ERR_NOT_FOUND);
     }
+    Ok((slot, entry.pa, entry.pages))
 }
 
 pub fn add_mapping(owner: u32, handle: u64) -> Result<(), u64> {
-    let (slot, _, _) = resolve(owner, handle)?;
-    unsafe {
-        FRAMES[slot].mapping_count = FRAMES[slot]
-            .mapping_count
-            .checked_add(1)
-            .ok_or(exo_abi::SYS_ERR_BUSY)?;
+    let Some((slot, generation)) = decode_handle(handle) else {
+        return Err(exo_abi::SYS_ERR_INVALID);
+    };
+    let mut frames = FRAMES.lock();
+    let entry = &mut frames[slot];
+    if entry.owner != owner || entry.generation != generation {
+        return Err(exo_abi::SYS_ERR_NOT_FOUND);
     }
+    entry.mapping_count = entry
+        .mapping_count
+        .checked_add(1)
+        .ok_or(exo_abi::SYS_ERR_BUSY)?;
     Ok(())
 }
 
 pub fn remove_mapping(owner: u32, handle: u64) -> Result<(), u64> {
-    let (slot, _, _) = resolve(owner, handle)?;
-    unsafe {
-        if FRAMES[slot].mapping_count == 0 {
-            return Err(exo_abi::SYS_ERR_INVALID);
-        }
-        FRAMES[slot].mapping_count -= 1;
+    let Some((slot, generation)) = decode_handle(handle) else {
+        return Err(exo_abi::SYS_ERR_INVALID);
+    };
+    let mut frames = FRAMES.lock();
+    let entry = &mut frames[slot];
+    if entry.owner != owner || entry.generation != generation {
+        return Err(exo_abi::SYS_ERR_NOT_FOUND);
     }
+    if entry.mapping_count == 0 {
+        return Err(exo_abi::SYS_ERR_INVALID);
+    }
+    entry.mapping_count -= 1;
     Ok(())
 }
 
@@ -159,19 +182,27 @@ pub fn cleanup_owner(owner: u32) {
     if owner == 0 {
         return;
     }
-    unsafe {
+    let mut reclaimed = [(0u64, 0u64); MAX_FRAMES];
+    let mut reclaimed_count = 0usize;
+    {
+        let mut frames = FRAMES.lock();
         let mut slot = 0usize;
         while slot < MAX_FRAMES {
-            let entry = FRAMES[slot];
+            let entry = frames[slot];
             if entry.owner == owner {
                 debug_assert_eq!(entry.mapping_count, 0);
-                mem::free_pages(entry.pa, entry.pages);
-                FRAMES[slot] = FrameEntry {
+                reclaimed[reclaimed_count] = (entry.pa, entry.pages);
+                reclaimed_count += 1;
+                frames[slot] = FrameEntry {
                     generation: next_generation(entry.generation),
                     ..FrameEntry::EMPTY
                 };
             }
             slot += 1;
         }
+    }
+    // 先释放Frame表锁，再进入Physical锁，保持对象锁顺序单向。
+    for &(pa, pages) in &reclaimed[..reclaimed_count] {
+        mem::free_pages(pa, pages);
     }
 }

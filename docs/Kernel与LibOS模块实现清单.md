@@ -1,8 +1,8 @@
 # Kernel 与 libOS 模块实现清单
 
 开发顺序与各阶段验收标准见：[Kernel开发Timeline.md](./Kernel开发Timeline.md)。
-**Frame + VSpace、Thread、Endpoint/Reply 和 Notification 已完成第一阶段实现**；
-下一阶段是定时器抢占与跨地址空间 IPC。
+**Frame + VSpace、四核Thread、Endpoint/Reply、Notification和静态优先级抢占调度已完成**；
+下一阶段是真机SMP验收与实时性分析。
 
 ## 共享 ABI
 
@@ -11,6 +11,7 @@
 - 定义 syscall 编号和 AArch64 寄存器调用约定。
 - 定义 `UserBootInfo`、`DeviceResource`、`PciHostInfo`、`PciRange`、`PciIntxRoute`。
 - `UserBootInfo` 包含可选的直接 xHCI 资源和 `XHCI_TRANSPORT_PCI/DIRECT` 传输类型。
+- ABI version 6包含`cpu_count`和完整Endpoint生命周期；当前QEMU和Pi5目标要求4个逻辑CPU上线。
 - 定义 BootInfo、UART、ECAM、xHCI BAR、heap、stack、DMA arena和Frame arena的固定EL0 VA。
 - 使用 `magic + version + size` 校验 EL1 与 EL0 的 ABI。
 
@@ -21,6 +22,7 @@
 实现位置：`kernel/src/main.rs`、`kernel/src/kmain.rs`、`kernel/src/boot/boot_info.rs`
 
 - 接收 UEFI/EL2 提供的内存图和 DTB 地址。
+- 解析CPU/PSCI信息，通过SMC `PSCI_CPU_ON`拉起CPU1..3，并等待online mask为`0xf`。
 - 初始化 EL1 栈、异常向量、物理内存和 stage-1 页表。
 - 加载 `libos.elf`。
 - 创建只读 `UserBootInfo`，把其 EL0 VA 放入 `x0`。
@@ -122,19 +124,24 @@ SYS_DEVICE_RELEASE(device_handle)
 - 复制`p_filesz`内容并把`p_memsz - p_filesz`的BSS清零。
 - 拒绝segment与BootInfo、MMIO、heap、stack和DMA arena重叠。
 
-### 6. 线程管理与协作式调度
+### 6. 四核线程与静态优先级调度
 
-实现位置：`kernel/src/object/thread.rs`、`kernel/src/scheduler/mod.rs`
+实现位置：`kernel/src/arch/aarch64/smp.rs`、`kernel/src/object/thread.rs`、
+`kernel/src/scheduler/priority.rs`、`kernel/src/scheduler/timer.rs`
 
 - 一个任务表示一个EL0地址空间及其MMIO、DMA、IRQ等资源；一个任务可以包含多个线程。
-- 每个线程记录`x0..x30`、`SP_EL0`、`ELR_EL1`、`SPSR_EL1`和独立用户栈。
-- 维护`Ready`、`Running`、`Blocked`、`Exited`线程状态和就绪队列。
-- 实现线程创建、退出、yield、阻塞、唤醒和上下文切换。
+- CPU0解析DTB CPU节点并通过PSCI `CPU_ON`拉起CPU1..3；每核分别初始化栈、
+  `VBAR_EL1`、GIC CPU Interface和Generic Timer。
+- 每个线程记录完整整数/SIMD上下文、独立用户栈、CPU亲和性、基础/有效优先级、
+  最大可控优先级、运行CPU和累计运行ticks。
+- 维护`Ready`、`Running`、`Blocked`、`Exited`线程状态。
+- 每核维护64级Ready Queue和非空bitmap；数值较大的优先级先运行。
+- 高优先级Ready线程立即抢占低优先级线程；同优先级线程每1ms移到FIFO队尾。
 - Notification WAIT只阻塞调用线程；设备IRQ到达后唤醒对应等待线程。
-- 线程共享所属任务的地址空间和设备资源，但不能访问其他任务的资源。
-- 第一阶段实现单核协作式调度，后续再增加定时器抢占、优先级和多核调度。
-- 已实现 `kernel/src/object/thread.rs`、`kernel/src/scheduler/mod.rs` 和完整 EL0 异常帧保存/恢复。
-- Kernel只提供线程隔离和调度机制；线程库、同步原语和设备处理策略由libOS实现。
+- 跨核唤醒使用SGI0请求远程重调度；页表变化使用SGI1完成TLB shootdown；
+  任务退出使用SGI2停止其他核后再统一回收。
+- Endpoint Call建立最多16线程的传递优先级继承链，Reply、取消或退出后恢复。
+- libOS选择线程亲和性和基础优先级；Kernel校验MCP并强制执行调度。
 
 ### 7. Endpoint、Reply 与 Notification
 
@@ -146,10 +153,13 @@ SYS_DEVICE_RELEASE(device_handle)
 - 每个线程有一页固定 IPC Buffer；Kernel 只复制 `IpcMessage`，不保存任意 EL0 指针。
 - Notification 保存 pending badge，`SIGNAL` 使用 OR 合并，`WAIT` 阻塞当前线程，
   `POLL` 无事件时返回 `SYS_ERR_WOULD_BLOCK`。
-- IRQ 可以绑定 Notification；IRQ 到达时 EL1 记录 IAR、暂时禁用中断并 signal，
-  用户处理设备后通过现有 `SYS_IRQ_ACK` 完成 EOI。旧 `SYS_IRQ_WAIT/ACK` 仍兼容。
+- IRQ 可以绑定 Notification；IRQ 到达时 EL1 禁用 SPI、写 EOI、记录待 ACK 状态并 signal。
+  用户处理设备后通过 `SYS_IRQ_ACK` 重新使能 SPI。这样 active 设备 IRQ 不会阻挡
+  Generic Timer 抢占和驱动线程唤醒；旧 `SYS_IRQ_WAIT/ACK` 仍使用延迟 EOI。
 - xHCI executor 已使用 `IRQ -> Notification -> handle_event -> IRQ_ACK`，
   MMIO、DMA ring和Event Ring仍由libOS直接访问。
+- Endpoint Call把Caller的有效优先级传递给Server，避免中优先级线程造成优先级反转；
+  Reply后撤销继承。Notification和单向Send只唤醒线程，不建立长期优先级继承。
 
 
 ## EL1 Kernel 系统调用接口
@@ -215,37 +225,40 @@ DMA 页仍然来自普通物理 RAM，但使用独立接口表达“连续、设
 
 | syscall          | 输入       | 返回      | Kernel处理                                     |
 | ---------------- | ---------- | --------- | ---------------------------------------------- |
-| `SYS_IRQ_BIND`   | `x0=INTID, x1=NotificationHandle, x2=badge` | `0`成功 | 校验授权，配置并绑定SPI；`x1=0`保留旧WAIT路径，非零时直接投递Notification。 |
+| `SYS_IRQ_BIND`   | `x0=INTID, x1=NotificationHandle, x2=badge, x3=target_cpu` | `0`成功 | 校验授权和CPU，配置SPI目标；`x1=0`保留旧WAIT路径。 |
 | `SYS_IRQ_WAIT`   | 无         | 实际INTID | enable绑定IRQ，执行WFI，读取IAR并暂时disable。 |
-| `SYS_IRQ_ACK`    | `x0=INTID` | `0`成功   | 校验active IAR token并写EOIR。                 |
+| `SYS_IRQ_ACK`    | `x0=INTID` | `0`成功   | 校验待ACK状态；Notification模式重新使能SPI，旧WAIT模式先写EOIR。 |
 | `SYS_IRQ_UNBIND` | `x0=INTID` | `0`成功   | 禁用IRQ并删除binding。                         |
 
 Notification 绑定扩展使用同一个 `SYS_IRQ_BIND`：
 
 ```text
-SYS_IRQ_BIND(x0=INTID, x1=NotificationHandle, x2=badge)
+SYS_IRQ_BIND(x0=INTID, x1=NotificationHandle, x2=badge, x3=target_cpu)
 ```
 
-`x1=0` 保持旧的 `SYS_IRQ_WAIT/ACK` 模式；`x1!=0` 时绑定成功即允许该 SPI，
-硬件中断由 Kernel 投递到 Notification，用户处理完设备后仍调用 `SYS_IRQ_ACK`。
+`x1=0` 保持旧的 `SYS_IRQ_WAIT/ACK` 模式；`x1!=0` 时绑定成功即允许该 SPI。
+硬件中断由 Kernel 禁用SPI并EOI后投递到Notification；用户处理完设备后调用
+`SYS_IRQ_ACK`重新使能SPI。`target_cpu=IRQ_TARGET_CURRENT`表示投递到调用线程
+当前所在CPU；USB线程在CPU2绑定xHCI时使用该值。
 
 ### 3. Thread接口
 
 | syscall | 输入 | 返回/行为 | Kernel处理 |
 | --- | --- | --- | --- |
-| `SYS_THREAD_CREATE` | `x0=entry, x1=arg, x2=priority` | `ThreadHandle` | 校验入口位于EL0可执行段，分配独立栈和IPC Buffer，加入Ready队列。 |
+| `SYS_THREAD_CREATE` | `x0=entry, x1=arg, x2=cpu, x3=priority, x4=max_control_priority` | `ThreadHandle` | 校验入口、CPU和`0..63`优先级，分配栈/IPC Buffer并加入目标核Ready Queue。 |
+| `SYS_THREAD_SET_PRIORITY` | `x0=ThreadHandle, x1=priority` | `0/error` | 校验目标所有权及调用线程MCP，更新基础/有效优先级并按需跨核抢占。 |
 | `SYS_THREAD_EXIT` | `x0=exit_code` | 不返回 | 回收当前线程栈和IPC Buffer；最后线程退出时清理任务。 |
-| `SYS_THREAD_YIELD` | 无 | `0` | 当前线程重新进入Ready队列，按优先级/FIFO选择下一个线程。 |
-| `SYS_THREAD_SET_PRIORITY` | `x0=ThreadHandle, x1=priority` | `0` | 校验owner和generation并更新优先级。 |
+| `SYS_THREAD_YIELD` | 无 | `0` | 仅放弃当前同优先级时间片，把线程移到该级FIFO队尾。 |
+| `SYS_THREAD_RUNTIME` | `x0=ThreadHandle` | Generic Timer ticks | 返回该线程累计执行时间，供libOS监控。 |
 
 线程入口约定为 `extern "C" fn(arg, thread_handle, ipc_buffer_va) -> !`。
-第一阶段为单核协作式调度，不提供定时器抢占系统调用。
 
 ### 4. Endpoint与Reply接口
 
 | syscall | 输入 | 返回/行为 | Kernel处理 |
 | --- | --- | --- | --- |
 | `SYS_ENDPOINT_CREATE` | 无 | `EndpointHandle` | 创建当前任务拥有的同步Endpoint。 |
+| `SYS_ENDPOINT_DESTROY` | `x0=EndpointHandle` | `0/error` | 仅销毁无Sender、Receiver和活动Reply的Endpoint，并递增generation。 |
 | `SYS_ENDPOINT_SEND` | `x0=EndpointHandle` | 阻塞直到接收者取得消息 | 从当前线程IPC Buffer复制消息。 |
 | `SYS_ENDPOINT_RECV` | `x0=EndpointHandle` | 阻塞直到发送者到达 | 把发送者消息复制到当前线程IPC Buffer。 |
 | `SYS_ENDPOINT_CALL` | `x0=EndpointHandle` | 阻塞直到Reply | 创建一次性ReplyHandle并等待回复。 |
@@ -286,23 +299,29 @@ SYS_IRQ_BIND(x0=INTID, x1=NotificationHandle, x2=badge)
 
 ### 2. 普通Frame封装
 
-实现位置：`libos/src/kernel_api/frame.rs`、`libos/src/apps/frame_smoke.rs`
+实现位置：`libos/src/kernel_api/frame.rs`、`libos/src/apps/system_smoke/frame.rs`
 
 - `Frame::allocate/map/free`和`Mapping::as_ptr/unmap`隐藏原始Handle。
 - 应用通过映射后的指针直接访问内存，资源释放时才再次调用Kernel。
-- `frame-smoke`覆盖零初始化、部分映射、W^X、错误Handle和状态转换。
-- `frame-fault-test`验证unmap后访问旧VA触发EL0 Data Abort。
+- `system-smoke`中的Frame模块覆盖零初始化、部分映射、W^X、错误Handle和状态转换。
 
 ### 3. Thread、Endpoint与Notification封装
 
-实现位置：`libos/src/kernel_api/thread.rs`、`libos/src/kernel_api/endpoint.rs`、`libos/src/kernel_api/notification.rs`、
-`libos/src/apps/thread_ipc_smoke.rs`
+实现位置：`libos/src/kernel_api/thread.rs`、`libos/src/kernel_api/endpoint.rs`、
+`libos/src/kernel_api/notification.rs`、`libos/src/apps/system_smoke/ipc.rs`、
+`libos/src/apps/system_smoke/priority.rs`
 
-- `Thread::spawn`、`yield_now`、`exit`和优先级设置封装线程系统调用。
-- `Endpoint::send/recv/call/reply/reply_recv`配合显式`IpcBuffer`使用；
+- `Thread::spawn(entry, arg, ThreadConfig)`明确指定CPU、基础优先级和MCP。
+- `set_priority`在MCP范围内调整基础优先级，`runtime_ticks`读取累计执行时间，
+  `current_cpu`读取Kernel写入`TPIDRRO_EL0`的逻辑CPU编号。
+- `yield_now`只把当前线程移到同优先级FIFO队尾。
+- `Endpoint::send/recv/call/reply/reply_recv/destroy`配合显式`IpcBuffer`使用；
   主线程使用固定首地址，新线程从入口参数`x2`取得自己的Buffer VA。
 - `Notification::signal/wait/poll/destroy/bind_irq`封装异步事件和IRQ绑定。
-- `thread-ipc-smoke`在无USB模式下验证线程、同步IPC、pending badge、过期Handle和回收。
+- `system-smoke`中的IPC模块验证线程、同步IPC、pending badge、过期Handle和回收。
+- `system-smoke`中的Priority模块验证CPU亲和性、同级1ms轮转、高优先级抢占和
+  Endpoint Call优先级继承。
+- `system-smoke`中的Robot模块同时运行控制、推理和可选USB线程，验证timer PPI、Endpoint、Notification和xHCI IRQ可以共存。
 
 ### 4. UART驱动
 
@@ -339,7 +358,7 @@ SYS_IRQ_BIND(x0=INTID, x1=NotificationHandle, x2=badge)
 
 ### 7. xHCI与USB
 
-实现位置：`libos/vendor/crab-usb`、`libos/src/drivers/usb.rs`
+实现位置：`libos/vendor/crab-usb`、`libos/src/drivers/xhci.rs`
 
 - QEMU后端从PCI枚举结果映射xHCI BAR并绑定INTx IRQ。
 - Pi5后端直接从`UserBootInfo.xhci`映射RP1 DWC3标准xHCI区域并绑定IRQ。
@@ -351,22 +370,25 @@ SYS_IRQ_BIND(x0=INTID, x1=NotificationHandle, x2=badge)
 
 ### 8. USB执行器
 
-当前实现位置：`libos/src/drivers/usb.rs::block_on_usb`
+当前实现位置：`libos/src/runtime/usb_executor.rs`
 
 - poll CrabUSB Future。
-- Future为Pending时调用IRQ WAIT。
-- xHCI IRQ返回后调用`EventHandler::handle_event()`。
+- Future为Pending时等待xHCI IRQ绑定的Notification。
+- Notification唤醒USB线程后调用`EventHandler::handle_event()`。
 - 消费Event Ring后调用IRQ ACK。
-- 当前USB应用仍使用单Future执行器；后续可把xHCI IRQ迁移到
-  `Notification::wait`并由独立USB线程处理，不改变设备协议层。
+- 当前USB任务使用单Future执行器；system-smoke中由独立USB线程运行，
+  Notification阻塞只影响该线程。
 
 ### 9. CDC ACM与FTDI USB串口
 
-当前实现位置：`libos/src/drivers/usb.rs`
+驱动实现位置：`libos/src/drivers/usb_serial.rs`
+
+应用实现位置：`libos/src/apps/usb_task.rs`、`libos/src/apps/usb_echo.rs`
 
 - 识别CDC控制接口（class `0x02`、subclass `0x02`、protocol `0x01`）和数据接口（class `0x0a`）。
 - 从descriptor动态寻找Bulk IN/OUT endpoint，发送`SET_LINE_CODING`和`SET_CONTROL_LINE_STATE`。
-- CDC ACM Bulk IN数据不删除状态头，直接提交到Bulk OUT回显。
+- `usb_serial.rs`只提供配置完成的异步字节流，不决定上层业务。
+- `usb_echo.rs`负责把CDC ACM Bulk IN数据原样提交到Bulk OUT。
 - 保留QEMU FTDI `0403:6001`兼容路径，继续处理FTDI状态字节和vendor request；它只在`usb-echo`诊断feature下启用。
 
 QEMU真实USB透传由`qemu/run.sh`控制：
@@ -460,12 +482,16 @@ LIBOS_FEATURES=qemu-xhci,usb-echo QEMU_USB_MODE=ftdi bash qemu/run.sh
 | -------------- | --------------------------------------------------------------------------------- |
 | `runtime.rs`   | 封装全部SVC；初始化固定普通heap；切换早期/直接UART日志。                          |
 | `memory.rs`    | `FRAME_ALLOC/MAP/UNMAP/FREE`；映射后向调用者提供直接VA访问。                    |
-| `thread.rs`    | `THREAD_CREATE/EXIT/YIELD/SET_PRIORITY`。                                      |
-| `ipc.rs`       | `ENDPOINT_CREATE/SEND/RECV/CALL/REPLY/REPLY_RECV`；固定IPC Buffer。             |
+| `thread.rs`    | `THREAD_CREATE/SET_PRIORITY/YIELD/EXIT/RUNTIME`；提供CPU亲和性和优先级配置。 |
+| `ipc.rs`       | `ENDPOINT_CREATE/DESTROY/SEND/RECV/CALL/REPLY/REPLY_RECV`；固定IPC Buffer。     |
 | `notification.rs` | `NOTIFICATION_CREATE/SIGNAL/WAIT/POLL/DESTROY`和Notification IRQ绑定。       |
 | `uart_echo.rs` | `MAP_MMIO`、`IRQ_BIND/WAIT/ACK/UNBIND`。                                          |
 | `pci.rs`       | QEMU路径使用`MAP_MMIO`映射ECAM；配置空间读写不再进入Kernel；Pi5路径不使用。       |
 | `dma.rs`       | `DMA_ALLOC/FREE`。                                                                |
-| `usb_app.rs`   | QEMU映射xHCI BAR，Pi5映射直接xHCI资源；使用`MAP_MMIO`和`IRQ_BIND/WAIT/ACK`。      |
-| `scservo.rs`   | 在CDC ACM Bulk IN/OUT之上运行Protocol 0和FeetechMotorsBus，不新增Kernel syscall。 |
+| `xhci.rs`      | QEMU映射xHCI BAR，Pi5映射直接xHCI资源；使用`MAP_MMIO`和Notification IRQ绑定。    |
+| `usb_executor.rs` | `NOTIFICATION_WAIT`、`IRQ_ACK`；在EL0消费CrabUSB Event Ring。                |
+| `usb_serial.rs` | 在xHCI之上配置CDC ACM/FTDI并暴露Bulk字节流，不新增Kernel syscall。              |
+| `usb_task.rs`  | 组合xHCI、USB串口和具体应用；自身不实现硬件协议。                               |
+| `scservo.rs`   | 在USB串口Bulk IN/OUT之上实现Protocol 0和FeetechMotorsBus。                      |
+| `scservo_app.rs` | 执行PING、读取和可选中位运动策略，不新增Kernel syscall。                       |
 | panic/错误退出 | `SYS_EXIT`。                                                                      |

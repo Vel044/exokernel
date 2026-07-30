@@ -1,30 +1,48 @@
-//! EL0 线程接口。
+//! EL0静态优先级线程接口。
 //!
-//! 线程对象和上下文保存在 EL1；libOS 只提交入口、参数和优先级，之后
-//! 通过共享地址空间继续运行。线程入口的三个参数由 Kernel 注入：
-//! x0=业务参数、x1=ThreadHandle、x2=该线程的 IPC Buffer VA。
+//! 线程创建时固定CPU亲和性；基础优先级可在MCP授权范围内修改。高优先级
+//! Ready线程由Kernel立即抢占，同优先级线程按1ms时间片轮转。
+
+#[derive(Clone, Copy)]
+pub struct ThreadConfig {
+    pub cpu: u8,
+    pub priority: u8,
+    pub max_control_priority: u8,
+}
+
+impl ThreadConfig {
+    pub const fn new(cpu: u8, priority: u8, max_control_priority: u8) -> Self {
+        Self {
+            cpu,
+            priority,
+            max_control_priority,
+        }
+    }
+}
 
 pub struct Thread {
-    pub(crate) handle: exo_abi::ThreadHandle,
+    handle: exo_abi::ThreadHandle,
 }
 
 impl Thread {
     pub fn spawn(
         entry: extern "C" fn(u64, u64, u64) -> !,
         arg: u64,
-        priority: u8,
+        config: ThreadConfig,
     ) -> Result<Self, u64> {
-        let handle = crate::runtime::svc(
+        let value = crate::runtime::svc5(
             exo_abi::SYS_THREAD_CREATE,
             entry as usize as u64,
             arg,
-            priority as u64,
+            config.cpu as u64,
+            config.priority as u64,
+            config.max_control_priority as u64,
         );
-        if exo_abi::is_sys_error(handle) {
-            Err(handle)
+        if exo_abi::is_sys_error(value) {
+            Err(value)
         } else {
             Ok(Self {
-                handle: exo_abi::ThreadHandle(handle),
+                handle: exo_abi::ThreadHandle(value),
             })
         }
     }
@@ -34,49 +52,53 @@ impl Thread {
     }
 
     pub fn set_priority(&self, priority: u8) -> Result<(), u64> {
-        match crate::runtime::svc(
+        result(crate::runtime::svc(
             exo_abi::SYS_THREAD_SET_PRIORITY,
             self.handle.0,
             priority as u64,
             0,
-        ) {
-            0 => Ok(()),
-            error => Err(error),
+        ))
+    }
+
+    pub fn runtime_ticks(&self) -> Result<u64, u64> {
+        let value = crate::runtime::svc(exo_abi::SYS_THREAD_RUNTIME, self.handle.0, 0, 0);
+        if exo_abi::is_sys_error(value) {
+            Err(value)
+        } else {
+            Ok(value)
         }
     }
 }
 
-pub fn yield_now() -> Result<(), u64> {
-    match crate::runtime::svc(exo_abi::SYS_THREAD_YIELD, 0, 0, 0) {
-        0 => Ok(()),
-        error => Err(error),
-    }
+/// 当前同优先级队列仍有其他线程时，把本线程移到队尾。
+pub fn yield_now() {
+    let _ = crate::runtime::svc(exo_abi::SYS_THREAD_YIELD, 0, 0, 0);
 }
 
-pub fn spawn(
-    entry: extern "C" fn(u64, u64, u64) -> !,
-    arg: u64,
-    priority: u8,
-) -> Result<exo_abi::ThreadHandle, u64> {
-    Thread::spawn(entry, arg, priority).map(|thread| thread.handle())
-}
-
-pub fn set_priority(handle: exo_abi::ThreadHandle, priority: u8) -> Result<(), u64> {
-    let result = crate::runtime::svc(
-        exo_abi::SYS_THREAD_SET_PRIORITY,
-        handle.0,
-        priority as u64,
-        0,
-    );
-    match result {
-        0 => Ok(()),
-        error => Err(error),
+/// Kernel写入只读`TPIDRRO_EL0`的逻辑CPU编号。
+pub fn current_cpu() -> usize {
+    let cpu: u64;
+    unsafe {
+        core::arch::asm!(
+            "mrs {cpu}, tpidrro_el0",
+            cpu = out(reg) cpu,
+            options(nomem, nostack)
+        );
     }
+    cpu as usize
 }
 
 pub fn exit(code: u64) -> ! {
     crate::runtime::svc(exo_abi::SYS_THREAD_EXIT, code, 0, 0);
     loop {
         core::hint::spin_loop();
+    }
+}
+
+fn result(value: u64) -> Result<(), u64> {
+    if value == 0 {
+        Ok(())
+    } else {
+        Err(value)
     }
 }

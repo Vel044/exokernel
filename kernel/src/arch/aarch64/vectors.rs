@@ -105,8 +105,10 @@ vector_table_el1:
     b .
 
 __vec_el1_sync:
-    // 272 字节 = x0..x30(31*8) + SP_EL0/ELR_EL1/SPSR_EL1。
-    sub sp, sp, #272
+    // 784字节 = GPR与系统返回状态272字节 + q0..q31共512字节。
+    // Rust/LLVM会使用NEON；若不保存q寄存器，SVC或Timer抢占会破坏
+    // 用户态局部变量、Vec复制和USB协议状态。
+    sub sp, sp, #784
     stp x0, x1, [sp, #0]
     stp x2, x3, [sp, #16]
     stp x4, x5, [sp, #32]
@@ -129,12 +131,28 @@ __vec_el1_sync:
     str x0, [sp, #256]
     mrs x0, spsr_el1
     str x0, [sp, #264]
+    stp q0, q1, [sp, #272]
+    stp q2, q3, [sp, #304]
+    stp q4, q5, [sp, #336]
+    stp q6, q7, [sp, #368]
+    stp q8, q9, [sp, #400]
+    stp q10, q11, [sp, #432]
+    stp q12, q13, [sp, #464]
+    stp q14, q15, [sp, #496]
+    stp q16, q17, [sp, #528]
+    stp q18, q19, [sp, #560]
+    stp q20, q21, [sp, #592]
+    stp q22, q23, [sp, #624]
+    stp q24, q25, [sp, #656]
+    stp q26, q27, [sp, #688]
+    stp q28, q29, [sp, #720]
+    stp q30, q31, [sp, #752]
     mov x0, sp
     bl el1_sync_handler_frame
     b __vec_el1_restore
 
 __vec_el1_irq:
-    sub sp, sp, #272
+    sub sp, sp, #784
     stp x0, x1, [sp, #0]
     stp x2, x3, [sp, #16]
     stp x4, x5, [sp, #32]
@@ -157,6 +175,22 @@ __vec_el1_irq:
     str x0, [sp, #256]
     mrs x0, spsr_el1
     str x0, [sp, #264]
+    stp q0, q1, [sp, #272]
+    stp q2, q3, [sp, #304]
+    stp q4, q5, [sp, #336]
+    stp q6, q7, [sp, #368]
+    stp q8, q9, [sp, #400]
+    stp q10, q11, [sp, #432]
+    stp q12, q13, [sp, #464]
+    stp q14, q15, [sp, #496]
+    stp q16, q17, [sp, #528]
+    stp q18, q19, [sp, #560]
+    stp q20, q21, [sp, #592]
+    stp q22, q23, [sp, #624]
+    stp q24, q25, [sp, #656]
+    stp q26, q27, [sp, #688]
+    stp q28, q29, [sp, #720]
+    stp q30, q31, [sp, #752]
     mov x0, sp
     bl el1_irq_handler_frame
 
@@ -167,10 +201,39 @@ __vec_el1_restore:
     ldr x16, [x19, #248]
     ldr x17, [x19, #256]
     ldr x18, [x19, #264]
-    add sp, sp, #272
+    add sp, sp, #784
+    b __restore_el0_frame
+
+// 辅助核第一次从EL1 idle进入EL0时并不存在异常入口创建的784字节临时帧，
+// 因此不能复用上面的`add sp, sp, #272`。Rust把Thread表内TrapFrame地址
+// 放入x0；这里直接恢复该线程的用户寄存器和返回状态。
+.global enter_el0_frame
+enter_el0_frame:
+    mov x19, x0
+    ldr x16, [x19, #248]
+    ldr x17, [x19, #256]
+    ldr x18, [x19, #264]
+
+__restore_el0_frame:
     msr sp_el0, x16
     msr elr_el1, x17
     msr spsr_el1, x18
+    ldp q0, q1, [x19, #272]
+    ldp q2, q3, [x19, #304]
+    ldp q4, q5, [x19, #336]
+    ldp q6, q7, [x19, #368]
+    ldp q8, q9, [x19, #400]
+    ldp q10, q11, [x19, #432]
+    ldp q12, q13, [x19, #464]
+    ldp q14, q15, [x19, #496]
+    ldp q16, q17, [x19, #528]
+    ldp q18, q19, [x19, #560]
+    ldp q20, q21, [x19, #592]
+    ldp q22, q23, [x19, #624]
+    ldp q24, q25, [x19, #656]
+    ldp q26, q27, [x19, #688]
+    ldp q28, q29, [x19, #720]
+    ldp q30, q31, [x19, #752]
     ldp x0, x1, [x19, #0]
     ldp x2, x3, [x19, #16]
     ldp x4, x5, [x19, #32]
@@ -195,6 +258,7 @@ __vec_el1_restore:
 extern "C" {
     pub static vector_table_el2: u8;
     pub static vector_table_el1: u8;
+    fn enter_el0_frame(frame: *mut crate::trap::TrapFrame) -> !;
 }
 
 pub fn install_el2() -> u64 {
@@ -219,4 +283,15 @@ pub fn install_el1() -> u64 {
 /// 还没跑到 kmain::el1_main() 里的 install_el1(), 也能进入同一套 EL1 handler。
 pub fn install_el1_from_el2() -> u64 {
     install_el1()
+}
+
+/// 从EL1调度器直接恢复一个保存的EL0线程上下文。
+///
+/// # Safety
+///
+/// `frame`必须指向Kernel Thread表中仍然有效且独占的`TrapFrame`；调用前
+/// 调度器必须已经把该线程状态设为Running，并保证其EL0页表、栈和入口仍
+/// 有效。该函数恢复全部通用寄存器后执行`eret`，因此永不返回Rust调用点。
+pub unsafe fn enter_saved_el0(frame: *mut crate::trap::TrapFrame) -> ! {
+    enter_el0_frame(frame)
 }

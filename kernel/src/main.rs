@@ -52,6 +52,7 @@ mod memory;
 mod object;
 mod resource;
 mod scheduler;
+mod sync;
 mod syscall;
 
 pub(crate) use arch::aarch64::vectors;
@@ -348,9 +349,15 @@ fn main() -> Status {
 
     if dtb == 0 {
         #[cfg(all(feature = "qemu", not(feature = "pi5")))]
-        uefi::println!(
-            "[exo] UEFI FDT not found; QEMU build will use embedded qemu-virt.dtb after EBS"
-        );
+        {
+            uefi::println!(
+                "[exo] UEFI FDT not found; QEMU build will use embedded qemu-virt.dtb after EBS"
+            );
+            // QEMU UEFI不把FDT放入配置表。正式资源发现仍使用内嵌DTB，
+            // 这里只在EL2启动桥阶段临时启用virt固定PL011，确保EBS到EL1
+            // 之间的故障也能输出；该地址不会写入EL0授权表。
+            uart::init(0x0900_0000);
+        }
         #[cfg(not(all(feature = "qemu", not(feature = "pi5"))))]
         uefi::println!("[exo] UEFI FDT not found; no reliable UART after EBS");
     }
@@ -441,7 +448,11 @@ fn main() -> Status {
         uart::puts("\r\n");
     }
 
-    let stack_top = core::ptr::addr_of!(EL1_BOOT_STACK) as u64 + EL1_BOOT_STACK_SIZE as u64;
+    // PE/COFF链接器不能可靠承载64KiB section alignment；静态区提供完整
+    // 64KiB容量，进入EL1前把栈顶向下对齐到AAPCS要求的16字节。最多舍弃
+    // 15字节，不影响栈容量。PSCI辅助核栈仍由页分配器按64KiB对齐。
+    let stack_top =
+        (core::ptr::addr_of!(EL1_BOOT_STACK) as u64 + EL1_BOOT_STACK_SIZE as u64) & !0xf;
     #[cfg(feature = "pi5")]
     let el1_entry = copied_el1_entry;
     #[cfg(not(feature = "pi5"))]

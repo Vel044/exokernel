@@ -7,4 +7,6 @@ pub(crate) mod pci;
 #[cfg(all(any(feature = "qemu-xhci", feature = "pi5-xhci"), feature = "scservo"))]
 pub(crate) mod scservo;
 #[cfg(any(feature = "qemu-xhci", feature = "pi5-xhci"))]
-pub(crate) mod usb;
+pub(crate) mod usb_serial;
+#[cfg(any(feature = "qemu-xhci", feature = "pi5-xhci"))]
+pub(crate) mod xhci;

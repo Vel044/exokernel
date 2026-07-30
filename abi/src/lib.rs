@@ -53,9 +53,20 @@ pub const SYS_NOTIFICATION_SIGNAL: u64 = 29;
 pub const SYS_NOTIFICATION_WAIT: u64 = 30;
 pub const SYS_NOTIFICATION_POLL: u64 = 31;
 pub const SYS_NOTIFICATION_DESTROY: u64 = 32;
+pub const SYS_THREAD_RUNTIME: u64 = 33;
+pub const SYS_ENDPOINT_DESTROY: u64 = 34;
+
+/// v1固定支持QEMU virt和Pi5的四个AArch64 CPU。
+pub const MAX_CPUS: usize = 4;
+/// 静态优先级范围为0..=63，数值越大越先运行。
+pub const MAX_THREAD_PRIORITY: u8 = 63;
+/// 相同优先级线程的强制轮转时间片。
+pub const THREAD_TIME_SLICE_NS: u64 = 1_000_000;
+/// IRQ绑定到发起系统调用的当前CPU。
+pub const IRQ_TARGET_CURRENT: u64 = u64::MAX;
 
 pub const USER_BOOT_INFO_MAGIC: u32 = 0x4558_4f42;
-pub const USER_BOOT_INFO_VERSION: u16 = 3;
+pub const USER_BOOT_INFO_VERSION: u16 = 6;
 pub const XHCI_TRANSPORT_NONE: u32 = 0;
 pub const XHCI_TRANSPORT_PCI: u32 = 1;
 pub const XHCI_TRANSPORT_DIRECT: u32 = 2;
@@ -194,7 +205,8 @@ pub struct UserBootInfo {
     pub uart: DeviceResource,
     pub xhci: DeviceResource,
     pub xhci_transport: u32,
-    pub reserved: u32,
+    /// Kernel已成功拉起并参与调度的CPU数量。
+    pub cpu_count: u32,
     pub pci: PciHostInfo,
     pub heap_base: u64,
     pub heap_size: u64,

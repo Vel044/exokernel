@@ -1,9 +1,9 @@
-//! 单核协作式调度器。
-//!
-//! 调度策略保持简单且确定：优先级较高的 Ready 线程先运行，同优先级
-//! 按进入 Ready 队列的顺序运行。时间片抢占留给后续 generic timer 阶段。
+//! 每核静态优先级抢占调度器。
 
-/// 从线程表取出下一个可运行线程。
-pub fn next_ready() -> Option<usize> {
-    crate::thread::take_next_ready()
-}
+pub mod priority;
+pub mod timer;
+
+pub use priority::{
+    init, on_thread_exit, on_thread_ready, on_timer, preempt_if_needed, priority_changed,
+    schedule_after_block, yield_current,
+};

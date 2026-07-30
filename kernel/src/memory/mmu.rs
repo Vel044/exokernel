@@ -23,6 +23,13 @@ const OUTPUT_ADDRESS_MASK: u64 = 0x0000_ffff_ffff_f000;
 pub const ATTR_NORMAL: u64 = 0; // 索引 0 = 普通内存 (Normal WB-WA, 可缓存)
 pub const ATTR_DEVICE: u64 = 1; // 索引 1 = 设备内存 (Device-nGnRE, 不可缓存, MMIO 用)
 pub const ATTR_NORMAL_NC: u64 = 2; // 索引 2 = 普通不可缓存内存 (DMA v1 用)
+                                   // SH[9:8]=0b11表示Inner Shareable。四核共享Thread表、Ready Queue、页表和
+                                   // EL0普通RAM时必须使用该属性，才能让原子操作、缓存一致性和ISH barrier
+                                   // 位于同一个共享域；只标Normal Cacheable而SH=0在SMP下是不完整的。
+const SH_INNER: u64 = 0b11 << 8;
+// Device寄存器本身不可缓存，但多个CPU可能访问同一个GIC Distributor，
+// 因而用Outer Shareable表达系统级设备观察顺序。
+const SH_OUTER: u64 = 0b10 << 8;
 
 // ── 访问权限 ──
 pub const AP_RW_EL1: u64 = 0 << 6; // EL1 可读写, EL0 不可访问
@@ -30,13 +37,18 @@ pub const AP_RW_EL0: u64 = 1 << 6; // EL1/EL0 都可读写
 pub const AP_RO_EL0: u64 = 3 << 6; // EL1/EL0 都只读
 
 // ── 预设的映射标志组合 ──
-pub const MMU_KERNEL: u64 = AP_RW_EL1 | (ATTR_NORMAL << 2) | (1 << 10) | (1 << 54);
-pub const MMU_USER_RX: u64 = AP_RO_EL0 | (ATTR_NORMAL << 2) | (1 << 10) | (1 << 53);
-pub const MMU_USER_RW: u64 = AP_RW_EL0 | (ATTR_NORMAL << 2) | (1 << 10) | (1 << 53) | (1 << 54);
-pub const MMU_USER_RO: u64 = AP_RO_EL0 | (ATTR_NORMAL << 2) | (1 << 10) | (1 << 53) | (1 << 54);
-pub const MMU_DEV: u64 = AP_RW_EL1 | (ATTR_DEVICE << 2) | (1 << 10) | (1 << 53) | (1 << 54);
-pub const MMU_USER_DEV: u64 = AP_RW_EL0 | (ATTR_DEVICE << 2) | (1 << 10) | (1 << 53) | (1 << 54);
-pub const MMU_USER_DMA: u64 = AP_RW_EL0 | (ATTR_NORMAL_NC << 2) | (1 << 10) | (1 << 53) | (1 << 54);
+pub const MMU_KERNEL: u64 = AP_RW_EL1 | (ATTR_NORMAL << 2) | SH_INNER | (1 << 10) | (1 << 54);
+pub const MMU_USER_RX: u64 = AP_RO_EL0 | (ATTR_NORMAL << 2) | SH_INNER | (1 << 10) | (1 << 53);
+pub const MMU_USER_RW: u64 =
+    AP_RW_EL0 | (ATTR_NORMAL << 2) | SH_INNER | (1 << 10) | (1 << 53) | (1 << 54);
+pub const MMU_USER_RO: u64 =
+    AP_RO_EL0 | (ATTR_NORMAL << 2) | SH_INNER | (1 << 10) | (1 << 53) | (1 << 54);
+pub const MMU_DEV: u64 =
+    AP_RW_EL1 | (ATTR_DEVICE << 2) | SH_OUTER | (1 << 10) | (1 << 53) | (1 << 54);
+pub const MMU_USER_DEV: u64 =
+    AP_RW_EL0 | (ATTR_DEVICE << 2) | SH_OUTER | (1 << 10) | (1 << 53) | (1 << 54);
+pub const MMU_USER_DMA: u64 =
+    AP_RW_EL0 | (ATTR_NORMAL_NC << 2) | SH_INNER | (1 << 10) | (1 << 53) | (1 << 54);
 
 static mut ACTIVE_TABLE: u64 = 0;
 
@@ -323,24 +335,30 @@ pub fn active_table() -> u64 {
 }
 
 pub fn flush_el1_tlb() {
-    unsafe { core::arch::asm!("dsb ishst; tlbi vmalle1; dsb ish; isb") };
+    crate::arch::aarch64::smp::shootdown_tlb();
 }
 
 pub fn flush_el1_tlb_range(va: u64, pages: u64) {
-    unsafe { core::arch::asm!("dsb ishst", options(nostack)) };
-    if pages > 256 {
-        unsafe { core::arch::asm!("tlbi vmalle1", options(nostack)) };
-    } else {
-        let mut index = 0u64;
-        while index < pages {
-            let operand = (va + index * 4096) >> 12;
-            unsafe {
-                core::arch::asm!("tlbi vale1is, {}", in(reg) operand, options(nostack));
-            }
-            index += 1;
-        }
-    }
-    unsafe { core::arch::asm!("dsb ish; isb", options(nostack)) };
+    let _ = (va, pages);
+    // 当前四核共享一个VSpace且尚未分配ASID。为保证线程栈/IPC页在slot
+    // 复用时绝不命中远程核旧翻译，第一版统一广播VMALLE1IS。
+    crate::arch::aarch64::smp::shootdown_tlb();
+}
+
+/// 仅在当前PE执行TLB失效，不发送SGI。
+///
+/// 该原语供SMP shootdown协议使用；普通映射代码必须调用上面的公开接口，
+/// 否则只会清除调用核的TLB，远程EL0线程仍可能访问已经释放的物理页。
+pub(crate) fn flush_el1_tlb_local() {
+    unsafe {
+        core::arch::asm!(
+            "dsb ishst",
+            "tlbi vmalle1is",
+            "dsb ish",
+            "isb",
+            options(nostack)
+        )
+    };
 }
 
 /// 将普通Frame此前的CPU写入同步到指令侧，供RW解除后重新映射为RX。

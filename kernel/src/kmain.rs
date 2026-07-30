@@ -30,6 +30,7 @@ pub extern "C" fn el1_main(boot_info_addr: u64) -> ! {
     // 然后执行 eret。AArch64 C ABI 规定第一个参数在 x0, 所以这里的
     // boot_info_addr 就是 EL2 传下来的 BootInfo 物理地址。
 
+    crate::arch::aarch64::cpu::set_id(0);
     // 安装 EL1 异常向量表 — 必须尽早, EL0 的 SVC/Abort/IRQ 都走 VBAR_EL1。
     let vbar = crate::vectors::install_el1();
 
@@ -79,6 +80,7 @@ pub extern "C" fn el1_main(boot_info_addr: u64) -> ! {
     // 从完整 DTB 生成一次平台资源快照；后续 UserBootInfo、保护表和任务
     // grant 都使用同一份结果，完整 DTB 不会映射给 EL0。
     let platform = crate::resources::discover(dtb_addr).expect("invalid platform DTB");
+    crate::arch::aarch64::smp::set_cpu_count(platform.cpus.count);
     let uart_reg = platform.uart;
 
     // 把 DTB 发现的 UART 地址所在的 2MB block 映射为 Device memory,
@@ -282,7 +284,7 @@ pub extern "C" fn el1_main(boot_info_addr: u64) -> ! {
             } else {
                 exo_abi::XHCI_TRANSPORT_NONE
             },
-            reserved: 0,
+            cpu_count: platform.cpus.count as u32,
             pci: pci_info,
             heap_base: USER_HEAP_BASE,
             heap_size: USER_HEAP_SIZE,
@@ -335,6 +337,26 @@ pub extern "C" fn el1_main(boot_info_addr: u64) -> ! {
     );
     crate::ipc::init();
     crate::thread::install_initial(loaded.entry, USER_STACK_TOP, initial_ipc_pa);
+
+    // CPU0完成共享页表、GIC Distributor和任务对象初始化后，才允许辅助核
+    // 进入共享调度器。PSCI context_id携带逻辑CPU编号，辅助核使用独立EL1栈。
+    // 任一目标核未在一秒内置online位即停止启动，避免伪装成可用的四核系统。
+    if !crate::arch::aarch64::smp::boot_secondaries(&platform.cpus, root, platform.timer_irq.intid)
+    {
+        uart::puts("[exo] SMP startup failed: all four PSCI CPUs are required\r\n");
+        loop {
+            unsafe { core::arch::asm!("wfe", options(nomem, nostack)) };
+        }
+    }
+    uart::puts("[exo] SMP online mask=");
+    uart::hex(crate::arch::aarch64::smp::online_mask());
+    uart::puts(" cpu_count=");
+    uart::hex(crate::arch::aarch64::smp::cpu_count() as u64);
+    uart::puts("\r\n");
+
+    // 辅助核上线后再启动CPU0的1ms抢占Timer，避免SMP握手期间把尚未
+    // 进入EL0的CPU0误当成正在运行的用户线程。
+    crate::scheduler::init(platform.timer_irq.intid);
 
     uart::puts("[exo] enter EL0 libOS...\r\n");
 

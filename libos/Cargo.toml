@@ -23,9 +23,7 @@ scservo = []
 scservo-move = ["scservo"]
 usb-echo = []
 uart-echo = []
-frame-smoke = []
-frame-fault-test = ["frame-smoke"]
-thread-ipc-smoke = []
+system-smoke = []
 
 [profile.dev]
 panic = "abort"

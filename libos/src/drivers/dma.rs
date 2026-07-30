@@ -1,3 +1,16 @@
+//! CrabUSB到外核DMA系统调用之间的EL0适配层。
+//!
+//! ```text
+//! CrabUSB请求DmaOp::alloc_contiguous
+//!   → 在固定DMA_ARENA中选择一个不重叠EL0 VA
+//!   → SYS_DMA_ALLOC(size, alignment, va)
+//!   → EL1分配连续PA、清零、建立Non-cacheable映射
+//!   → 返回DmaAllocHandle { CPU指针=va, DMA地址=pa }
+//! ```
+//!
+//! xHCI读取的DCBAA、TRB、Event Ring和数据buffer都保存DMA地址；CPU则通过
+//! EL0 VA填写内容。v1无IOMMU，因此DMA地址就是PA，但EL0不能自行指定或释放PA。
+
 use core::{alloc::Layout, num::NonZeroUsize, ptr::NonNull, time::Duration};
 
 use dma_api::{
@@ -9,7 +22,9 @@ const SLOT_COUNT: usize = 64;
 
 #[derive(Clone, Copy)]
 struct Slot {
+    /// CPU在EL0中访问这块DMA内存的虚拟地址。
     va: u64,
+    /// Kernel实际分配并记录的page-rounded字节数。
     size: usize,
 }
 
@@ -25,6 +40,7 @@ pub struct UsbKernel;
 
 impl UsbKernel {
     fn allocate(&self, constraints: DmaConstraints, layout: Layout) -> Option<DmaAllocHandle> {
+        // xHCI/DmaOp可能请求任意字节数；Kernel接口按4KiB页分配。
         let size = page_round(layout.size().max(1))?;
         let alignment = layout
             .align()
@@ -34,6 +50,8 @@ impl UsbKernel {
             return None;
         }
 
+        // 这张EL0表只负责在固定DMA VA arena中找空洞；真正的物理页所有权
+        // 记录在EL1 task表中，伪造或重复释放仍会被Kernel拒绝。
         let mut slots = SLOTS.lock();
         let slot_index = slots.iter().position(|slot| slot.size == 0)?;
         let mut candidate = exo_abi::DMA_ARENA_BASE;
@@ -56,6 +74,8 @@ impl UsbKernel {
             candidate = collision_end;
         }
 
+        // 跨入EL1：Kernel分配连续PA并映射到candidate。返回值dma在当前
+        // 无IOMMU平台等于PA，供xHCI写入寄存器或TRB。
         let dma = crate::runtime::dma_alloc(size, alignment, candidate).ok()?;
         if !constraints_satisfied(constraints, dma, size) {
             let _ = crate::runtime::dma_free(candidate, size);
@@ -65,11 +85,14 @@ impl UsbKernel {
             va: candidate,
             size,
         };
+        // pointer供EL0 CPU访问，DmaAddr供xHCI设备访问；二者不是同一地址域。
         let pointer = NonNull::new(candidate as *mut u8)?;
         Some(unsafe { DmaAllocHandle::new(pointer, DmaAddr::from(dma), layout) })
     }
 
     fn release(&self, pointer: NonNull<u8>) {
+        // CrabUSB只交回CPU指针。先在EL0 slot表恢复size，再用VA+size请求
+        // Kernel核对所有权、撤销PTE并释放对应物理页。
         let va = pointer.as_ptr() as u64;
         let mut slots = SLOTS.lock();
         if let Some(slot) = slots
@@ -120,6 +143,8 @@ impl DmaOp for UsbKernel {
         size: NonZeroUsize,
         _direction: DmaDirection,
     ) -> Result<DmaMapHandle, DmaError> {
+        // 普通EL0 buffer不保证物理连续或设备可见，因此额外申请DMA bounce
+        // buffer。ToDevice时复制进去，FromDevice时再复制回来。
         let layout = Layout::from_size_align(size.get(), 1)?;
         let bounce = self
             .allocate(constraints, layout)
@@ -163,6 +188,8 @@ impl DmaOp for UsbKernel {
         size: usize,
         direction: DmaDirection,
     ) {
+        // CPU普通内存 → DMA bounce内存，然后用DMB OSH保证设备在doorbell
+        // 之后观察到完整数据。
         if matches!(
             direction,
             DmaDirection::ToDevice | DmaDirection::Bidirectional
@@ -187,6 +214,7 @@ impl DmaOp for UsbKernel {
         size: usize,
         direction: DmaDirection,
     ) {
+        // xHCI写入DMA bounce内存 → 复制回调用者普通buffer，再交给协议层。
         if matches!(
             direction,
             DmaDirection::FromDevice | DmaDirection::Bidirectional
@@ -246,5 +274,7 @@ fn align_up(value: u64, alignment: u64) -> Option<u64> {
 
 #[inline]
 fn mb() {
+    // dmb osh约束Outer Shareable域内的内存访问顺序：ring/TRB内容必须先于
+    // MMIO doorbell可见，completion数据也必须先于CPU后续读取可见。
     unsafe { core::arch::asm!("dmb osh", options(nostack, preserves_flags)) };
 }
