@@ -105,7 +105,6 @@ pub fn load(root: u64, image: &[u8]) -> Result<LoadedElf, &'static str> {
             va: vaddr,
             pa,
             pages,
-            executable: (flags & PF_X) != 0,
         };
         result.segment_count += 1;
     }

@@ -3,6 +3,18 @@ set -euo pipefail
 cd "$(dirname "$0")"
 export PATH="$HOME/.cargo/bin:$PATH"
 
+select_objcopy() {
+    if [ -n "${OBJCOPY:-}" ]; then
+        printf '%s\n' "$OBJCOPY"
+    elif [ -x /opt/homebrew/opt/llvm/bin/llvm-objcopy ]; then
+        printf '%s\n' /opt/homebrew/opt/llvm/bin/llvm-objcopy
+    elif command -v llvm-objcopy >/dev/null 2>&1; then
+        command -v llvm-objcopy
+    else
+        command -v rust-objcopy
+    fi
+}
+
 source ./scripts/sudo_keychain.sh
 sudo_keychain_prepare
 
@@ -15,7 +27,8 @@ cd ..
 
 echo ""
 echo "==> 2. strip → libos.elf"
-rust-objcopy --strip-debug target/aarch64-unknown-none/release/libos libos/libos.elf
+OBJCOPY_BIN="$(select_objcopy)"
+"$OBJCOPY_BIN" --strip-debug target/aarch64-unknown-none/release/libos libos/libos.elf
 echo "    libos.elf: $(wc -c < libos/libos.elf) bytes"
 
 echo ""

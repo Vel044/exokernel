@@ -202,22 +202,6 @@ pub fn dma_free(va: u64, size: usize) -> Result<(), u64> {
     }
 }
 
-pub fn irq_bind(intid: u32) -> Result<(), u64> {
-    // x1=0选择兼容的SYS_IRQ_WAIT模式；当前xHCI路径使用下面的
-    // irq_bind_notification，把IRQ直接投递到一个Notification对象。
-    match svc5(
-        exo_abi::SYS_IRQ_BIND,
-        intid as u64,
-        0,
-        0,
-        exo_abi::IRQ_TARGET_CURRENT,
-        0,
-    ) {
-        0 => Ok(()),
-        error => Err(error),
-    }
-}
-
 /// 将硬件 IRQ 绑定到 Notification。绑定后 IRQ 到达会由 Kernel 合并
 /// badge 并唤醒等待线程；用户处理完设备状态后仍需调用 irq_ack。
 pub fn irq_bind_notification(
@@ -238,11 +222,6 @@ pub fn irq_bind_notification(
         0 => Ok(()),
         error => Err(error),
     }
-}
-
-pub fn irq_wait() -> u32 {
-    // 旧接口：整个调用线程在Kernel里等待任一已绑定IRQ。
-    svc(exo_abi::SYS_IRQ_WAIT, 0, 0, 0) as u32
 }
 
 pub fn irq_ack(intid: u32) {

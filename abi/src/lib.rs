@@ -28,7 +28,7 @@ pub const SYS_PUTS: u64 = 2;
 pub const SYS_EXIT: u64 = 5;
 pub const SYS_MAP_MMIO: u64 = 6;
 pub const SYS_IRQ_BIND: u64 = 7;
-pub const SYS_IRQ_WAIT: u64 = 8;
+// 编号8曾用于已删除的直接中断等待接口。为保持ABI编号稳定而保留空洞。
 pub const SYS_IRQ_ACK: u64 = 9;
 pub const SYS_IRQ_UNBIND: u64 = 10;
 pub const SYS_UNMAP_MMIO: u64 = 11;
@@ -66,7 +66,8 @@ pub const THREAD_TIME_SLICE_NS: u64 = 1_000_000;
 pub const IRQ_TARGET_CURRENT: u64 = u64::MAX;
 
 pub const USER_BOOT_INFO_MAGIC: u32 = 0x4558_4f42;
-pub const USER_BOOT_INFO_VERSION: u16 = 6;
+// v7移除旧IRQ_WAIT，并要求每个IRQ_BIND都携带有效Notification和badge。
+pub const USER_BOOT_INFO_VERSION: u16 = 7;
 pub const XHCI_TRANSPORT_NONE: u32 = 0;
 pub const XHCI_TRANSPORT_PCI: u32 = 1;
 pub const XHCI_TRANSPORT_DIRECT: u32 = 2;

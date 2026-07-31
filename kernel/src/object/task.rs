@@ -3,11 +3,8 @@
 //! 这是后续 capability/task table 的最小前身。EL1 记录哪些物理页属于当前
 //! libOS，以及向它开放了哪些用户 VA、绑定了哪些 IRQ；EL0 不能自行伪造或释放这些资源。
 //!
-//! IRQ 模型：
-//!   - 旧路径使用 SYS_IRQ_WAIT/ACK，由调用线程等待 IRQ 并显式完成 EOI。
-//!   - 新路径把 IRQ 绑定到 Notification；EL1先禁用SPI并EOI，再投递badge，
-//!     用户处理设备后通过SYS_IRQ_ACK重新使能SPI。
-//!   - 每个 IRQ binding 单独保存 active IAR，多个设备 IRQ 可以同时存在。
+//! IRQ统一绑定到Notification：EL1先禁用SPI并EOI，再投递badge；用户线程
+//! 处理设备状态后通过SYS_IRQ_ACK清除pending状态并重新使能SPI。
 
 use crate::config::{
     USER_BOOT_INFO_VA, USER_HEAP_BASE, USER_HEAP_SIZE, USER_STACK_PAGES, USER_STACK_TOP,
@@ -48,7 +45,6 @@ pub struct OwnedPages {
     pub va: u64,
     pub pa: u64,
     pub pages: u64,
-    pub executable: bool,
 }
 
 impl OwnedPages {
@@ -56,7 +52,6 @@ impl OwnedPages {
         va: 0,
         pa: 0,
         pages: 0,
-        executable: false,
     };
 }
 
@@ -90,11 +85,8 @@ struct IrqBinding {
     intid: u32,
     notification: u64,
     badge: u64,
-    target_cpu: u8,
-    active_iar: u32,
-    /// Notification模式在EL1 IRQ入口已经EOI，ACK只需重新使能SPI。
-    /// 旧IRQ_WAIT模式保持false，由ACK完成延迟EOI。
-    eoi_done: bool,
+    /// IRQ入口已经完成GICC EOIR；该位表示设备处理尚未由EL0 ACK。
+    awaiting_ack: bool,
 }
 
 impl IrqBinding {
@@ -102,9 +94,7 @@ impl IrqBinding {
         intid: 0,
         notification: 0,
         badge: 0,
-        target_cpu: 0,
-        active_iar: 0,
-        eoi_done: false,
+        awaiting_ack: false,
     };
 }
 
@@ -328,26 +318,6 @@ pub fn range_available(va: u64, pages: u64) -> bool {
     true
 }
 
-/// 线程入口必须位于 ELF 的可执行 PT_LOAD 中，不能跳入可写数据区。
-pub fn is_user_executable(va: u64) -> bool {
-    let _guard = TASK_LOCK.lock();
-    unsafe {
-        if !CURRENT.active {
-            return false;
-        }
-        let mut index = 0usize;
-        while index < CURRENT.owned_count {
-            let item = CURRENT.owned[index];
-            let end = item.va.saturating_add(item.pages * exo_abi::PAGE_SIZE);
-            if item.executable && va >= item.va && va < end {
-                return true;
-            }
-            index += 1;
-        }
-    }
-    false
-}
-
 pub fn record_dma(va: u64, pa: u64, pages: u64) -> bool {
     let _guard = TASK_LOCK.lock();
     unsafe {
@@ -399,9 +369,9 @@ pub fn irq_flags(intid: u32) -> Option<u32> {
     None
 }
 
-/// 绑定一个 IRQ 到当前任务。绑定后该 IRQ 可在 SYS_IRQ_WAIT 中使能。
+/// 把一个获授权IRQ绑定到当前任务拥有的Notification。
 /// 返回 true 表示成功；false 表示已绑定或超出容量。
-pub fn bind_irq(intid: u32, notification: u64, badge: u64, target_cpu: usize) -> bool {
+pub fn bind_irq(intid: u32, notification: u64, badge: u64) -> bool {
     let _guard = TASK_LOCK.lock();
     unsafe {
         if !CURRENT.active || CURRENT.irq_binding_count >= MAX_IRQ_BINDINGS {
@@ -419,9 +389,7 @@ pub fn bind_irq(intid: u32, notification: u64, badge: u64, target_cpu: usize) ->
             intid,
             notification,
             badge,
-            target_cpu: target_cpu as u8,
-            active_iar: 0,
-            eoi_done: false,
+            awaiting_ack: false,
         };
         CURRENT.irq_binding_count += 1;
         true
@@ -439,10 +407,6 @@ pub fn unbind_irq(intid: u32) -> bool {
         while i < CURRENT.irq_binding_count {
             if CURRENT.irq_bindings[i].intid == intid {
                 gic::disable_spi(intid);
-                // 旧WAIT模式的active IRQ不能丢弃；Notification模式已经EOI。
-                if CURRENT.irq_bindings[i].active_iar != 0 && !CURRENT.irq_bindings[i].eoi_done {
-                    gic::write_eoir(CURRENT.irq_bindings[i].active_iar);
-                }
                 // 从数组中移除
                 CURRENT.irq_binding_count -= 1;
                 CURRENT.irq_bindings[i] = CURRENT.irq_bindings[CURRENT.irq_binding_count];
@@ -469,7 +433,7 @@ pub fn has_binding(intid: u32) -> bool {
     }
 }
 
-/// 返回 IRQ 绑定的异步通知对象和 badge；None 表示旧版 IRQ_WAIT 绑定。
+/// 返回IRQ绑定的异步通知对象和badge。
 pub fn irq_notification(intid: u32) -> Option<(u64, u64)> {
     let _guard = TASK_LOCK.lock();
     unsafe {
@@ -477,11 +441,7 @@ pub fn irq_notification(intid: u32) -> Option<(u64, u64)> {
         while index < CURRENT.irq_binding_count {
             let binding = CURRENT.irq_bindings[index];
             if binding.intid == intid {
-                return if binding.notification == 0 {
-                    None
-                } else {
-                    Some((binding.notification, binding.badge))
-                };
+                return Some((binding.notification, binding.badge));
             }
             index += 1;
         }
@@ -505,61 +465,14 @@ pub fn notification_is_bound(notification: u64) -> bool {
     false
 }
 
-/// 第一个绑定的 INTID (v1 单 IRQ 场景)。
-pub fn first_bound_intid() -> Option<u32> {
+/// IRQ入口在禁用SPI并写EOIR后记录“等待用户ACK”状态。
+pub fn record_irq_pending(intid: u32) {
     let _guard = TASK_LOCK.lock();
     unsafe {
-        if CURRENT.irq_binding_count > 0 {
-            Some(CURRENT.irq_bindings[0].intid)
-        } else {
-            None
-        }
-    }
-}
-
-pub fn enable_bound_irqs() {
-    let _guard = TASK_LOCK.lock();
-    unsafe {
-        let mut i = 0;
-        while i < CURRENT.irq_binding_count {
-            gic::enable_spi(CURRENT.irq_bindings[i].intid);
-            i += 1;
-        }
-    }
-}
-
-pub fn disable_bound_irqs() {
-    let _guard = TASK_LOCK.lock();
-    unsafe {
-        let mut i = 0;
-        while i < CURRENT.irq_binding_count {
-            gic::disable_spi(CURRENT.irq_bindings[i].intid);
-            i += 1;
-        }
-    }
-}
-
-// ── IAR token 管理 (由 IRQ handler 写入，WAIT/ACK 消费) ──
-
-/// 由 EL1 IRQ handler 调用，保存完整 GICC_IAR token。
-pub fn record_iar(iar_token: u32) {
-    record_iar_state(iar_token, false);
-}
-
-/// Notification模式在IRQ入口禁用SPI并立即EOI后记录待用户确认状态。
-pub fn record_iar_eoi_done(iar_token: u32) {
-    record_iar_state(iar_token, true);
-}
-
-fn record_iar_state(iar_token: u32, eoi_done: bool) {
-    let _guard = TASK_LOCK.lock();
-    unsafe {
-        let intid = gic::intid(iar_token);
         let mut index = 0usize;
         while index < CURRENT.irq_binding_count {
             if CURRENT.irq_bindings[index].intid == intid {
-                CURRENT.irq_bindings[index].active_iar = iar_token;
-                CURRENT.irq_bindings[index].eoi_done = eoi_done;
+                CURRENT.irq_bindings[index].awaiting_ack = true;
                 return;
             }
             index += 1;
@@ -567,38 +480,8 @@ fn record_iar_state(iar_token: u32, eoi_done: bool) {
     }
 }
 
-/// 检查是否有未确认的 active IRQ。
-pub fn has_active_iar() -> bool {
-    let _guard = TASK_LOCK.lock();
-    unsafe {
-        let mut index = 0usize;
-        while index < CURRENT.irq_binding_count {
-            if CURRENT.irq_bindings[index].active_iar != 0 {
-                return true;
-            }
-            index += 1;
-        }
-        false
-    }
-}
-
-/// 获取 active IAR 不清零（给 ACK 校验用）。
-pub fn active_iar() -> u32 {
-    let _guard = TASK_LOCK.lock();
-    unsafe {
-        let mut index = 0usize;
-        while index < CURRENT.irq_binding_count {
-            if CURRENT.irq_bindings[index].active_iar != 0 {
-                return CURRENT.irq_bindings[index].active_iar;
-            }
-            index += 1;
-        }
-        0
-    }
-}
-
-/// 确认 IRQ 已完成处理：校验INTID并重新使能SPI。旧IRQ_WAIT模式还会
-/// 写GICC_EOIR；Notification模式已在IRQ入口EOI，避免阻塞Timer抢占。
+/// 确认IRQ设备状态已处理完毕：校验INTID和pending状态并重新使能SPI。
+/// GICC EOIR已在IRQ入口完成，ACK不再持有或处理IAR token。
 /// 返回 true 表示成功。
 pub fn ack_irq(intid: u32) -> bool {
     let _guard = TASK_LOCK.lock();
@@ -606,15 +489,10 @@ pub fn ack_irq(intid: u32) -> bool {
         let mut index = 0usize;
         while index < CURRENT.irq_binding_count {
             if CURRENT.irq_bindings[index].intid == intid {
-                let iar = CURRENT.irq_bindings[index].active_iar;
-                if iar == 0 {
+                if !CURRENT.irq_bindings[index].awaiting_ack {
                     return false;
                 }
-                if !CURRENT.irq_bindings[index].eoi_done {
-                    gic::write_eoir(iar);
-                }
-                CURRENT.irq_bindings[index].active_iar = 0;
-                CURRENT.irq_bindings[index].eoi_done = false;
+                CURRENT.irq_bindings[index].awaiting_ack = false;
                 gic::enable_spi(intid);
                 return true;
             }
@@ -624,7 +502,7 @@ pub fn ack_irq(intid: u32) -> bool {
     }
 }
 
-/// 退出时清理所有 IRQ：禁用并清除 IAR。
+/// 退出时禁用全部IRQ并清除等待ACK状态。
 pub fn cleanup_irqs() {
     let _guard = TASK_LOCK.lock();
     unsafe {
@@ -632,15 +510,6 @@ pub fn cleanup_irqs() {
         while i < CURRENT.irq_binding_count {
             gic::disable_spi(CURRENT.irq_bindings[i].intid);
             i += 1;
-        }
-        let mut j = 0usize;
-        while j < CURRENT.irq_binding_count {
-            if CURRENT.irq_bindings[j].active_iar != 0 && !CURRENT.irq_bindings[j].eoi_done {
-                gic::write_eoir(CURRENT.irq_bindings[j].active_iar);
-            }
-            CURRENT.irq_bindings[j].active_iar = 0;
-            CURRENT.irq_bindings[j].eoi_done = false;
-            j += 1;
         }
         CURRENT.irq_binding_count = 0;
     }

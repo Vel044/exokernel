@@ -20,11 +20,24 @@ pub fn smoke_test(info: &exo_abi::UserBootInfo) -> Result<(), u64> {
     write_bytes(&mut uart, b"[libos:uart-mmio] EL0 PL011 TX works\r\n");
     drop(uart);
 
-    if let Err(error) = crate::runtime::irq_bind(resource.intid) {
+    // smoke也走正式Notification链路，避免保留一套只用于测试的中断等待ABI。
+    let notification = match crate::notification::Notification::create() {
+        Ok(notification) => notification,
+        Err(error) => {
+            let _ = crate::runtime::unmap_mmio(exo_abi::UART_VA, resource.size);
+            return Err(error);
+        }
+    };
+    if let Err(error) = notification.bind_irq(resource.intid, UART_IRQ_BADGE) {
+        let _ = notification.destroy();
         let _ = crate::runtime::unmap_mmio(exo_abi::UART_VA, resource.size);
         return Err(error);
     }
     if let Err(error) = crate::runtime::irq_unbind(resource.intid) {
+        let _ = crate::runtime::unmap_mmio(exo_abi::UART_VA, resource.size);
+        return Err(error);
+    }
+    if let Err(error) = notification.destroy() {
         let _ = crate::runtime::unmap_mmio(exo_abi::UART_VA, resource.size);
         return Err(error);
     }

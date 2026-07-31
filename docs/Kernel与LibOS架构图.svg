@@ -34,7 +34,7 @@
   <text x="85" y="242" style="font-size:14px;fill:#ffffff">• UART</text>
   <text x="85" y="269" style="font-size:14px;fill:#ffffff">• PCI</text>
   <text x="85" y="296" style="font-size:14px;fill:#ffffff">• xHCI</text>
-  <text x="85" y="323" style="font-size:14px;fill:#ffffff">• CDC ACM</text>
+  <text x="85" y="323" style="font-size:14px;fill:#ffffff">• USB Serial</text>
   <text x="85" y="350" style="font-size:14px;fill:#ffffff">• SCServo</text>
 
   <g>
@@ -43,7 +43,7 @@
     <text x="295" y="234" class="body">UserBootInfo.uart</text>
     <text x="295" y="260" class="body">映射 PL011 MMIO</text>
     <text x="295" y="286" class="body">TX 日志 / RX 回显</text>
-    <text x="295" y="312" class="body">IRQ WAIT / ACK</text>
+    <text x="295" y="312" class="body">Notification WAIT / IRQ ACK</text>
 
     <rect x="500" y="165" width="210" height="190" rx="7" fill="#e8f2fc" stroke="#90caf9"/>
     <text x="520" y="202" class="card-title">PCI</text>
@@ -60,10 +60,10 @@
     <text x="745" y="312" class="body">QEMU PCI / Pi5 RP1</text>
 
     <rect x="950" y="165" width="210" height="190" rx="7" fill="#e8f2fc" stroke="#90caf9"/>
-    <text x="970" y="202" class="card-title">CDC ACM</text>
-    <text x="970" y="234" class="body">控制与数据接口</text>
+    <text x="970" y="202" class="card-title">USB Serial</text>
+    <text x="970" y="234" class="body">CDC ACM / FTDI</text>
     <text x="970" y="260" class="body">1 Mbps / 8N1</text>
-    <text x="970" y="286" class="body">Control Request</text>
+    <text x="970" y="286" class="body">Control / Vendor Request</text>
     <text x="970" y="312" class="body">Bulk IN / Bulk OUT</text>
 
     <rect x="1175" y="165" width="210" height="190" rx="7" fill="#e3f4e8" stroke="#81c784"/>
@@ -90,6 +90,15 @@
   <text x="85" y="661" style="font-size:14px;fill:#ffffff">• 内存保护</text>
   <text x="85" y="688" style="font-size:14px;fill:#ffffff">• 中断与 SGI</text>
   <text x="85" y="715" style="font-size:14px;fill:#ffffff">• 调度与 IPC</text>
+  <line x1="75" y1="948" x2="220" y2="948" stroke="#607d8b" stroke-width="1"/>
+  <line x1="148" y1="966" x2="148" y2="1028" stroke="#607d8b" stroke-width="1"/>
+  <text x="111" y="970" text-anchor="middle" style="font-size:11px;fill:#dbe3e6">本系统</text>
+  <text x="111" y="994" text-anchor="middle" style="font-size:15px;font-weight:700;fill:#ffffff">6,873</text>
+  <text x="111" y="1015" text-anchor="middle" style="font-size:10px;fill:#dbe3e6">kernel/src</text>
+  <text x="185" y="970" text-anchor="middle" style="font-size:11px;fill:#dbe3e6">seL4</text>
+  <text x="185" y="994" text-anchor="middle" style="font-size:15px;font-weight:700;fill:#ffffff">15,685</text>
+  <text x="185" y="1015" text-anchor="middle" style="font-size:10px;fill:#dbe3e6">AArch64</text>
+  <text x="148" y="1043" text-anchor="middle" style="font-size:10px;fill:#b0bec5">有效代码行（排除空行与纯注释）</text>
 
   <text x="275" y="528" class="section-title" style="fill:#29434e">功能模块</text>
 
@@ -149,9 +158,8 @@
   <rect x="675" y="756" width="360" height="132" rx="7" fill="#ffffff" stroke="#ffb74d"/>
   <text x="695" y="782" class="card-title">IRQ</text>
   <text x="695" y="805" class="mono">IRQ_BIND    绑定IRQ、Notification和CPU</text>
-  <text x="695" y="828" class="mono">IRQ_WAIT    兼容路径，阻塞等待IRQ</text>
-  <text x="695" y="851" class="mono">IRQ_ACK     EOI并重新开放IRQ</text>
-  <text x="695" y="874" class="mono">IRQ_UNBIND  禁用并解除IRQ绑定</text>
+  <text x="695" y="839" class="mono">IRQ_ACK     设备处理完成后重新开放IRQ</text>
+  <text x="695" y="873" class="mono">IRQ_UNBIND  禁用并解除IRQ绑定</text>
 
   <rect x="1050" y="756" width="370" height="132" rx="7" fill="#ffffff" stroke="#ffb74d"/>
   <text x="1070" y="782" class="card-title">Thread + Scheduler</text>

@@ -5,6 +5,20 @@ cd "$(dirname "$0")"
 # 同时避免 Homebrew rustc/cargo 与 rust-objcopy 使用不同 LLVM 版本。
 export PATH="$HOME/.cargo/bin:$PATH"
 
+select_objcopy() {
+    if [ -n "${OBJCOPY:-}" ]; then
+        printf '%s\n' "$OBJCOPY"
+    elif [ -x /opt/homebrew/opt/llvm/bin/llvm-objcopy ]; then
+        # macOS Homebrew Rust与LLVM版本可能不同；直接使用独立llvm-objcopy
+        # 处理EL0 ELF，不加载rustc_driver，因此不会发生动态库版本冲突。
+        printf '%s\n' /opt/homebrew/opt/llvm/bin/llvm-objcopy
+    elif command -v llvm-objcopy >/dev/null 2>&1; then
+        command -v llvm-objcopy
+    else
+        command -v rust-objcopy
+    fi
+}
+
 echo "==> 1. 编译 libos (EL0)"
 cd libos
 LIBOS_FEATURES="${LIBOS_FEATURES:-qemu-xhci,scservo}"
@@ -14,7 +28,8 @@ cd ..
 
 echo ""
 echo "==> 2. strip → libos.elf"
-rust-objcopy --strip-debug target/aarch64-unknown-none/release/libos libos/libos.elf
+OBJCOPY_BIN="$(select_objcopy)"
+"$OBJCOPY_BIN" --strip-debug target/aarch64-unknown-none/release/libos libos/libos.elf
 echo "    libos.elf: $(wc -c < libos/libos.elf) bytes"
 
 echo ""

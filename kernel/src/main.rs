@@ -75,6 +75,7 @@ const FDT_GUID: uefi::Guid = uefi::guid!("b1b621d5-f19c-41a5-830b-d9152c69aae0")
 const EL1_BOOT_STACK_SIZE: usize = 64 * 1024;
 static mut EL1_BOOT_STACK: [u8; EL1_BOOT_STACK_SIZE] = [0; EL1_BOOT_STACK_SIZE];
 
+#[cfg(feature = "pi5")]
 #[inline(always)]
 fn clean_invalidate_exec_range(start: u64, size: u64) {
     let mut p = start & !63;
@@ -103,6 +104,7 @@ fn clean_invalidate_exec_range(start: u64, size: u64) {
     }
 }
 
+#[cfg(feature = "pi5")]
 fn boot_alloc_page(bi: &mut BootInfo) -> u64 {
     let mut i = 0usize;
     while i < bi.range_count {
@@ -123,14 +125,17 @@ fn boot_alloc_page(bi: &mut BootInfo) -> u64 {
     loop {}
 }
 
+#[cfg(feature = "pi5")]
 fn boot_l1_index(va: u64) -> usize {
     ((va >> 30) & 0x1ff) as usize
 }
 
+#[cfg(feature = "pi5")]
 fn boot_l2_index(va: u64) -> usize {
     ((va >> 21) & 0x1ff) as usize
 }
 
+#[cfg(feature = "pi5")]
 fn boot_map_2m(root: u64, bi: &mut BootInfo, va: u64, pa: u64, flags: u64) {
     unsafe {
         let l1 = root as *mut u64;
@@ -147,6 +152,7 @@ fn boot_map_2m(root: u64, bi: &mut BootInfo, va: u64, pa: u64, flags: u64) {
     }
 }
 
+#[cfg(feature = "pi5")]
 fn boot_map_range_2m(root: u64, bi: &mut BootInfo, start: u64, end: u64, flags: u64) {
     let mut va = start & !0x1f_ffff;
     let end = (end + 0x1f_ffff) & !0x1f_ffff;
@@ -156,6 +162,7 @@ fn boot_map_range_2m(root: u64, bi: &mut BootInfo, start: u64, end: u64, flags: 
     }
 }
 
+#[cfg(feature = "pi5")]
 fn install_el1_identity_stage1(root: u64) {
     msr!("ttbr0_el1", root);
     let tcr: u64 =

@@ -499,10 +499,6 @@ pub fn charge(slot: usize, ticks: u64) {
     RUNTIME_TICKS[slot].fetch_add(ticks, Ordering::AcqRel);
 }
 
-pub fn max_control_priority(slot: usize) -> u8 {
-    unsafe { THREADS[slot].max_control_priority }
-}
-
 pub fn cleanup_all(root: u64) {
     if !is_initialized() {
         return;

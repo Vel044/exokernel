@@ -10,8 +10,6 @@
 //! reg 信息喂给 protect.rs (建 MMIO 保护表),
 //! interrupts 留着以后给中断路由表。
 
-use crate::{protect, uart};
-
 // ── FDT 格式常量 ──
 // FDT header 开头是一个 32 位 magic number
 const FDT_MAGIC: u32 = 0xd00dfeed; // FDT 魔数 (大端)
@@ -315,10 +313,6 @@ pub fn find_uart_irq(dtb_paddr: u64) -> Option<IrqSpec> {
             return None;
         }
     }
-}
-
-pub fn find_uart_intid(dtb_paddr: u64) -> Option<u32> {
-    find_uart_irq(dtb_paddr).map(|irq| irq.intid)
 }
 
 /// 找到 ARM Generic Timer 的 non-secure physical timer PPI。
@@ -661,146 +655,6 @@ fn find_uart_in_dtb(dtb_paddr: u64) -> Option<RegRange> {
             i += 1;
         } else {
             return None;
-        }
-    }
-}
-
-/// 从物理地址 dtb_paddr 解析设备树, 打印每个节点的 reg 信息
-/// dtb_paddr 来自 BootInfo.dtb (UEFI ConfigTable 里的 FDT_GUID 条目)
-pub fn parse(dtb_paddr: u64) {
-    if dtb_paddr == 0 {
-        uart::puts("[dtb] DTB not found (paddr=0), skipping\r\n");
-        return;
-    }
-
-    // 把物理地址转成指针, 直接读内存
-    let ptr = dtb_paddr as *const u32;
-
-    // ── 读 FDT header (前 40 字节) ──
-    let magic = unsafe { read_be(ptr.add(0)) };
-    if magic != FDT_MAGIC {
-        uart::puts("[dtb] bad magic=");
-        uart::hex(magic as u64);
-        uart::puts("\r\n");
-        return;
-    }
-
-    let totalsize = unsafe { read_be(ptr.add(1)) }; // DTB 总字节数
-    let off_struct = unsafe { read_be(ptr.add(2)) }; // structure block 偏移
-    let off_strings = unsafe { read_be(ptr.add(3)) }; // strings block 偏移
-
-    uart::puts("[dtb] FDT found, size=");
-    uart::hex(totalsize as u64);
-    uart::puts(" struct_off=");
-    uart::hex(off_struct as u64);
-    uart::puts(" strings_off=");
-    uart::hex(off_strings as u64);
-    uart::puts("\r\n");
-
-    // ── 遍历 structure block ──
-    // sp = structure block 的基址
-    // ss = strings block 的基址
-    let sp = (dtb_paddr + off_struct as u64) as *const u32;
-    let ss = (dtb_paddr + off_strings as u64) as *const u8;
-    let mut addr_cells: u32 = 2; // 地址单元格数: 默认 2 = 64 位地址
-    let mut size_cells: u32 = 2; // 大小单元格数: 默认 2 = 64 位大小
-    let mut current_is_memory = false;
-
-    let mut i = 0usize; // 当前指向 structure block 的第几个 u32
-    loop {
-        let token = unsafe { read_be(sp.add(i)) };
-        if token == FDT_END {
-            break; // 整棵树结束
-        }
-        if token == FDT_BEGIN_NODE {
-            i += 1;
-            // 读节点名 (null 结尾, 对齐到 4 字节)
-            let name_ptr = unsafe { sp.add(i) as *const u8 };
-            let mut name_len = 0usize;
-            while unsafe { *name_ptr.add(name_len) } != 0 {
-                name_len += 1;
-            }
-            let name = unsafe {
-                core::str::from_utf8_unchecked(core::slice::from_raw_parts(name_ptr, name_len))
-            };
-            current_is_memory = name == "memory" || name.starts_with("memory@");
-            uart::puts("[dtb] node: ");
-            uart::puts(name);
-            uart::puts("\r\n");
-            // 跳过节点名字段 (向上取整到 4 字节对齐)
-            i += (name_len + 4) / 4;
-        } else if token == FDT_END_NODE {
-            i += 1;
-            // 退出节点, 恢复默认地址/大小格数
-            addr_cells = 2;
-            size_cells = 2;
-            current_is_memory = false;
-        } else if token == FDT_PROP {
-            i += 1;
-            let len = unsafe { read_be(sp.add(i)) }; // 属性值的字节数
-            i += 1;
-            let nameoff = unsafe { read_be(sp.add(i)) }; // 属性名在 strings block 的偏移
-            i += 1;
-            // 读属性名
-            let prop_name_ptr = unsafe { ss.add(nameoff as usize) };
-            let mut pnl = 0usize;
-            while unsafe { *prop_name_ptr.add(pnl) } != 0 {
-                pnl += 1;
-            }
-            let pname = unsafe {
-                core::str::from_utf8_unchecked(core::slice::from_raw_parts(prop_name_ptr, pnl))
-            };
-
-            // ═══ 只抓两个关键属性 ═══
-            // #address-cells / #size-cells: 父节点指定子节点的地址/大小格式
-            if pname == "#address-cells" && len == 4 {
-                addr_cells = unsafe { read_be(sp.add(i)) };
-            } else if pname == "#size-cells" && len == 4 {
-                size_cells = unsafe { read_be(sp.add(i)) };
-            } else if pname == "reg" {
-                // reg = 寄存器地址范围列表
-                // 每个条目 = addr_cells × 4B + size_cells × 4B
-                let entry_words = (addr_cells + size_cells) as usize;
-                let entries = (len / 4) as usize / entry_words;
-                for e in 0..entries {
-                    let base_offset: usize = i + e * entry_words;
-                    let base: u64 = if addr_cells == 2 {
-                        ((unsafe { read_be(sp.add(base_offset)) }) as u64) << 32
-                            | (unsafe { read_be(sp.add(base_offset + 1)) }) as u64
-                    } else {
-                        (unsafe { read_be(sp.add(base_offset)) }) as u64
-                    };
-                    let size: u64 = if size_cells == 2 {
-                        ((unsafe { read_be(sp.add(base_offset + addr_cells as usize)) }) as u64)
-                            << 32
-                            | (unsafe { read_be(sp.add(base_offset + addr_cells as usize + 1)) })
-                                as u64
-                    } else {
-                        (unsafe { read_be(sp.add(base_offset + addr_cells as usize)) }) as u64
-                    };
-                    uart::puts("  reg[");
-                    uart::hex(e as u64);
-                    uart::puts("]: base=");
-                    uart::hex(base);
-                    uart::puts(" size=");
-                    uart::hex(size);
-                    uart::puts("\r\n");
-                    if !current_is_memory && size != 0 {
-                        protect::register(base, size);
-                    }
-                }
-            }
-
-            // 跳过属性值 (对齐到 4 字节)
-            let data_words = (len + 3) / 4;
-            i += data_words as usize;
-        } else if token == FDT_NOP {
-            i += 1; // 空操作, 跳过
-        } else {
-            uart::puts("[dtb] unknown token=");
-            uart::hex(token as u64);
-            uart::puts("\r\n");
-            break;
         }
     }
 }

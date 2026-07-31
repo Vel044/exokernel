@@ -18,38 +18,15 @@
 //! 这些对象都由EL0在获授权映射上直接管理。
 
 use crate::uart;
-
-pub const SYS_PUTS: u64 = 2;
-pub const SYS_EXIT: u64 = 5;
-pub const SYS_MAP_MMIO: u64 = 6;
-pub const SYS_IRQ_BIND: u64 = 7;
-pub const SYS_IRQ_WAIT: u64 = 8;
-pub const SYS_IRQ_ACK: u64 = 9;
-pub const SYS_IRQ_UNBIND: u64 = 10;
-pub const SYS_UNMAP_MMIO: u64 = 11;
-pub const SYS_DMA_ALLOC: u64 = 12;
-pub const SYS_DMA_FREE: u64 = 13;
-pub const SYS_FRAME_ALLOC: u64 = 14;
-pub const SYS_FRAME_FREE: u64 = 15;
-pub const SYS_FRAME_MAP: u64 = 16;
-pub const SYS_FRAME_UNMAP: u64 = 17;
-pub const SYS_THREAD_CREATE: u64 = 18;
-pub const SYS_THREAD_EXIT: u64 = 19;
-pub const SYS_THREAD_YIELD: u64 = 20;
-pub const SYS_THREAD_SET_PRIORITY: u64 = 21;
-pub const SYS_ENDPOINT_CREATE: u64 = 22;
-pub const SYS_ENDPOINT_SEND: u64 = 23;
-pub const SYS_ENDPOINT_RECV: u64 = 24;
-pub const SYS_ENDPOINT_CALL: u64 = 25;
-pub const SYS_ENDPOINT_REPLY: u64 = 26;
-pub const SYS_ENDPOINT_REPLY_RECV: u64 = 27;
-pub const SYS_NOTIFICATION_CREATE: u64 = 28;
-pub const SYS_NOTIFICATION_SIGNAL: u64 = 29;
-pub const SYS_NOTIFICATION_WAIT: u64 = 30;
-pub const SYS_NOTIFICATION_POLL: u64 = 31;
-pub const SYS_NOTIFICATION_DESTROY: u64 = 32;
-pub const SYS_THREAD_RUNTIME: u64 = 33;
-pub const SYS_ENDPOINT_DESTROY: u64 = 34;
+use exo_abi::{
+    SYS_DMA_ALLOC, SYS_DMA_FREE, SYS_ENDPOINT_CALL, SYS_ENDPOINT_CREATE, SYS_ENDPOINT_DESTROY,
+    SYS_ENDPOINT_RECV, SYS_ENDPOINT_REPLY, SYS_ENDPOINT_REPLY_RECV, SYS_ENDPOINT_SEND, SYS_EXIT,
+    SYS_FRAME_ALLOC, SYS_FRAME_FREE, SYS_FRAME_MAP, SYS_FRAME_UNMAP, SYS_IRQ_ACK, SYS_IRQ_BIND,
+    SYS_IRQ_UNBIND, SYS_MAP_MMIO, SYS_NOTIFICATION_CREATE, SYS_NOTIFICATION_DESTROY,
+    SYS_NOTIFICATION_POLL, SYS_NOTIFICATION_SIGNAL, SYS_NOTIFICATION_WAIT, SYS_PUTS,
+    SYS_THREAD_CREATE, SYS_THREAD_EXIT, SYS_THREAD_RUNTIME, SYS_THREAD_SET_PRIORITY,
+    SYS_THREAD_YIELD, SYS_UNMAP_MMIO,
+};
 
 #[derive(Clone, Copy)]
 #[repr(C)]
@@ -299,7 +276,7 @@ pub extern "C" fn el1_irq_handler_frame(frame: *mut TrapFrame) -> *mut TrapFrame
             crate::gic::disable_spi(intid);
             if let Some((notification, badge)) = crate::task::irq_notification(intid) {
                 crate::gic::write_eoir(iar_token);
-                crate::task::record_iar_eoi_done(iar_token);
+                crate::task::record_irq_pending(intid);
                 let _ = crate::ipc::notification_signal(notification, badge);
                 // Notification可能唤醒本核更高优先级线程。设备协议仍完全在
                 // EL0处理，Kernel这里只决定是否切换TrapFrame。
@@ -308,8 +285,9 @@ pub extern "C" fn el1_irq_handler_frame(frame: *mut TrapFrame) -> *mut TrapFrame
                 }
                 return crate::scheduler::priority::activate_if_idle(frame);
             } else {
-                // 旧IRQ_WAIT模式仍由SYS_IRQ_ACK延迟EOI。
-                crate::task::record_iar(iar_token);
+                // 正常绑定必定有Notification。若对象表意外不一致，仍需EOI，
+                // 否则GIC会一直保留active状态并阻塞后续中断。
+                crate::gic::write_eoir(iar_token);
             }
         } else {
             crate::gic::write_eoir(iar_token);
@@ -410,7 +388,6 @@ fn handle_svc(elr: u64, sysno: u64, arg0: u64, arg1: u64, arg2: u64, arg3: u64, 
         SYS_MAP_MMIO => sys_map_mmio(arg0, arg1, arg2),
         SYS_EXIT => crate::task::exit_current(arg0),
         SYS_IRQ_BIND => sys_irq_bind(arg0, arg1, arg2, arg3),
-        SYS_IRQ_WAIT => sys_irq_wait(),
         SYS_IRQ_ACK => sys_irq_ack(arg0),
         SYS_IRQ_UNBIND => sys_irq_unbind(arg0),
         SYS_UNMAP_MMIO => sys_unmap_mmio(arg0, arg1),
@@ -595,10 +572,10 @@ fn sys_irq_bind(intid: u64, notification: u64, badge: u64, target_cpu: u64) -> u
     };
     // Handle中包含slot+generation；notification_valid同时校验对象存在、
     // generation未过期且owner是当前任务。
-    if notification != 0 && (!crate::ipc::notification_valid(notification) || badge == 0) {
+    if notification == 0 || !crate::ipc::notification_valid(notification) || badge == 0 {
         return exo_abi::SYS_ERR_INVALID;
     }
-    if !crate::task::bind_irq(intid, notification, badge, target_cpu) {
+    if !crate::task::bind_irq(intid, notification, badge) {
         uart::puts("\r\n[exo] SYS_IRQ_BIND failed: already bound or full\r\n");
         return 3;
     }
@@ -607,11 +584,9 @@ fn sys_irq_bind(intid: u64, notification: u64, badge: u64, target_cpu: u64) -> u
     let trigger_level = flags & 0x3 == 0;
     // GIC MMIO永远留在EL1。驱动只能请求绑定，不能直接改Distributor。
     crate::gic::configure_spi(intid, trigger_level, target_cpu);
-    if notification != 0 {
-        // Notification 绑定不经过旧的 SYS_IRQ_WAIT，因此绑定成功后直接
-        // 允许该 SPI 进入 EL1 IRQ handler；handler 会在 ACK 前暂时禁用它。
-        crate::gic::enable_spi(intid);
-    }
+    // Notification绑定成功后直接允许该SPI进入EL1 IRQ handler；handler
+    // 会在投递badge前暂时禁用它，直到用户完成设备处理并执行IRQ_ACK。
+    crate::gic::enable_spi(intid);
 
     uart::puts("\r\n[exo] SYS_IRQ_BIND intid=");
     uart::hex(intid as u64);
@@ -619,47 +594,6 @@ fn sys_irq_bind(intid: u64, notification: u64, badge: u64, target_cpu: u64) -> u
     uart::hex(target_cpu as u64);
     uart::puts("\r\n");
     0
-}
-
-fn sys_irq_wait() -> u64 {
-    if crate::task::has_active_iar() {
-        uart::puts("\r\n[exo] SYS_IRQ_WAIT rejected: previous IRQ not ACKed\r\n");
-        return u64::MAX;
-    }
-
-    if crate::task::first_bound_intid().is_none() {
-        uart::puts("\r\n[exo] SYS_IRQ_WAIT rejected: no bound IRQ\r\n");
-        return u64::MAX;
-    }
-
-    unsafe {
-        core::arch::asm!("msr daifset, #2", options(nomem, nostack));
-    }
-    crate::task::enable_bound_irqs();
-
-    // 保持 PSTATE.I=1。ARM 的 WFI 会被已送达的物理 IRQ 唤醒，即使 IRQ
-    // 在 PSTATE 中被屏蔽；醒来后由当前同步异常上下文主动读取 GICC_IAR。
-    // 这样不存在“解屏蔽后、执行 WFI 前”被抢占导致错过唤醒的窗口。
-    let result: u64;
-    loop {
-        unsafe {
-            core::arch::asm!("msr daifset, #2", "dsb sy", "wfi", options(nomem, nostack));
-        }
-
-        if let Some(iar_token) = crate::gic::acknowledge() {
-            let pending_intid = crate::gic::intid(iar_token);
-            if crate::task::has_binding(pending_intid) {
-                crate::task::record_iar(iar_token);
-                result = pending_intid as u64;
-                break;
-            }
-            crate::gic::write_eoir(iar_token);
-        }
-    }
-
-    crate::task::disable_bound_irqs();
-
-    result
 }
 
 fn sys_irq_ack(intid: u64) -> u64 {
@@ -670,8 +604,6 @@ fn sys_irq_ack(intid: u64) -> u64 {
     if !crate::task::ack_irq(intid) {
         uart::puts("\r\n[exo] SYS_IRQ_ACK failed: no active IRQ or INTID mismatch (got ");
         uart::hex(intid as u64);
-        uart::puts(" active=");
-        uart::hex(crate::task::active_iar() as u64);
         uart::puts(")\r\n");
         return 1;
     }

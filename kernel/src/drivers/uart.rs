@@ -22,11 +22,6 @@ pub fn init(base: u64) {
     }
 }
 
-/// UART 是否已经由 DTB 初始化。
-pub fn is_ready() -> bool {
-    unsafe { UART_BASE != 0 }
-}
-
 /// 返回当前 UART 基址。未初始化时返回 0。
 pub fn base() -> u64 {
     unsafe { UART_BASE }

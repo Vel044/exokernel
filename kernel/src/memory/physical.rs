@@ -44,16 +44,6 @@ impl PhysicalAllocator {
 static ALLOCATOR: crate::sync::SpinLock<PhysicalAllocator> =
     crate::sync::SpinLock::new(PhysicalAllocator::new());
 
-/// 初始化: 从 UEFI MemoryMap 提取的 (物理基址, 页数) 对塞进分配池
-/// 在 main.rs 里 EBS 后调, 遍历 mmap.entries() 只收 CONVENTIONAL 类型的
-pub fn init_from_ranges(conventional_ranges: &[(u64, u64)]) {
-    let mut allocator = ALLOCATOR.lock();
-    allocator.count = 0;
-    for &(base, pages) in conventional_ranges {
-        allocator.add_range(base, pages);
-    }
-}
-
 /// 清空分配池。用于 EL1 从 BootInfo 逐项重建 allocator, 避免早期栈上放大数组。
 pub fn init_empty() {
     ALLOCATOR.lock().count = 0;

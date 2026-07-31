@@ -155,7 +155,8 @@ SYS_DEVICE_RELEASE(device_handle)
   `POLL` 无事件时返回 `SYS_ERR_WOULD_BLOCK`。
 - IRQ 可以绑定 Notification；IRQ 到达时 EL1 禁用 SPI、写 EOI、记录待 ACK 状态并 signal。
   用户处理设备后通过 `SYS_IRQ_ACK` 重新使能 SPI。这样 active 设备 IRQ 不会阻挡
-  Generic Timer 抢占和驱动线程唤醒；旧 `SYS_IRQ_WAIT/ACK` 仍使用延迟 EOI。
+  Generic Timer抢占和驱动线程唤醒；设备IRQ通过Notification投递，IRQ入口
+  立即EOI，用户处理完设备状态后用`IRQ_ACK`重新使能SPI。
 - xHCI executor 已使用 `IRQ -> Notification -> handle_event -> IRQ_ACK`，
   MMIO、DMA ring和Event Ring仍由libOS直接访问。
 - Endpoint Call把Caller的有效优先级传递给Server，避免中优先级线程造成优先级反转；
@@ -225,9 +226,8 @@ DMA 页仍然来自普通物理 RAM，但使用独立接口表达“连续、设
 
 | syscall          | 输入       | 返回      | Kernel处理                                     |
 | ---------------- | ---------- | --------- | ---------------------------------------------- |
-| `SYS_IRQ_BIND`   | `x0=INTID, x1=NotificationHandle, x2=badge, x3=target_cpu` | `0`成功 | 校验授权和CPU，配置SPI目标；`x1=0`保留旧WAIT路径。 |
-| `SYS_IRQ_WAIT`   | 无         | 实际INTID | enable绑定IRQ，执行WFI，读取IAR并暂时disable。 |
-| `SYS_IRQ_ACK`    | `x0=INTID` | `0`成功   | 校验待ACK状态；Notification模式重新使能SPI，旧WAIT模式先写EOIR。 |
+| `SYS_IRQ_BIND`   | `x0=INTID, x1=NotificationHandle, x2=badge, x3=target_cpu` | `0`成功 | 校验IRQ授权、Notification所有权和目标CPU，配置并使能SPI。 |
+| `SYS_IRQ_ACK`    | `x0=INTID` | `0`成功   | 校验待ACK状态并重新使能已暂时屏蔽的SPI。 |
 | `SYS_IRQ_UNBIND` | `x0=INTID` | `0`成功   | 禁用IRQ并删除binding。                         |
 
 Notification 绑定扩展使用同一个 `SYS_IRQ_BIND`：
@@ -236,7 +236,8 @@ Notification 绑定扩展使用同一个 `SYS_IRQ_BIND`：
 SYS_IRQ_BIND(x0=INTID, x1=NotificationHandle, x2=badge, x3=target_cpu)
 ```
 
-`x1=0` 保持旧的 `SYS_IRQ_WAIT/ACK` 模式；`x1!=0` 时绑定成功即允许该 SPI。
+IRQ必须绑定到有效Notification且badge非零，不再提供直接在系统调用中等待
+硬件IRQ的兼容路径。线程通过`NOTIFICATION_WAIT`阻塞，IRQ入口投递badge。
 硬件中断由 Kernel 禁用SPI并EOI后投递到Notification；用户处理完设备后调用
 `SYS_IRQ_ACK`重新使能SPI。`target_cpu=IRQ_TARGET_CURRENT`表示投递到调用线程
 当前所在CPU；USB线程在CPU2绑定xHCI时使用该值。
