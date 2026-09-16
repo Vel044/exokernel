@@ -463,6 +463,7 @@ pub enum ControlTable {
     HomingOffset,
     OperatingMode,
     TorqueEnable,
+    Lock,
     GoalPosition,
     GoalVelocity,
     PresentPosition,
@@ -485,6 +486,8 @@ impl ControlTable {
             Self::HomingOffset => (31, 2),
             Self::OperatingMode => (33, 1),
             Self::TorqueEnable => (40, 1),
+            // STS3215 的 Lock 位于 55；使能扭矩后还要解锁该寄存器组。
+            Self::Lock => (55, 1),
             Self::GoalPosition => (42, 2),
             Self::GoalVelocity => (46, 2),
             Self::PresentPosition => (56, 2),
@@ -666,6 +669,44 @@ impl<'a> FeetechMotorsBus<'a> {
         Ok(values)
     }
 
+    /// 读取六轴当前位置并保留归一化所需的浮点精度。
+    ///
+    /// 设备寄存器本身仍是整数；这里的f32只用于把校准范围映射到ACT的
+    /// 连续动作空间，避免先转i32再参与限幅时额外丢失小数。
+    pub async fn sync_read_positions_f32(&mut self) -> Result<[f32; 6], ScservoError> {
+        let raw = self.sync_read(ControlTable::PresentPosition, false).await?;
+        let mut positions = [0.0f32; 6];
+        for (index, value) in raw.into_iter().enumerate() {
+            let value = value.ok_or(ScservoError::Timeout)?;
+            positions[index] = self.normalize_f32(self.motors[index].name, value as f32);
+        }
+        Ok(positions)
+    }
+
+    /// 读取六个舵机当前的Goal Position寄存器，并转换回ACT归一化坐标。
+    ///
+    /// Present Position反映机械实际位置；Goal Position反映最近一次写入的
+    /// 目标。两者同时观察，才能区分“目标本来没变”和“目标写入但机械还没跟上”。
+    pub async fn sync_read_goal_positions_f32(&mut self) -> Result<[f32; 6], ScservoError> {
+        let raw = self.sync_read(ControlTable::GoalPosition, false).await?;
+        let mut positions = [0.0f32; 6];
+        for (index, value) in raw.into_iter().enumerate() {
+            let value = value.ok_or(ScservoError::Timeout)?;
+            positions[index] = self.normalize_f32(self.motors[index].name, value as f32);
+        }
+        Ok(positions)
+    }
+
+    /// 读回六个舵机的 Torque_Enable，确认硬件而不是 USB OUT 已经接受使能。
+    pub async fn sync_read_torque_enabled(&mut self) -> Result<[u8; 6], ScservoError> {
+        let raw = self.sync_read(ControlTable::TorqueEnable, false).await?;
+        let mut enabled = [0u8; 6];
+        for (index, value) in raw.into_iter().enumerate() {
+            enabled[index] = value.ok_or(ScservoError::Timeout)? as u8;
+        }
+        Ok(enabled)
+    }
+
     pub async fn sync_write(
         &mut self,
         table: ControlTable,
@@ -697,14 +738,39 @@ impl<'a> FeetechMotorsBus<'a> {
         self.protocol.sync_write(address, length, &refs).await
     }
 
+    /// 把六个ACT归一化目标一次写入Goal Position。
+    pub async fn sync_write_positions_f32(&mut self, values: [f32; 6]) -> Result<(), ScservoError> {
+        self.ensure_connected()?;
+        let (address, length) = ControlTable::GoalPosition.spec();
+        let mut encoded = Vec::with_capacity(self.motors.len());
+        for (index, value) in values.into_iter().enumerate() {
+            if !value.is_finite() {
+                return Err(ScservoError::InvalidArgument);
+            }
+            let raw = self.unnormalize_f32(self.motors[index].name, value);
+            let raw = if let Some(bit) = ControlTable::GoalPosition.sign_bit() {
+                encode_sign_magnitude(raw, bit)?
+            } else {
+                raw as u32
+            };
+            encoded.push((
+                self.motors[index].id,
+                little_endian_bytes(raw, length as usize),
+            ));
+        }
+        let refs: Vec<(u8, &[u8])> = encoded
+            .iter()
+            .map(|(id, bytes)| (*id, bytes.as_slice()))
+            .collect();
+        self.protocol.sync_write(address, length, &refs).await
+    }
+
     pub async fn enable_torque(&mut self, motor: Option<MotorName>) -> Result<(), ScservoError> {
-        self.write_selected(ControlTable::TorqueEnable, motor, 1)
-            .await
+        self.set_torque_and_lock(motor, true).await
     }
 
     pub async fn disable_torque(&mut self, motor: Option<MotorName>) -> Result<(), ScservoError> {
-        self.write_selected(ControlTable::TorqueEnable, motor, 0)
-            .await
+        self.set_torque_and_lock(motor, false).await
     }
 
     pub async fn read_position(&mut self, motor: MotorName) -> Result<i32, ScservoError> {
@@ -851,6 +917,36 @@ impl<'a> FeetechMotorsBus<'a> {
         }
     }
 
+    /// 按照 Python FeetechMotorsBus 的顺序逐个控制舵机。
+    ///
+    /// 这里故意不使用广播 SYNC_WRITE：扭矩使能和 Lock 都需要逐个电机确认，
+    /// 这样能把“Bulk OUT 完成”与“舵机寄存器已经生效”区分开。
+    async fn set_torque_and_lock(
+        &mut self,
+        motor: Option<MotorName>,
+        enabled: bool,
+    ) -> Result<(), ScservoError> {
+        let value = if enabled { 1 } else { 0 };
+        let lock_value = value;
+        if let Some(motor) = motor {
+            // 每个 WRITE 都等待该 ID 的状态包，因此失败会立刻暴露。
+            self.write(ControlTable::TorqueEnable, motor, value, false)
+                .await?;
+            // Python实现随后写Lock=1解锁、Lock=0锁定。
+            self.write(ControlTable::Lock, motor, lock_value, false)
+                .await?;
+            return Ok(());
+        }
+        for motor in MotorName::ALL {
+            // 每个 WRITE 都等待该 ID 的状态包，因此失败会立刻暴露。
+            self.write(ControlTable::TorqueEnable, motor, value, false)
+                .await?;
+            self.write(ControlTable::Lock, motor, lock_value, false)
+                .await?;
+        }
+        Ok(())
+    }
+
     fn ensure_connected(&self) -> Result<(), ScservoError> {
         if self.connected {
             Ok(())
@@ -883,6 +979,27 @@ impl<'a> FeetechMotorsBus<'a> {
         normalized
     }
 
+    /// `normalize`的浮点版本，保持与Python校准语义一致。
+    fn normalize_f32(&self, motor: MotorName, value: f32) -> f32 {
+        let calibration = self.calibration(motor);
+        let min = calibration.range_min as f32;
+        let max = calibration.range_max.max(calibration.range_min + 1) as f32;
+        let bounded = value.clamp(min, max);
+        let span = (max - min).max(1.0);
+        let mut normalized = match self.motor(motor).norm_mode {
+            MotorNormMode::RangeM100100 => (bounded - min) * 200.0 / span - 100.0,
+            MotorNormMode::Range0100 => (bounded - min) * 100.0 / span,
+            MotorNormMode::Degrees => (value - (min + max) * 0.5) * 360.0 / 4095.0,
+        };
+        if self.apply_drive_mode && calibration.drive_mode != 0 {
+            normalized = match self.motor(motor).norm_mode {
+                MotorNormMode::Range0100 => 100.0 - normalized,
+                _ => -normalized,
+            };
+        }
+        normalized
+    }
+
     fn unnormalize(&self, motor: MotorName, value: i32) -> i32 {
         let calibration = self.calibration(motor);
         let min = calibration.range_min;
@@ -901,6 +1018,28 @@ impl<'a> FeetechMotorsBus<'a> {
             MotorNormMode::Range0100 => min + value.clamp(0, 100) * (max - min) / 100,
             MotorNormMode::Degrees => (value * 4095 / 360) + (min + max) / 2,
         }
+    }
+
+    /// 把ACT归一化目标转换为STS3215原始位置寄存器值。
+    fn unnormalize_f32(&self, motor: MotorName, value: f32) -> i32 {
+        let calibration = self.calibration(motor);
+        let min = calibration.range_min as f32;
+        let max = calibration.range_max.max(calibration.range_min + 1) as f32;
+        let mut value = value;
+        if self.apply_drive_mode && calibration.drive_mode != 0 {
+            value = match self.motor(motor).norm_mode {
+                MotorNormMode::Range0100 => 100.0 - value,
+                _ => -value,
+            };
+        }
+        let raw = match self.motor(motor).norm_mode {
+            MotorNormMode::RangeM100100 => {
+                min + (value.clamp(-100.0, 100.0) + 100.0) * (max - min) / 200.0
+            }
+            MotorNormMode::Range0100 => min + value.clamp(0.0, 100.0) * (max - min) / 100.0,
+            MotorNormMode::Degrees => value * 4095.0 / 360.0 + (min + max) * 0.5,
+        };
+        raw as i32
     }
 
     fn motor(&self, motor: MotorName) -> MotorConfig {

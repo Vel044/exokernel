@@ -1,0 +1,6 @@
+system,case_id,duration_ms,mean_abs_error,max_abs_error,failed_elements,valid
+macos-host-rust,000,9918.931,0.000011496,0.000083923,0,true
+macos-host-rust,001,12581.406,0.000017194,0.000152588,0,true
+macos-host-rust,002,11442.782,0.000019011,0.000198364,0,true
+macos-host-rust,003,9789.098,0.000014575,0.000167847,0,true
+macos-host-rust,004,9630.175,0.000009543,0.000083923,0,true

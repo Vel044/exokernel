@@ -385,7 +385,7 @@ fn main() -> Status {
     uefi::println!("[exo] calling ExitBootServices...");
     let mmap = unsafe { uefi::boot::exit_boot_services(uefi::boot::MemoryType::LOADER_DATA) };
     // EBS 之后 UEFI console 已经失效。后续日志必须等 EL1 从 DTB 初始化 UART。
-    uart::puts("[exo] post-EBS still in EL2, direct UART OK\r\n");
+    uart::puts("[exo] post-EBS direct UART OK\r\n");
 
     // ── 第四步: 提取空闲物理内存范围, 放进 BootInfo 给 EL1 外核 ──
     // MemoryMap 里记录了整台机器所有物理内存页的用途:
@@ -394,8 +394,10 @@ fn main() -> Status {
     //   BOOT_SERVICES_*  → 固件占的, EBS 后也变空闲了 (Type 3/4)
     // 但我们暂时只收 Type 7, 保证不给内核自己的地址
     bi.fill_memmap(&mmap);
-    bi.read_el2();
-    uart::puts("[exo] BootInfo ready in EL2\r\n");
+    bi.read_cpu_state(el_raw);
+    uart::puts("[exo] BootInfo ready at CurrentEL=");
+    uart::hex((el_raw >> 2) & 3);
+    uart::puts("\r\n");
 
     #[cfg(feature = "pi5")]
     let copied_el1_entry = {
@@ -437,6 +439,22 @@ fn main() -> Status {
         entry
     };
 
+    // PE/COFF链接器不能可靠承载64KiB section alignment；静态区提供完整
+    // 64KiB容量，进入EL1前把栈顶向下对齐到AAPCS要求的16字节。
+    let stack_top =
+        (core::ptr::addr_of!(EL1_BOOT_STACK) as u64 + EL1_BOOT_STACK_SIZE as u64) & !0xf;
+
+    // HVF等环境由UEFI直接交付EL1。此时不能安装EL2向量或执行任何EL2
+    // 系统寄存器访问，只切换到外核栈后直接进入同一个el1_main。
+    if ((el_raw >> 2) & 3) == 1 {
+        uart::puts("[exo] firmware entered at EL1; bypass EL2 boot shim\r\n");
+        trap::enter_el1_direct(
+            kmain::el1_main as *const () as u64,
+            stack_top,
+            &bi as *const BootInfo as u64,
+        );
+    }
+
     // ── 第五步: EL2 boot shim 降级到 EL1 外核 ──
     crate::vectors::install_el2();
     uart::puts("[exo] VBAR_EL2 installed\r\n");
@@ -455,11 +473,7 @@ fn main() -> Status {
         uart::puts("\r\n");
     }
 
-    // PE/COFF链接器不能可靠承载64KiB section alignment；静态区提供完整
-    // 64KiB容量，进入EL1前把栈顶向下对齐到AAPCS要求的16字节。最多舍弃
-    // 15字节，不影响栈容量。PSCI辅助核栈仍由页分配器按64KiB对齐。
-    let stack_top =
-        (core::ptr::addr_of!(EL1_BOOT_STACK) as u64 + EL1_BOOT_STACK_SIZE as u64) & !0xf;
+    // PSCI辅助核栈仍由页分配器按64KiB对齐。
     #[cfg(feature = "pi5")]
     let el1_entry = copied_el1_entry;
     #[cfg(not(feature = "pi5"))]

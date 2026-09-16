@@ -6,7 +6,7 @@
 use crab_usb::EventHandler;
 
 use crate::apps::usb_task::{signal_ready, ReadySignal};
-#[cfg(feature = "scservo-move")]
+#[cfg(any(feature = "ide", feature = "app-scservo-move"))]
 use crate::drivers::scservo::ControlTable;
 use crate::drivers::scservo::{FeetechMotorsBus, MotorName, ScservoError};
 use crate::drivers::usb_serial::UsbSerialTransport;
@@ -23,7 +23,7 @@ pub(crate) fn run(
         crate::runtime::usb_executor::block_on_usb(startup(&mut bus), handler, intid, notification);
     match result {
         Ok(()) => {
-            #[cfg(feature = "scservo-move")]
+            #[cfg(any(feature = "ide", feature = "app-scservo-move"))]
             {
                 if let Err(error) = crate::runtime::usb_executor::block_on_usb(
                     move_to_neutral(&mut bus),
@@ -45,7 +45,7 @@ pub(crate) fn run(
                 }
                 crate::runtime::puts(b"[libos] SCServo motion startup complete\r\n");
             }
-            #[cfg(not(feature = "scservo-move"))]
+            #[cfg(not(any(feature = "ide", feature = "app-scservo-move")))]
             crate::runtime::puts(b"[libos] SCServo read-only startup complete\r\n");
 
             // system-smoke等到协议探测和可选运动完成后才继续验收。
@@ -81,13 +81,18 @@ async fn startup(bus: &mut FeetechMotorsBus<'_>) -> Result<(), ScservoError> {
     Ok(())
 }
 
-#[cfg(feature = "scservo-move")]
+#[cfg(any(feature = "ide", feature = "app-scservo-move"))]
 async fn move_to_neutral(bus: &mut FeetechMotorsBus<'_>) -> Result<(), ScservoError> {
     // 前五个关节归一化中点为0，夹爪中点为50%。
     let neutral = [Some(0), Some(0), Some(0), Some(0), Some(0), Some(50)];
     let mut current = bus.sync_read(ControlTable::PresentPosition, true).await?;
 
     bus.enable_torque(None).await?;
+    let torque = bus.sync_read_torque_enabled().await?;
+    print_torque(b"[libos] torque readback", torque);
+    if torque.iter().any(|value| *value != 1) {
+        return Err(ScservoError::Device(0x40));
+    }
     crate::runtime::puts(b"[libos] moving to calibrated neutral pose\r\n");
 
     let mut round = 0;
@@ -125,8 +130,20 @@ async fn move_to_neutral(bus: &mut FeetechMotorsBus<'_>) -> Result<(), ScservoEr
     }
 
     bus.disable_torque(None).await?;
+    let torque = bus.sync_read_torque_enabled().await?;
+    print_torque(b"[libos] torque disabled readback", torque);
     crate::runtime::puts(b"[libos] calibrated neutral pose reached; torque disabled\r\n");
     Ok(())
+}
+
+#[cfg(any(feature = "ide", feature = "app-scservo-move"))]
+fn print_torque(prefix: &[u8], values: [u8; 6]) {
+    crate::runtime::puts(prefix);
+    for value in values {
+        crate::runtime::puts(b" ");
+        crate::runtime::hex(value as u64);
+    }
+    crate::runtime::puts(b"\r\n");
 }
 
 fn error_code(error: ScservoError) -> u64 {

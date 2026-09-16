@@ -1,0 +1,683 @@
+==> 编译 Kernel + libOS
+==> 1. 编译 libos (EL0)
+    libOS app:      act-inference
+    cargo features: app-act-inference
+warning: profiles for the non root package will be ignored, specify profiles at the workspace root:
+package:   /Users/vel/Work/RobotOS/Lerobot/exokernel/libos/Cargo.toml
+workspace: /Users/vel/Work/RobotOS/Lerobot/exokernel/Cargo.toml
+   Compiling libos v0.1.0 (/Users/vel/Work/RobotOS/Lerobot/exokernel/libos)
+warning: method `predict` is never used
+  --> libos/src/drivers/act.rs:43:12
+   |
+28 | impl<'a> Policy<'a> {
+   | ------------------- method in this implementation
+...
+43 |     pub fn predict(
+   |            ^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: struct `Endpoint` is never constructed
+ --> libos/src/kernel_api/endpoint.rs:6:12
+  |
+6 | pub struct Endpoint {
+  |            ^^^^^^^^
+
+warning: multiple associated items are never used
+  --> libos/src/kernel_api/endpoint.rs:11:12
+   |
+10 | impl Endpoint {
+   | ------------- associated items in this implementation
+11 |     pub fn from_raw(handle: u64) -> Self {
+   |            ^^^^^^^^
+...
+17 |     pub fn raw(&self) -> u64 {
+   |            ^^^
+...
+21 |     pub fn create() -> Result<Self, u64> {
+   |            ^^^^^^
+...
+32 |     pub fn handle(&self) -> exo_abi::EndpointHandle {
+   |            ^^^^^^
+...
+40 |     pub fn destroy(&self) -> Result<(), u64> {
+   |            ^^^^^^^
+...
+47 |     pub fn send(&self) -> Result<(), u64> {
+   |            ^^^^
+...
+54 |     pub fn recv(&self) -> Result<(), u64> {
+   |            ^^^^
+...
+62 |     pub fn call(&self) -> Result<(), u64> {
+   |            ^^^^
+...
+69 |     pub fn reply(&self, reply: exo_abi::ReplyHandle) -> Result<(), u64> {
+   |            ^^^^^
+...
+76 |     pub fn reply_recv(&self, reply: exo_abi::ReplyHandle) -> Result<(), ...
+   |            ^^^^^^^^^^
+
+warning: struct `IpcBuffer` is never constructed
+  --> libos/src/kernel_api/endpoint.rs:94:12
+   |
+94 | pub struct IpcBuffer {
+   |            ^^^^^^^^^
+
+warning: associated items `initial`, `from_va`, `read`, and `write` are never used
+   --> libos/src/kernel_api/endpoint.rs:99:12
+    |
+ 98 | impl IpcBuffer {
+    | -------------- associated items in this implementation
+ 99 |     pub fn initial() -> Self {
+    |            ^^^^^^^
+...
+105 |     pub unsafe fn from_va(va: u64) -> Self {
+    |                   ^^^^^^^
+...
+111 |     pub fn read(&self) -> exo_abi::IpcMessage {
+    |            ^^^^
+...
+115 |     pub fn write(&mut self, message: exo_abi::IpcMessage) {
+    |            ^^^^^
+
+warning: associated constants `READ` and `READ_EXECUTE` are never used
+  --> libos/src/kernel_api/frame.rs:12:15
+   |
+11 | impl Rights {
+   | ----------- associated constants in this implementation
+12 |     pub const READ: Self = Self(exo_abi::FRAME_RIGHT_READ);
+   |               ^^^^
+13 |     pub const READ_WRITE: Self = Self(exo_abi::FRAME_RIGHT_READ | exo_ab...
+14 |     pub const READ_EXECUTE: Self = Self(exo_abi::FRAME_RIGHT_READ | exo_...
+   |               ^^^^^^^^^^^^
+
+warning: field `pages` is never read
+  --> libos/src/kernel_api/frame.rs:19:5
+   |
+17 | pub struct Frame {
+   |            ----- field in this struct
+18 |     handle: exo_abi::FrameHandle,
+19 |     pages: u64,
+   |     ^^^^^
+
+warning: methods `map_to`, `pages`, and `raw_handle` are never used
+  --> libos/src/kernel_api/frame.rs:46:12
+   |
+22 | impl Frame {
+   | ---------- methods in this implementation
+...
+46 |     pub fn map_to(
+   |            ^^^^^^
+...
+70 |     pub fn pages(&self) -> u64 {
+   |            ^^^^^
+...
+74 |     pub fn raw_handle(&self) -> exo_abi::FrameHandle {
+   |            ^^^^^^^^^^
+
+warning: fields `ptr` and `len` are never read
+  --> libos/src/kernel_api/frame.rs:85:5
+   |
+83 | pub struct Mapping {
+   |            ------- fields in this struct
+84 |     handle: exo_abi::MappingHandle,
+85 |     ptr: NonNull<u8>,
+   |     ^^^
+86 |     len: usize,
+   |     ^^^
+
+warning: methods `as_ptr`, `len`, and `raw_handle` are never used
+  --> libos/src/kernel_api/frame.rs:90:12
+   |
+89 | impl Mapping {
+   | ------------ methods in this implementation
+90 |     pub fn as_ptr(&self) -> *mut u8 {
+   |            ^^^^^^
+...
+94 |     pub fn len(&self) -> usize {
+   |            ^^^
+...
+98 |     pub fn raw_handle(&self) -> exo_abi::MappingHandle {
+   |            ^^^^^^^^^^
+
+warning: struct `Notification` is never constructed
+ --> libos/src/kernel_api/notification.rs:6:12
+  |
+6 | pub struct Notification {
+  |            ^^^^^^^^^^^^
+
+warning: multiple associated items are never used
+  --> libos/src/kernel_api/notification.rs:13:12
+   |
+11 | impl Notification {
+   | ----------------- associated items in this implementation
+12 |     /// 包装已经由其他模块保存的handle，不创建或复制Kernel对象。
+13 |     pub fn from_raw(handle: u64) -> Self {
+   |            ^^^^^^^^
+...
+20 |     pub fn raw(&self) -> u64 {
+   |            ^^^
+...
+25 |     pub fn create() -> Result<Self, u64> {
+   |            ^^^^^^
+...
+38 |     pub fn handle(&self) -> exo_abi::NotificationHandle {
+   |            ^^^^^^
+...
+43 |     pub fn signal(&self, badge: u64) -> Result<(), u64> {
+   |            ^^^^^^
+...
+51 |     pub fn bind_irq(&self, intid: u32, badge: u64) -> Result<(), u64> {
+   |            ^^^^^^^^
+...
+57 |     pub fn wait(&self) -> Result<u64, u64> {
+   |            ^^^^
+...
+67 |     pub fn poll(&self) -> Result<u64, u64> {
+   |            ^^^^
+...
+77 |     pub fn destroy(&self) -> Result<(), u64> {
+   |            ^^^^^^^
+
+warning: constant `ELF_MAGIC` is never used
+  --> libos/src/kernel_api/process.rs:11:7
+   |
+11 | const ELF_MAGIC: [u8; 4] = [0x7f, b'E', b'L', b'F'];
+   |       ^^^^^^^^^
+
+warning: constant `ELFCLASS64` is never used
+  --> libos/src/kernel_api/process.rs:12:7
+   |
+12 | const ELFCLASS64: u8 = 2;
+   |       ^^^^^^^^^^
+
+warning: constant `ELFDATA2LSB` is never used
+  --> libos/src/kernel_api/process.rs:13:7
+   |
+13 | const ELFDATA2LSB: u8 = 1;
+   |       ^^^^^^^^^^^
+
+warning: constant `EM_AARCH64` is never used
+  --> libos/src/kernel_api/process.rs:14:7
+   |
+14 | const EM_AARCH64: u16 = 183;
+   |       ^^^^^^^^^^
+
+warning: constant `PT_LOAD` is never used
+  --> libos/src/kernel_api/process.rs:15:7
+   |
+15 | const PT_LOAD: u32 = 1;
+   |       ^^^^^^^
+
+warning: constant `PF_W` is never used
+  --> libos/src/kernel_api/process.rs:16:7
+   |
+16 | const PF_W: u32 = 2;
+   |       ^^^^
+
+warning: constant `PF_X` is never used
+  --> libos/src/kernel_api/process.rs:17:7
+   |
+17 | const PF_X: u32 = 1;
+   |       ^^^^
+
+warning: constant `PH_SIZE` is never used
+  --> libos/src/kernel_api/process.rs:18:7
+   |
+18 | const PH_SIZE: usize = 56;
+   |       ^^^^^^^
+
+warning: struct `LoadSegment` is never constructed
+  --> libos/src/kernel_api/process.rs:21:8
+   |
+21 | struct LoadSegment {
+   |        ^^^^^^^^^^^
+
+warning: struct `ProcessBuilder` is never constructed
+  --> libos/src/kernel_api/process.rs:29:12
+   |
+29 | pub struct ProcessBuilder<'a> {
+   |            ^^^^^^^^^^^^^^
+
+warning: struct `Process` is never constructed
+  --> libos/src/kernel_api/process.rs:33:12
+   |
+33 | pub struct Process {
+   |            ^^^^^^^
+
+warning: associated items `new` and `build` are never used
+  --> libos/src/kernel_api/process.rs:41:12
+   |
+40 | impl<'a> ProcessBuilder<'a> {
+   | --------------------------- associated items in this implementation
+41 |     pub fn new(image: &'a [u8]) -> Result<Self, u64> {
+   |            ^^^
+...
+47 |     pub fn build(self) -> Result<Process, u64> {
+   |            ^^^^^
+
+warning: methods `start` and `destroy` are never used
+   --> libos/src/kernel_api/process.rs:152:12
+    |
+151 | impl Process {
+    | ------------ methods in this implementation
+152 |     pub fn start(&self) -> Result<(), u64> {
+    |            ^^^^^
+...
+158 |     pub fn destroy(mut self) -> Result<(), u64> {
+    |            ^^^^^^^
+
+warning: function `parse_header` is never used
+   --> libos/src/kernel_api/process.rs:170:4
+    |
+170 | fn parse_header(image: &[u8]) -> Result<(), u64> {
+    |    ^^^^^^^^^^^^
+
+warning: function `parse_load_segments` is never used
+   --> libos/src/kernel_api/process.rs:182:4
+    |
+182 | fn parse_load_segments(image: &[u8]) -> Result<(u64, Vec<LoadSegment>),...
+    |    ^^^^^^^^^^^^^^^^^^^
+
+warning: function `pages_for` is never used
+   --> libos/src/kernel_api/process.rs:241:4
+    |
+241 | fn pages_for(bytes: u64, offset: u64) -> Result<u64, u64> {
+    |    ^^^^^^^^^
+
+warning: function `read_u16` is never used
+   --> libos/src/kernel_api/process.rs:250:4
+    |
+250 | fn read_u16(image: &[u8], offset: usize) -> Result<u16, u64> {
+    |    ^^^^^^^^
+
+warning: function `read_u32_at` is never used
+   --> libos/src/kernel_api/process.rs:257:4
+    |
+257 | fn read_u32_at(image: &[u8], offset: usize) -> Result<u32, u64> {
+    |    ^^^^^^^^^^^
+
+warning: function `read_u64_at` is never used
+   --> libos/src/kernel_api/process.rs:266:4
+    |
+266 | fn read_u64_at(image: &[u8], offset: usize) -> Result<u64, u64> {
+    |    ^^^^^^^^^^^
+
+warning: field `handle` is never read
+  --> libos/src/kernel_api/thread.rs:24:5
+   |
+23 | pub struct Thread {
+   |            ------ field in this struct
+24 |     handle: exo_abi::ThreadHandle,
+   |     ^^^^^^
+
+warning: multiple associated items are never used
+   --> libos/src/kernel_api/thread.rs:50:12
+    |
+ 27 | impl Thread {
+    | ----------- associated items in this implementation
+...
+ 50 |     pub fn handle(&self) -> exo_abi::ThreadHandle {
+    |            ^^^^^^
+...
+ 56 |     pub fn spawn_in(
+    |            ^^^^^^^^
+...
+ 90 |     pub fn start(&self) -> Result<(), u64> {
+    |            ^^^^^
+...
+ 94 |     pub fn suspend(&self) -> Result<(), u64> {
+    |            ^^^^^^^
+...
+ 98 |     pub fn destroy(self) -> Result<(), u64> {
+    |            ^^^^^^^
+...
+102 |     pub fn set_priority(&self, priority: u8) -> Result<(), u64> {
+    |            ^^^^^^^^^^^^
+...
+111 |     pub fn runtime_ticks(&self) -> Result<u64, u64> {
+    |            ^^^^^^^^^^^^^
+
+warning: function `yield_now` is never used
+   --> libos/src/kernel_api/thread.rs:122:8
+    |
+122 | pub fn yield_now() {
+    |        ^^^^^^^^^
+
+warning: function `current_cpu` is never used
+   --> libos/src/kernel_api/thread.rs:127:8
+    |
+127 | pub fn current_cpu() -> usize {
+    |        ^^^^^^^^^^^
+
+warning: function `exit` is never used
+   --> libos/src/kernel_api/thread.rs:139:8
+    |
+139 | pub fn exit(code: u64) -> ! {
+    |        ^^^^
+
+warning: function `result` is never used
+   --> libos/src/kernel_api/thread.rs:146:4
+    |
+146 | fn result(value: u64) -> Result<(), u64> {
+    |    ^^^^^^
+
+warning: struct `VSpace` is never constructed
+ --> libos/src/kernel_api/vspace.rs:6:12
+  |
+6 | pub struct VSpace {
+  |            ^^^^^^
+
+warning: associated items `create`, `handle`, and `destroy` are never used
+  --> libos/src/kernel_api/vspace.rs:11:12
+   |
+10 | impl VSpace {
+   | ----------- associated items in this implementation
+11 |     pub fn create() -> Result<Self, u64> {
+   |            ^^^^^^
+...
+17 |     pub fn handle(&self) -> exo_abi::VSpaceHandle {
+   |            ^^^^^^
+...
+21 |     pub fn destroy(self) -> Result<(), u64> {
+   |            ^^^^^^^
+
+warning: function `svc6` is never used
+  --> libos/src/runtime/mod.rs:97:8
+   |
+97 | pub fn svc6(sysno: u64, arg0: u64, arg1: u64, arg2: u64, arg3: u64, arg4...
+   |        ^^^^
+
+warning: function `frame_map_to` is never used
+   --> libos/src/runtime/mod.rs:158:8
+    |
+158 | pub fn frame_map_to(
+    |        ^^^^^^^^^^^^
+
+warning: function `vspace_create` is never used
+   --> libos/src/runtime/mod.rs:182:8
+    |
+182 | pub fn vspace_create() -> Result<exo_abi::VSpaceHandle, u64> {
+    |        ^^^^^^^^^^^^^
+
+warning: function `vspace_destroy` is never used
+   --> libos/src/runtime/mod.rs:191:8
+    |
+191 | pub fn vspace_destroy(handle: exo_abi::VSpaceHandle) -> Result<(), u64> {
+    |        ^^^^^^^^^^^^^^
+
+warning: function `enable_direct_uart` is never used
+   --> libos/src/runtime/mod.rs:219:8
+    |
+219 | pub fn enable_direct_uart() {
+    |        ^^^^^^^^^^^^^^^^^^
+
+warning: function `unmap_mmio` is never used
+   --> libos/src/runtime/mod.rs:271:8
+    |
+271 | pub fn unmap_mmio(va: u64, size: u64) -> Result<(), u64> {
+    |        ^^^^^^^^^^
+
+warning: function `irq_bind_notification` is never used
+   --> libos/src/runtime/mod.rs:301:8
+    |
+301 | pub fn irq_bind_notification(
+    |        ^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `irq_ack` is never used
+   --> libos/src/runtime/mod.rs:321:8
+    |
+321 | pub fn irq_ack(intid: u32) {
+    |        ^^^^^^^
+
+warning: function `irq_unbind` is never used
+   --> libos/src/runtime/mod.rs:327:8
+    |
+327 | pub fn irq_unbind(intid: u32) -> Result<(), u64> {
+    |        ^^^^^^^^^^
+
+warning: function `delay_ns` is never used
+   --> libos/src/runtime/mod.rs:346:8
+    |
+346 | pub fn delay_ns(nanoseconds: u64) {
+    |        ^^^^^^^^
+
+warning: `libos` (bin "libos") generated 49 warnings
+    Finished `release` profile [optimized] target(s) in 1.19s
+
+==> 2. strip → libos.elf
+    libos.elf:   264992 bytes
+
+==> 3. 编译 exokernel (EL2 boot shim + EL1 kernel)
+warning: profiles for the non root package will be ignored, specify profiles at the workspace root:
+package:   /Users/vel/Work/RobotOS/Lerobot/exokernel/libos/Cargo.toml
+workspace: /Users/vel/Work/RobotOS/Lerobot/exokernel/Cargo.toml
+   Compiling exokernel v0.1.0 (/Users/vel/Work/RobotOS/Lerobot/exokernel/kernel)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.23s
+
+==> 完成!
+    kernel: target/aarch64-unknown-uefi/debug/BOOTAA64.efi
+    libos:  libos/libos.elf (embedded in .efi)
+=== Exokernel QEMU Test ===
+
+==> 已更新 qemu/esp.img 中的 BOOTAA64.EFI
+USB topology: none (Frame/VSpace or UART-only test)
+==> 复用ACT ext4镜像: /Users/vel/Work/RobotOS/Lerobot/exokernel/qemu/act-model.ext4
+ACT model volume: /Users/vel/Work/RobotOS/Lerobot/exokernel/qemu/act-model.ext4 (read-only ext4)
+
+QEMU command:
+  qemu-system-aarch64 -accel hvf -M virt -cpu host -m 4G ...
+
+UEFI firmware (version edk2-stable202408-prebuilt.qemu.org built at 16:28:50 on Sep 12 2024)
+ArmTrngLib could not be correctly initialized.
+Error: Image at 0013FDB6000 start failed: 00000001
+Error: Image at 0013FD6D000 start failed: Not Found
+Error: Image at 0013FCBA000 start failed: Unsupported
+Error: Image at 0013FC3F000 start failed: Not Found
+Error: Image at 0013FB65000 start failed: Aborted
+Tpm2SubmitCommand - Tcg2 - Not Found
+Tpm2GetCapabilityPcrs fail!
+Tpm2SubmitCommand - Tcg2 - Not Found
+Image type X64 can't be loaded on AARCH64 UEFI system.
+[2J[01;01H[=3h[2J[01;01H[2J[01;01H[=3h[2J[01;01HBdsDxe: loading Boot0001 "UEFI Misc Device" from VenHw(837DCA9E-E874-4D82-B29A-23FE0E23D1E2,003E000A00000000)
+ConvertPages: failed to find range 140000000 - 1400BFFFF
+BdsDxe: starting Boot0001 "UEFI Misc Device" from VenHw(837DCA9E-E874-4D82-B29A-23FE0E23D1E2,003E000A00000000)
+[exo] UEFI console: EL2 boot, pre-EBS
+[exo] UEFI config: ACPI2=0x13cb43018, FDT=0x0
+[exo] UEFI FDT not found; QEMU build will use embedded qemu-virt.dtb after EBS
+[exo] CurrentEL raw=0x4, exc_level=1
+[exo] calling ExitBootServices...
+[exo] post-EBS direct UART OK
+[exo] BootInfo ready at CurrentEL=0x0000000000000001
+[exo] firmware entered at EL1; bypass EL2 boot shim
+
+*** [exo] EL1 kernel alive ***
+[exo] VBAR_EL1=0x000000013c6fc800
+[exo] EL1 mem ready, free=0x00000000003ef58c KB
+[exo] using embedded QEMU DTB
+[exo] DTB pa=0x0000000042000000 size=0x0000000000001fa4
+[exo] DTB UART base=0x0000000009000000 size=0x0000000000001000
+[exo] GICv2 init: GICD=0x0000000008000000 GICC=0x0000000008010000
+[exo] virtio-mmio window=0x000000000a000000 size=0x0000000000004000
+[exo] PCI ECAM=0x0000004010000000 size=0x0000000010000000 INTx routes=0x0000000000000010
+[exo] EL0 libOS pa=0x0000000042009000 entry=0x0000000040000000 stack_pa=0x0000000042033000 stack_va=0x0000000041000000 segments=0x0000000000000003
+[exo] EL1 stage-1 root=0x0000000042002000
+[exo] PSCI CPU_ON cpu=0x0000000000000001 mpidr=0x0000000000000001 entry=0x000000013c6fba9c
+[exo] PSCI CPU_ON result=0x0000000000000000
+[exo] PSCI CPU_ON cpu=0x0000000000000002 mpidr=0x0000000000000002 entry=0x000000013c6fba9c
+[exo] PSCI CPU_ON result=0x0000000000000000
+[exo] PSCI CPU_ON cpu=0x0000000000000003 mpidr=0x0000000000000003 entry=0x000000013c6fba9c
+[exo] PSCI CPU_ON result=0x0000000000000000
+[exo] SMP online mask=0x000000000000000f cpu_count=0x0000000000000004
+[exo] Generic Timer PPI=0x000000000000001b frequency=0x00000000016e3600 slice_ticks=0x0000000000005dc0
+[exo] enter EL0 libOS...
+[exo] eret to EL0 libOS (PC=0x0000000040000000, SP=0x0000000041000000, x0=0x0000000040200000)
+[libos] ACT real-data correctness experiment start
+[libos] mounting user ext4 filesystem
+
+[exo] SYS_MAP_MMIO pa=0x000000000a000000 va=0x0000000040700000 size=0x0000000000004000
+[libos] safetensors loaded through ext4
+[libos] ACT parsing weights and allocating workspace
+[libos] ACT model and workspace ready
+[libos] ACT correctness backend CPU0..3 ready
+[libos] ACT case=0 forward begin
+[libos] ACT stage complete: input preparation stage_ms=0 total_ms=0
+[libos] ACT stage complete: handeye normalization stage_ms=0 total_ms=0
+[libos] ACT stage complete: handeye ResNet stem stage_ms=86 total_ms=86
+[libos] ACT stage complete: handeye ResNet block=0x0000000000000000 stage_ms=155 total_ms=242
+[libos] ACT stage complete: handeye ResNet block=0x0000000000000001 stage_ms=148 total_ms=391
+[libos] ACT stage complete: handeye ResNet block=0x0000000000000002 stage_ms=113 total_ms=504
+[libos] ACT stage complete: handeye ResNet block=0x0000000000000003 stage_ms=146 total_ms=651
+[libos] ACT stage complete: handeye ResNet block=0x0000000000000004 stage_ms=117 total_ms=768
+[libos] ACT stage complete: handeye ResNet block=0x0000000000000005 stage_ms=154 total_ms=922
+[libos] ACT stage complete: handeye ResNet block=0x0000000000000006 stage_ms=120 total_ms=1043
+[libos] ACT stage complete: handeye ResNet block=0x0000000000000007 stage_ms=158 total_ms=1201
+[libos] ACT stage complete: handeye feature projection stage_ms=9 total_ms=1210
+[libos] ACT stage complete: fixed normalization stage_ms=0 total_ms=1211
+[libos] ACT stage complete: fixed ResNet stem stage_ms=78 total_ms=1290
+[libos] ACT stage complete: fixed ResNet block=0x0000000000000000 stage_ms=150 total_ms=1440
+[libos] ACT stage complete: fixed ResNet block=0x0000000000000001 stage_ms=149 total_ms=1590
+[libos] ACT stage complete: fixed ResNet block=0x0000000000000002 stage_ms=140 total_ms=1731
+[libos] ACT stage complete: fixed ResNet block=0x0000000000000003 stage_ms=148 total_ms=1880
+[libos] ACT stage complete: fixed ResNet block=0x0000000000000004 stage_ms=117 total_ms=1997
+[libos] ACT stage complete: fixed ResNet block=0x0000000000000005 stage_ms=150 total_ms=2147
+[libos] ACT stage complete: fixed ResNet block=0x0000000000000006 stage_ms=122 total_ms=2270
+[libos] ACT stage complete: fixed ResNet block=0x0000000000000007 stage_ms=153 total_ms=2423
+[libos] ACT stage complete: fixed feature projection stage_ms=9 total_ms=2432
+[libos] ACT stage complete: Transformer encoder layer=0x0000000000000000 stage_ms=438 total_ms=2871
+[libos] ACT stage complete: Transformer encoder layer=0x0000000000000001 stage_ms=438 total_ms=3310
+[libos] ACT stage complete: Transformer encoder layer=0x0000000000000002 stage_ms=452 total_ms=3762
+[libos] ACT stage complete: Transformer encoder layer=0x0000000000000003 stage_ms=441 total_ms=4203
+[libos] ACT stage complete: Transformer decoder stage_ms=146 total_ms=4350
+[libos] ACT stage complete: action head stage_ms=0 total_ms=4350
+[libos] ACT case=0 ticks=0x00000000063985e5 mean_abs_x1e9=11046 max_abs_x1e9=83923 max_step=88 max_joint=1 failed=0
+[libos] ACT case=1 forward begin
+[libos] ACT stage complete: input preparation stage_ms=0 total_ms=0
+[libos] ACT stage complete: handeye normalization stage_ms=0 total_ms=0
+[libos] ACT stage complete: handeye ResNet stem stage_ms=78 total_ms=78
+[libos] ACT stage complete: handeye ResNet block=0x0000000000000000 stage_ms=147 total_ms=226
+[libos] ACT stage complete: handeye ResNet block=0x0000000000000001 stage_ms=149 total_ms=375
+[libos] ACT stage complete: handeye ResNet block=0x0000000000000002 stage_ms=118 total_ms=493
+[libos] ACT stage complete: handeye ResNet block=0x0000000000000003 stage_ms=145 total_ms=639
+[libos] ACT stage complete: handeye ResNet block=0x0000000000000004 stage_ms=116 total_ms=756
+[libos] ACT stage complete: handeye ResNet block=0x0000000000000005 stage_ms=149 total_ms=905
+[libos] ACT stage complete: handeye ResNet block=0x0000000000000006 stage_ms=120 total_ms=1026
+[libos] ACT stage complete: handeye ResNet block=0x0000000000000007 stage_ms=154 total_ms=1180
+[libos] ACT stage complete: handeye feature projection stage_ms=10 total_ms=1191
+[libos] ACT stage complete: fixed normalization stage_ms=0 total_ms=1191
+[libos] ACT stage complete: fixed ResNet stem stage_ms=81 total_ms=1272
+[libos] ACT stage complete: fixed ResNet block=0x0000000000000000 stage_ms=165 total_ms=1438
+[libos] ACT stage complete: fixed ResNet block=0x0000000000000001 stage_ms=157 total_ms=1596
+[libos] ACT stage complete: fixed ResNet block=0x0000000000000002 stage_ms=115 total_ms=1712
+[libos] ACT stage complete: fixed ResNet block=0x0000000000000003 stage_ms=149 total_ms=1861
+[libos] ACT stage complete: fixed ResNet block=0x0000000000000004 stage_ms=118 total_ms=1980
+[libos] ACT stage complete: fixed ResNet block=0x0000000000000005 stage_ms=169 total_ms=2149
+[libos] ACT stage complete: fixed ResNet block=0x0000000000000006 stage_ms=122 total_ms=2272
+[libos] ACT stage complete: fixed ResNet block=0x0000000000000007 stage_ms=155 total_ms=2428
+[libos] ACT stage complete: fixed feature projection stage_ms=9 total_ms=2437
+[libos] ACT stage complete: Transformer encoder layer=0x0000000000000000 stage_ms=448 total_ms=2886
+[libos] ACT stage complete: Transformer encoder layer=0x0000000000000001 stage_ms=444 total_ms=3331
+[libos] ACT stage complete: Transformer encoder layer=0x0000000000000002 stage_ms=438 total_ms=3769
+[libos] ACT stage complete: Transformer encoder layer=0x0000000000000003 stage_ms=447 total_ms=4217
+[libos] ACT stage complete: Transformer decoder stage_ms=144 total_ms=4362
+[libos] ACT stage complete: action head stage_ms=0 total_ms=4362
+[libos] ACT case=1 ticks=0x00000000063dc468 mean_abs_x1e9=16551 max_abs_x1e9=137329 max_step=87 max_joint=2 failed=0
+[libos] ACT case=2 forward begin
+[libos] ACT stage complete: input preparation stage_ms=0 total_ms=0
+[libos] ACT stage complete: handeye normalization stage_ms=0 total_ms=0
+[libos] ACT stage complete: handeye ResNet stem stage_ms=82 total_ms=82
+[libos] ACT stage complete: handeye ResNet block=0x0000000000000000 stage_ms=152 total_ms=235
+[libos] ACT stage complete: handeye ResNet block=0x0000000000000001 stage_ms=153 total_ms=388
+[libos] ACT stage complete: handeye ResNet block=0x0000000000000002 stage_ms=119 total_ms=507
+[libos] ACT stage complete: handeye ResNet block=0x0000000000000003 stage_ms=153 total_ms=661
+[libos] ACT stage complete: handeye ResNet block=0x0000000000000004 stage_ms=123 total_ms=785
+[libos] ACT stage complete: handeye ResNet block=0x0000000000000005 stage_ms=154 total_ms=939
+[libos] ACT stage complete: handeye ResNet block=0x0000000000000006 stage_ms=148 total_ms=1088
+[libos] ACT stage complete: handeye ResNet block=0x0000000000000007 stage_ms=159 total_ms=1247
+[libos] ACT stage complete: handeye feature projection stage_ms=9 total_ms=1257
+[libos] ACT stage complete: fixed normalization stage_ms=0 total_ms=1257
+[libos] ACT stage complete: fixed ResNet stem stage_ms=81 total_ms=1338
+[libos] ACT stage complete: fixed ResNet block=0x0000000000000000 stage_ms=157 total_ms=1496
+[libos] ACT stage complete: fixed ResNet block=0x0000000000000001 stage_ms=156 total_ms=1652
+[libos] ACT stage complete: fixed ResNet block=0x0000000000000002 stage_ms=118 total_ms=1771
+[libos] ACT stage complete: fixed ResNet block=0x0000000000000003 stage_ms=154 total_ms=1926
+[libos] ACT stage complete: fixed ResNet block=0x0000000000000004 stage_ms=123 total_ms=2049
+[libos] ACT stage complete: fixed ResNet block=0x0000000000000005 stage_ms=156 total_ms=2205
+[libos] ACT stage complete: fixed ResNet block=0x0000000000000006 stage_ms=126 total_ms=2331
+[libos] ACT stage complete: fixed ResNet block=0x0000000000000007 stage_ms=164 total_ms=2496
+[libos] ACT stage complete: fixed feature projection stage_ms=9 total_ms=2505
+[libos] ACT stage complete: Transformer encoder layer=0x0000000000000000 stage_ms=449 total_ms=2954
+[libos] ACT stage complete: Transformer encoder layer=0x0000000000000001 stage_ms=451 total_ms=3406
+[libos] ACT stage complete: Transformer encoder layer=0x0000000000000002 stage_ms=447 total_ms=3853
+[libos] ACT stage complete: Transformer encoder layer=0x0000000000000003 stage_ms=446 total_ms=4300
+[libos] ACT stage complete: Transformer decoder stage_ms=149 total_ms=4449
+[libos] ACT stage complete: action head stage_ms=0 total_ms=4450
+[libos] ACT case=2 ticks=0x00000000065dfda3 mean_abs_x1e9=18612 max_abs_x1e9=183105 max_step=34 max_joint=2 failed=0
+[libos] ACT case=3 forward begin
+[libos] ACT stage complete: input preparation stage_ms=0 total_ms=0
+[libos] ACT stage complete: handeye normalization stage_ms=0 total_ms=0
+[libos] ACT stage complete: handeye ResNet stem stage_ms=85 total_ms=85
+[libos] ACT stage complete: handeye ResNet block=0x0000000000000000 stage_ms=158 total_ms=243
+[libos] ACT stage complete: handeye ResNet block=0x0000000000000001 stage_ms=159 total_ms=403
+[libos] ACT stage complete: handeye ResNet block=0x0000000000000002 stage_ms=120 total_ms=524
+[libos] ACT stage complete: handeye ResNet block=0x0000000000000003 stage_ms=157 total_ms=681
+[libos] ACT stage complete: handeye ResNet block=0x0000000000000004 stage_ms=124 total_ms=806
+[libos] ACT stage complete: handeye ResNet block=0x0000000000000005 stage_ms=158 total_ms=965
+[libos] ACT stage complete: handeye ResNet block=0x0000000000000006 stage_ms=131 total_ms=1096
+[libos] ACT stage complete: handeye ResNet block=0x0000000000000007 stage_ms=170 total_ms=1267
+[libos] ACT stage complete: handeye feature projection stage_ms=9 total_ms=1276
+[libos] ACT stage complete: fixed normalization stage_ms=0 total_ms=1277
+[libos] ACT stage complete: fixed ResNet stem stage_ms=84 total_ms=1361
+[libos] ACT stage complete: fixed ResNet block=0x0000000000000000 stage_ms=160 total_ms=1521
+[libos] ACT stage complete: fixed ResNet block=0x0000000000000001 stage_ms=160 total_ms=1682
+[libos] ACT stage complete: fixed ResNet block=0x0000000000000002 stage_ms=122 total_ms=1804
+[libos] ACT stage complete: fixed ResNet block=0x0000000000000003 stage_ms=157 total_ms=1962
+[libos] ACT stage complete: fixed ResNet block=0x0000000000000004 stage_ms=126 total_ms=2089
+[libos] ACT stage complete: fixed ResNet block=0x0000000000000005 stage_ms=160 total_ms=2250
+[libos] ACT stage complete: fixed ResNet block=0x0000000000000006 stage_ms=128 total_ms=2378
+[libos] ACT stage complete: fixed ResNet block=0x0000000000000007 stage_ms=164 total_ms=2543
+[libos] ACT stage complete: fixed feature projection stage_ms=30 total_ms=2574
+[libos] ACT stage complete: Transformer encoder layer=0x0000000000000000 stage_ms=463 total_ms=3037
+[libos] ACT stage complete: Transformer encoder layer=0x0000000000000001 stage_ms=466 total_ms=3504
+[libos] ACT stage complete: Transformer encoder layer=0x0000000000000002 stage_ms=464 total_ms=3968
+[libos] ACT stage complete: Transformer encoder layer=0x0000000000000003 stage_ms=487 total_ms=4456
+[libos] ACT stage complete: Transformer decoder stage_ms=151 total_ms=4607
+[libos] ACT stage complete: action head stage_ms=0 total_ms=4607
+[libos] ACT case=3 ticks=0x00000000069793f3 mean_abs_x1e9=13755 max_abs_x1e9=167846 max_step=4 max_joint=2 failed=0
+[libos] ACT case=4 forward begin
+[libos] ACT stage complete: input preparation stage_ms=0 total_ms=0
+[libos] ACT stage complete: handeye normalization stage_ms=0 total_ms=0
+[libos] ACT stage complete: handeye ResNet stem stage_ms=84 total_ms=84
+[libos] ACT stage complete: handeye ResNet block=0x0000000000000000 stage_ms=159 total_ms=243
+[libos] ACT stage complete: handeye ResNet block=0x0000000000000001 stage_ms=161 total_ms=405
+[libos] ACT stage complete: handeye ResNet block=0x0000000000000002 stage_ms=126 total_ms=531
+[libos] ACT stage complete: handeye ResNet block=0x0000000000000003 stage_ms=160 total_ms=691
+[libos] ACT stage complete: handeye ResNet block=0x0000000000000004 stage_ms=129 total_ms=821
+[libos] ACT stage complete: handeye ResNet block=0x0000000000000005 stage_ms=162 total_ms=984
+[libos] ACT stage complete: handeye ResNet block=0x0000000000000006 stage_ms=129 total_ms=1113
+[libos] ACT stage complete: handeye ResNet block=0x0000000000000007 stage_ms=167 total_ms=1280
+[libos] ACT stage complete: handeye feature projection stage_ms=10 total_ms=1290
+[libos] ACT stage complete: fixed normalization stage_ms=0 total_ms=1291
+[libos] ACT stage complete: fixed ResNet stem stage_ms=86 total_ms=1377
+[libos] ACT stage complete: fixed ResNet block=0x0000000000000000 stage_ms=184 total_ms=1562
+[libos] ACT stage complete: fixed ResNet block=0x0000000000000001 stage_ms=161 total_ms=1723
+[libos] ACT stage complete: fixed ResNet block=0x0000000000000002 stage_ms=126 total_ms=1850
+[libos] ACT stage complete: fixed ResNet block=0x0000000000000003 stage_ms=157 total_ms=2007
+[libos] ACT stage complete: fixed ResNet block=0x0000000000000004 stage_ms=131 total_ms=2139
+[libos] ACT stage complete: fixed ResNet block=0x0000000000000005 stage_ms=164 total_ms=2303
+[libos] ACT stage complete: fixed ResNet block=0x0000000000000006 stage_ms=133 total_ms=2436
+[libos] ACT stage complete: fixed ResNet block=0x0000000000000007 stage_ms=168 total_ms=2605
+[libos] ACT stage complete: fixed feature projection stage_ms=9 total_ms=2615
+[libos] ACT stage complete: Transformer encoder layer=0x0000000000000000 stage_ms=463 total_ms=3078
+[libos] ACT stage complete: Transformer encoder layer=0x0000000000000001 stage_ms=473 total_ms=3552
+[libos] ACT stage complete: Transformer encoder layer=0x0000000000000002 stage_ms=462 total_ms=4014
+[libos] ACT stage complete: Transformer encoder layer=0x0000000000000003 stage_ms=469 total_ms=4484
+[libos] ACT stage complete: Transformer decoder stage_ms=171 total_ms=4655
+[libos] ACT stage complete: action head stage_ms=0 total_ms=4656
+[libos] ACT case=4 ticks=0x0000000006a96b0d mean_abs_x1e9=9206 max_abs_x1e9=76293 max_step=51 max_joint=3 failed=0
+[libos] ACT correctness PASS cases=5 values=3000
+
+[exo] EL0 exit code=0x0000000000000000
+[exo] Frame exit cleanup reclaimed pages=0x00000000000105fb
+[exo] EL0 mappings revoked, code/stack pages reclaimed

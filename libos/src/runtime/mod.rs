@@ -14,21 +14,78 @@
 //! MMIO/DMA建立映射后，驱动通过返回的EL0 VA直接读写；只有申请、释放、
 //! 阻塞等待和ACK等保护边界需要再次执行SVC。
 
-use core::alloc::Layout;
+use core::alloc::{GlobalAlloc, Layout};
 use core::arch::asm;
 use core::ptr::NonNull;
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use linked_list_allocator::LockedHeap;
 
+#[cfg(any(
+    feature = "app-act-benchmark",
+    feature = "app-act-inference",
+    feature = "app-robot-act-once"
+))]
+pub(crate) mod act_parallel;
+
 #[global_allocator]
-static HEAP: LockedHeap = LockedHeap::empty();
+static HEAP: CountingHeap = CountingHeap;
+static HEAP_STORAGE: LockedHeap = LockedHeap::empty();
+static HEAP_ALLOCATIONS: AtomicUsize = AtomicUsize::new(0);
 static DIRECT_UART_READY: AtomicBool = AtomicBool::new(false);
 
-pub unsafe fn init_heap(info: &exo_abi::UserBootInfo) {
-    // heap backing pages和VA由EL1在启动任务时一次性准备。此后Vec/Box的小块
-    // 分配只操作EL0中的LockedHeap，不会每次malloc都陷入Kernel。
-    HEAP.lock()
-        .init(info.heap_base as *mut u8, info.heap_size as usize);
+/// 在不改变实际分配器的前提下记录 alloc 调用次数。
+///
+/// ACT steady-state 只使用调用者提供的 Frame workspace；这个计数器用于把
+/// “没有隐含堆分配”变成 LibOS 串口中的可验证证据。计数器本身是原子读写，
+/// 不参与分配路径的判定，也不在 EL1 中维护状态。
+struct CountingHeap;
+
+unsafe impl GlobalAlloc for CountingHeap {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        HEAP_ALLOCATIONS.fetch_add(1, Ordering::Relaxed);
+        // SAFETY:调用者遵守GlobalAlloc契约；LockedHeap负责内部空闲链表锁。
+        unsafe { GlobalAlloc::alloc(&HEAP_STORAGE, layout) }
+    }
+
+    unsafe fn dealloc(&self, pointer: *mut u8, layout: Layout) {
+        // SAFETY:指针和布局由对应的alloc调用产生，交回同一个LockedHeap。
+        unsafe { GlobalAlloc::dealloc(&HEAP_STORAGE, pointer, layout) }
+    }
+}
+
+pub unsafe fn init_heap(base: *mut u8, size: usize) {
+    // heap backing pages和VA由EL0在启动时通过Frame系统调用建立。此后
+    // Vec/Box的小块分配只操作EL0中的LockedHeap，不会每次malloc都陷入Kernel。
+
+    // 使用Rust第三方linked_list_allocator，把已映射的4MiB内存
+    // 管理成Heap，供Vec、Box、String等动态对象分配。
+    HEAP_STORAGE.lock().init(base, size);
+}
+
+/// 返回进程内累计的 GlobalAlloc 调用次数；只读，不分配内存。
+pub(crate) fn allocation_count() -> usize {
+    HEAP_ALLOCATIONS.load(Ordering::Acquire)
+}
+
+/// 为当前CPU上的ACT数值内核启用浮点非正规数flush-to-zero。
+///
+/// `FPCR.FZ`控制FP32/FP64，`FZ16`控制FP16。ACT当前只计算FP32，但同时设置
+/// 两位可避免后续半精度内核落入不同模式。普通数、NaN和Inf语义不变；非常
+/// 接近零的subnormal按零处理，既符合常见推理后端行为，也避免QEMU TCG用
+/// 极慢的软件路径逐条模拟。FPCR是每个执行CPU的状态，所以每个worker都调用。
+#[cfg(any(
+    feature = "app-act-benchmark",
+    feature = "app-act-inference",
+    feature = "app-robot-act-once"
+))]
+pub(crate) fn configure_act_fpcr() {
+    let mut fpcr: u64;
+    unsafe {
+        core::arch::asm!("mrs {value}, fpcr", value = out(reg) fpcr, options(nomem, nostack));
+        fpcr |= (1 << 24) | (1 << 19);
+        core::arch::asm!("msr fpcr, {value}", value = in(reg) fpcr, options(nomem, nostack));
+        core::arch::asm!("isb", options(nomem, nostack));
+    }
 }
 
 pub fn svc(sysno: u64, arg0: u64, arg1: u64, arg2: u64) -> u64 {
@@ -63,7 +120,33 @@ pub fn svc5(sysno: u64, arg0: u64, arg1: u64, arg2: u64, arg3: u64, arg4: u64) -
     ret
 }
 
+/// 六参数 SVC 入口。AArch64 的 x0..x5 都是普通参数寄存器，x8仍保存
+/// 系统调用号；这里只给需要第六个参数的低级 ABI 使用，例如 FRAME_MAP_TO
+/// 的 rights。绝大多数调用继续使用 svc/svc5，保持调用面简单。
+pub fn svc6(sysno: u64, arg0: u64, arg1: u64, arg2: u64, arg3: u64, arg4: u64, arg5: u64) -> u64 {
+    let ret: u64;
+    unsafe {
+        asm!(
+            "svc #0",
+            inlateout("x8") sysno => _,
+            inlateout("x0") arg0 => ret,
+            inlateout("x1") arg1 => _,
+            inlateout("x2") arg2 => _,
+            inlateout("x3") arg3 => _,
+            inlateout("x4") arg4 => _,
+            inlateout("x5") arg5 => _,
+            lateout("x6") _, lateout("x7") _, lateout("x9") _, lateout("x10") _,
+            lateout("x11") _, lateout("x12") _, lateout("x13") _, lateout("x14") _,
+            lateout("x15") _, lateout("x16") _, lateout("x17") _,
+            clobber_abi("C"),
+            options(nostack)
+        );
+    }
+    ret
+}
+
 pub fn frame_alloc(pages: u64, align_pages: u64) -> Result<exo_abi::FrameHandle, u64> {
+    // 请求Kernel分配普通Frame并返回不透明句柄。
     let result = svc(exo_abi::SYS_FRAME_ALLOC, pages, align_pages, 0);
     if exo_abi::is_sys_error(result) {
         Err(result)
@@ -73,6 +156,7 @@ pub fn frame_alloc(pages: u64, align_pages: u64) -> Result<exo_abi::FrameHandle,
 }
 
 pub fn frame_free(handle: exo_abi::FrameHandle) -> Result<(), u64> {
+    // 请求Kernel释放当前任务拥有的Frame。
     match svc(exo_abi::SYS_FRAME_FREE, handle.0, 0, 0) {
         0 => Ok(()),
         error => Err(error),
@@ -86,6 +170,7 @@ pub fn frame_map(
     va: u64,
     rights: u64,
 ) -> Result<exo_abi::MappingHandle, u64> {
+    // 请求Kernel按权限把Frame映射到当前EL0 VA。
     let result = svc5(
         exo_abi::SYS_FRAME_MAP,
         frame.0,
@@ -101,7 +186,50 @@ pub fn frame_map(
     }
 }
 
+/// 把当前 owner 的 Frame 映射到一个由它创建的目标 VSpace。
+pub fn frame_map_to(
+    frame: exo_abi::FrameHandle,
+    target: exo_abi::VSpaceHandle,
+    offset_pages: u64,
+    pages: u64,
+    va: u64,
+    rights: u64,
+) -> Result<exo_abi::MappingHandle, u64> {
+    // 请求Kernel把当前Frame映射到另一个用户VSpace。
+    let result = svc6(
+        exo_abi::SYS_FRAME_MAP_TO,
+        frame.0,
+        target.0,
+        offset_pages,
+        pages,
+        va,
+        rights,
+    );
+    if exo_abi::is_sys_error(result) {
+        Err(result)
+    } else {
+        Ok(exo_abi::MappingHandle(result))
+    }
+}
+
+pub fn vspace_create() -> Result<exo_abi::VSpaceHandle, u64> {
+    let result = svc(exo_abi::SYS_VSPACE_CREATE, 0, 0, 0);
+    if exo_abi::is_sys_error(result) {
+        Err(result)
+    } else {
+        Ok(exo_abi::VSpaceHandle(result))
+    }
+}
+
+pub fn vspace_destroy(handle: exo_abi::VSpaceHandle) -> Result<(), u64> {
+    match svc(exo_abi::SYS_VSPACE_DESTROY, handle.0, 0, 0) {
+        0 => Ok(()),
+        error => Err(error),
+    }
+}
+
 pub fn frame_unmap(handle: exo_abi::MappingHandle) -> Result<(), u64> {
+    // 请求Kernel撤销当前任务拥有的Frame映射。
     match svc(exo_abi::SYS_FRAME_UNMAP, handle.0, 0, 0) {
         0 => Ok(()),
         error => Err(error),

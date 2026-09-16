@@ -1,0 +1,62 @@
+loading initial cache file /Users/vel/Work/RobotOS/Lerobot/sel4test-qemu-arm-virt/projects/act-inference-demo/settings.cmake
+-- ARM_CPU not set, defaulting to cortex-a53
+-- Extracting device tree from QEMU
+-- ARM_CPU not set, defaulting to cortex-a53
+-- Extracting device tree from QEMU
+-- Found GCC with prefix aarch64-linux-gnu-
+-- /Users/vel/Work/RobotOS/Lerobot/sel4test-qemu-arm-virt/build-act-inference-demo/kernel/gen_headers/plat/machine/devices_gen.h is out of date. Regenerating from DTB...
+-- libmuslc architecture: 'aarch64' (from KernelSel4Arch 'aarch64')
+-- Detecting cached version of: musllibc
+--   Found valid cache entry for musllibc
+-- Configuring done (1.0s)
+-- Generating done (0.0s)
+-- Build files have been written to: /Users/vel/Work/RobotOS/Lerobot/sel4test-qemu-arm-virt/build-act-inference-demo
+[0/2] Re-checking globbed directories...
+[1/47] Building C object kernel/CMakeFiles/kernel_all_pp_prune_wrapper_temp_lib.dir/kernel_all_pp_prune_wrapper_temp.c.obj
+[2/47] Building C object apps/root/CMakeFiles/act-inference-root.dir/src/main.c.obj
+[3/47] Generating kernel_all_pp_prune.c
+[4/47] Building C object apps/root/CMakeFiles/act-inference-root.dir/src/parallel.c.obj
+[5/47] Generating from generated/arch/object/structures.bf.pbf
+[6/47] Creating C input file for preprocessor
+[7/47] Building C object kernel/CMakeFiles/kernel_bf_gen_target_11_pbf_temp_lib.dir/kernel_bf_gen_target_11_pbf_temp.c.obj
+[8/47] Generating generated/sel4/shared_types.bf.pbf
+[9/47] Generating from generated/sel4/shared_types.bf.pbf
+[10/47] Creating C input file for preprocessor
+[11/47] Creating C input file for preprocessor
+[12/47] Building C object kernel/CMakeFiles/linker_ld_wrapper_temp_lib.dir/linker_ld_wrapper_temp.c.obj
+[13/47] Generating linker.lds_pp
+[14/47] Building C object kernel/CMakeFiles/kernel_i_wrapper_temp_lib.dir/kernel_all_copy.c.obj
+[15/47] Generating kernel_all.i
+[16/47] Generating circular_includes_valid
+[17/47] Linking C executable apps/root/act-inference-root
+[18/47] Building C object kernel/CMakeFiles/kernel.elf.dir/kernel_all.c.obj
+[19/47] Linking C executable kernel/kernel.elf
+[20/47] Generating kernel.elf
+[21/47] Generating rootserver
+[22/47] Generate CPIO archive archive.o
+[23/47] Generating gen_headers/image_start_addr.h, gen_headers/platform_info.h
+[24/47] Generating linker.lds_pp
+[25/47] Generating gen_headers/devices_gen.h
+[26/47] Building C object elfloader/CMakeFiles/elfloader.dir/src/arch-arm/drivers/smp-zynq7000.c.obj
+[27/47] Building C object elfloader/CMakeFiles/elfloader.dir/src/drivers/driver.c.obj
+[28/47] Building C object elfloader/CMakeFiles/elfloader.dir/src/drivers/timer/arm_generic_timer.c.obj
+[29/47] Building C object elfloader/CMakeFiles/elfloader.dir/src/arch-arm/drivers/smp-psci.c.obj
+[30/47] Building C object elfloader/CMakeFiles/elfloader.dir/src/arch-arm/smp_boot.c.obj
+[31/47] Building C object elfloader/CMakeFiles/elfloader.dir/src/arch-arm/drivers/smp-imx6.c.obj
+[32/47] Building C object elfloader/CMakeFiles/elfloader.dir/src/drivers/smp/common.c.obj
+[33/47] Building C object elfloader/CMakeFiles/elfloader.dir/src/drivers/uart/bcm-uart.c.obj
+[34/47] Building C object elfloader/CMakeFiles/elfloader.dir/src/drivers/uart/8250-uart.c.obj
+[35/47] Building C object elfloader/CMakeFiles/elfloader.dir/src/drivers/uart/exynos-uart.c.obj
+[36/47] Building C object elfloader/CMakeFiles/elfloader.dir/src/drivers/uart/common.c.obj
+[37/47] Building C object elfloader/CMakeFiles/elfloader.dir/src/arch-arm/drivers/smp-spin-table.c.obj
+[38/47] Building C object elfloader/CMakeFiles/elfloader.dir/src/drivers/uart/imx-lpuart.c.obj
+[39/47] Building C object elfloader/CMakeFiles/elfloader.dir/src/drivers/uart/xilinx-uart.c.obj
+[40/47] Building C object elfloader/CMakeFiles/elfloader.dir/src/drivers/uart/imx-uart.c.obj
+[41/47] Building C object elfloader/CMakeFiles/elfloader.dir/src/drivers/uart/meson-uart.c.obj
+[42/47] Building C object elfloader/CMakeFiles/elfloader.dir/src/drivers/uart/stm32mp2-uart.c.obj
+[43/47] Building C object elfloader/CMakeFiles/elfloader.dir/src/drivers/uart/pl011-uart.c.obj
+[44/47] Building C object elfloader/CMakeFiles/elfloader.dir/src/drivers/uart/msm-uart.c.obj
+[45/47] Linking C executable elfloader/elfloader
+[46/47] Generating ../../images/act-inference-root-image-arm-qemu-arm-virt
+seL4 ACT image: /Users/vel/Work/RobotOS/Lerobot/sel4test-qemu-arm-virt/build-act-inference-demo/images/act-inference-root-image-arm-qemu-arm-virt
+/Users/vel/Work/RobotOS/Lerobot/sel4test-qemu-arm-virt/build-act-inference-demo/images/act-inference-root-image-arm-qemu-arm-virt: ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), statically linked, with debug_info, not stripped

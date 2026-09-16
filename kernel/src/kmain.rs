@@ -6,8 +6,7 @@
 
 use crate::boot_info::BootInfo; // EL2 boot shim 收集后传给 EL1 的启动信息
 use crate::config::{
-    PAGE_SIZE, USER_BASE, USER_BOOT_INFO_VA, USER_HEAP_BASE, USER_HEAP_SIZE, USER_STACK_PAGES,
-    USER_STACK_TOP, USER_WINDOW_END,
+    PAGE_SIZE, USER_BASE, USER_BOOT_INFO_VA, USER_STACK_PAGES, USER_STACK_TOP, USER_WINDOW_END,
 };
 use crate::uart; // PL011 串口输出, 当前所有 bring-up 日志都靠它
 
@@ -146,6 +145,11 @@ pub extern "C" fn el1_main(boot_info_addr: u64) -> ! {
         // GIC 只能由 EL1 操作。deny 表优先于通用 DTB MMIO 登记。
         crate::protect::deny(gicd_pa, 0x10000);
         crate::protect::deny(gicc_pa, 0x10000);
+
+        // 启动根页表从这一刻起登记为 VSpaceHandle(1)。后续创建的独立
+        // VSpace 会复用同一份 Kernel UART/GIC 设备块，但不会继承当前 EL0
+        // 的 ELF、heap、stack、MMIO 或 Frame 映射。
+        crate::vspace::initialize(root, uart_reg.base, gicd_pa, gicc_pa);
     }
 
     let uart_intid = platform.uart_irq.intid;
@@ -171,6 +175,21 @@ pub extern "C" fn el1_main(boot_info_addr: u64) -> ! {
         uart::hex(xhci_reg.base);
         uart::puts(" size=");
         uart::hex(xhci_reg.size);
+        uart::puts("\r\n");
+    }
+    if let Some(virtio) = platform.virtio_mmio {
+        crate::protect::register(virtio.base, virtio.size);
+        if mmio_grant_count < crate::task::MAX_MMIO_GRANTS {
+            mmio_grants[mmio_grant_count] = crate::task::MmioGrant {
+                base: virtio.base,
+                size: virtio.size,
+            };
+            mmio_grant_count += 1;
+        }
+        uart::puts("[exo] virtio-mmio window=");
+        uart::hex(virtio.base);
+        uart::puts(" size=");
+        uart::hex(virtio.size);
         uart::puts("\r\n");
     }
     if pci_info.present != 0 {
@@ -246,8 +265,6 @@ pub extern "C" fn el1_main(boot_info_addr: u64) -> ! {
     // ELF loader 按 PT_LOAD 的 R/W/X 权限分别分配并映射用户段。
     let loaded = crate::elf::load(root, LIBOS_ELF).expect("failed to load EL0 ELF");
     let stack_paddr = crate::mem::alloc_pages(USER_STACK_PAGES).expect("no mem for EL0 stack");
-    let heap_paddr =
-        crate::mem::alloc_pages(USER_HEAP_SIZE / PAGE_SIZE).expect("no mem for EL0 heap");
     let user_boot_info_pa = crate::mem::alloc_page().expect("no mem for UserBootInfo");
     let initial_ipc_pa = crate::mem::alloc_page().expect("no mem for initial IPC buffer");
 
@@ -257,7 +274,6 @@ pub extern "C" fn el1_main(boot_info_addr: u64) -> ! {
             0,
             (USER_STACK_PAGES * PAGE_SIZE) as usize,
         );
-        core::ptr::write_bytes(heap_paddr as *mut u8, 0, USER_HEAP_SIZE as usize);
         core::ptr::write_bytes(user_boot_info_pa as *mut u8, 0, PAGE_SIZE as usize);
         (user_boot_info_pa as *mut exo_abi::UserBootInfo).write(exo_abi::UserBootInfo {
             magic: exo_abi::USER_BOOT_INFO_MAGIC,
@@ -267,14 +283,20 @@ pub extern "C" fn el1_main(boot_info_addr: u64) -> ! {
                 base: uart_reg.base,
                 size: uart_reg.size,
                 intid: uart_intid,
-                irq_flags: platform.uart_irq.flags,
             },
             xhci: direct_xhci
                 .map(|(reg, irq)| exo_abi::DeviceResource {
                     base: reg.base,
                     size: reg.size,
                     intid: irq.intid,
-                    irq_flags: irq.flags,
+                })
+                .unwrap_or_default(),
+            virtio_mmio: platform
+                .virtio_mmio
+                .map(|reg| exo_abi::DeviceResource {
+                    base: reg.base,
+                    size: reg.size,
+                    intid: 0,
                 })
                 .unwrap_or_default(),
             xhci_transport: if direct_xhci.is_some() {
@@ -286,12 +308,6 @@ pub extern "C" fn el1_main(boot_info_addr: u64) -> ! {
             },
             cpu_count: platform.cpus.count as u32,
             pci: pci_info,
-            heap_base: USER_HEAP_BASE,
-            heap_size: USER_HEAP_SIZE,
-            dma_arena_base: exo_abi::DMA_ARENA_BASE,
-            dma_arena_end: exo_abi::DMA_ARENA_END,
-            frame_arena_base: exo_abi::FRAME_ARENA_BASE,
-            frame_arena_end: exo_abi::FRAME_ARENA_END,
         });
     }
 
@@ -317,7 +333,6 @@ pub extern "C" fn el1_main(boot_info_addr: u64) -> ! {
         root,
         bi,
         stack_paddr,
-        heap_paddr,
         user_boot_info_pa,
         initial_ipc_pa,
     );
@@ -331,7 +346,6 @@ pub extern "C" fn el1_main(boot_info_addr: u64) -> ! {
         &loaded.segments[..loaded.segment_count],
         stack_paddr,
         user_boot_info_pa,
-        heap_paddr,
         &mmio_grants[..mmio_grant_count],
         &irq_grants[..irq_grant_count],
     );
@@ -341,7 +355,16 @@ pub extern "C" fn el1_main(boot_info_addr: u64) -> ! {
     // CPU0完成共享页表、GIC Distributor和任务对象初始化后，才允许辅助核
     // 进入共享调度器。PSCI context_id携带逻辑CPU编号，辅助核使用独立EL1栈。
     // 任一目标核未在一秒内置online位即停止启动，避免伪装成可用的四核系统。
-    if !crate::arch::aarch64::smp::boot_secondaries(&platform.cpus, root, platform.timer_irq.intid)
+    // 初始固件在EL1交付时（macOS HVF）PSCI由HVC调用；EL2 boot shim路径
+    // 继续使用SMC。此处依据EBS时保存的CurrentEL选择，不依赖平台名称。
+    let psci_hvc = ((bi.el2.current_el >> 2) & 3) == 1;
+    let timer_irq = if psci_hvc {
+        crate::dtb::find_virtual_timer_irq(dtb_addr)
+            .expect("virtual Generic Timer interrupt missing")
+    } else {
+        platform.timer_irq
+    };
+    if !crate::arch::aarch64::smp::boot_secondaries(&platform.cpus, root, timer_irq.intid, psci_hvc)
     {
         uart::puts("[exo] SMP startup failed: all four PSCI CPUs are required\r\n");
         loop {
@@ -356,7 +379,7 @@ pub extern "C" fn el1_main(boot_info_addr: u64) -> ! {
 
     // 辅助核上线后再启动CPU0的1ms抢占Timer，避免SMP握手期间把尚未
     // 进入EL0的CPU0误当成正在运行的用户线程。
-    crate::scheduler::init(platform.timer_irq.intid);
+    crate::scheduler::init(timer_irq.intid, psci_hvc);
 
     uart::puts("[exo] enter EL0 libOS...\r\n");
 
@@ -405,7 +428,6 @@ fn complete_el1_stage1(
     root: u64,
     bi: &BootInfo,
     stack_paddr: u64,
-    heap_paddr: u64,
     user_boot_info_pa: u64,
     initial_ipc_pa: u64,
 ) {
@@ -446,14 +468,6 @@ fn complete_el1_stage1(
         user_boot_info_pa,
         crate::mmu::MMU_USER_RO,
         1,
-    );
-
-    crate::mmu::map(
-        root,
-        USER_HEAP_BASE,
-        heap_paddr,
-        crate::mmu::MMU_USER_RW,
-        USER_HEAP_SIZE / PAGE_SIZE,
     );
 
     // 映射 EL0 栈:

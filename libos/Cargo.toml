@@ -14,16 +14,36 @@ crab-usb = { path = "vendor/crab-usb", version = "=0.10.2", optional = true }
 dma-api = { version = "=0.9.3", optional = true }
 spin = { version = "=0.12.0", optional = true }
 log = { version = "=0.4.33", optional = true }
+act-runtime = { path = "../act-runtime", optional = true }
+zune-jpeg = { version = "=0.5.16-rc1", default-features = false, features = ["neon"], optional = true }
+ext4-view = { version = "=0.9.3", default-features = false, optional = true }
+virtio-drivers = { version = "=0.13.0", default-features = false, features = ["alloc"], optional = true }
 
 [features]
-default = ["qemu-xhci", "scservo"]
+# 默认只保留一个不依赖设备的验收场景，避免裸 `cargo build` 落入含糊的
+# “启用了驱动但没有选择应用”状态。正式构建由 scripts/libos_features.sh
+# 根据 LIBOS_APP 和目标平台生成唯一的一组 feature。
+default = ["app-system-smoke"]
+# 仅供rust-analyzer加载所有第一方模块和可选依赖。正式构建脚本永远不会
+# 选择这个feature，因此它不会扩大实际可执行场景矩阵。
+ide = ["qemu-xhci", "user-fs", "dep:act-runtime"]
 qemu-xhci = ["dep:crab-usb", "dep:dma-api", "dep:spin", "dep:log"]
 pi5-xhci = ["dep:crab-usb", "dep:dma-api", "dep:spin", "dep:log"]
-scservo = []
-scservo-move = ["scservo"]
-usb-echo = []
-uart-echo = []
-system-smoke = []
+app-system-smoke = []
+app-process-smoke = []
+app-uart-echo = []
+app-usb-echo = []
+app-uvc-smoke = ["user-fs"]
+app-scservo = []
+app-scservo-move = ["app-scservo"]
+user-fs = ["dep:ext4-view", "dep:virtio-drivers", "dep:spin"]
+app-act-inference = ["dep:act-runtime", "user-fs"]
+app-act-benchmark = ["dep:act-runtime", "user-fs"]
+## 显式开启 ACL 微内核；缺少 AArch64 ACL bridge 时构建会失败，绝不回退 portable。
+acl-neon = ["dep:act-runtime", "act-runtime/acl-neon"]
+app-robot-act-once = ["qemu-xhci", "user-fs", "dep:act-runtime", "dep:zune-jpeg"]
+app-robot-observation = ["qemu-xhci", "user-fs"]
+app-robot-action-replay = ["qemu-xhci", "user-fs"]
 
 [profile.dev]
 panic = "abort"

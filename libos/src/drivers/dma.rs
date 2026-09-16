@@ -19,6 +19,8 @@ use dma_api::{
 use spin::Mutex;
 
 const SLOT_COUNT: usize = 64;
+/// DMA arena低8MiB专供xHCI和USB传输；高4MiB留给virtio-blk。
+const USB_DMA_ARENA_END: u64 = exo_abi::DMA_ARENA_BASE + 8 * 1024 * 1024;
 
 #[derive(Clone, Copy)]
 struct Slot {
@@ -58,7 +60,7 @@ impl UsbKernel {
         loop {
             candidate = align_up(candidate, alignment as u64)?;
             let end = candidate.checked_add(size as u64)?;
-            if end > exo_abi::DMA_ARENA_END {
+            if end > USB_DMA_ARENA_END {
                 return None;
             }
             let mut collision_end = 0u64;

@@ -108,7 +108,6 @@ struct TaskResources {
     owned_count: usize,
     stack_pa: u64,
     boot_info_pa: u64,
-    heap_pa: u64,
     mmio: [UserMapping; MAX_MMIO_MAPPINGS],
     mmio_count: usize,
     dma: [DmaMapping; MAX_DMA_MAPPINGS],
@@ -128,7 +127,6 @@ static mut CURRENT: TaskResources = TaskResources {
     owned_count: 0,
     stack_pa: 0,
     boot_info_pa: 0,
-    heap_pa: 0,
     mmio: [UserMapping::EMPTY; MAX_MMIO_MAPPINGS],
     mmio_count: 0,
     dma: [DmaMapping::EMPTY; MAX_DMA_MAPPINGS],
@@ -142,6 +140,13 @@ static TASK_LOCK: crate::sync::SpinLock<()> = crate::sync::SpinLock::new(());
 
 /// v1只有一个资源域；0始终表示没有活动任务。
 pub fn current_owner() -> u32 {
+    // 线程切换到由当前 libOS 创建的独立 VSpace 后，资源系统调用仍需沿着
+    // “当前线程 -> 资源域”找到 owner。启动早期线程表尚未初始化时才退回
+    // 单任务 owner=1。
+    let thread_owner = crate::thread::owner_of_current();
+    if thread_owner != 0 {
+        return thread_owner;
+    }
     let _guard = TASK_LOCK.lock();
     unsafe {
         if CURRENT.active {
@@ -157,7 +162,6 @@ pub fn install(
     segments: &[OwnedPages],
     stack_pa: u64,
     boot_info_pa: u64,
-    heap_pa: u64,
     mmio_grants: &[MmioGrant],
     irq_grants: &[IrqGrant],
 ) {
@@ -173,7 +177,6 @@ pub fn install(
             owned_count: 0,
             stack_pa,
             boot_info_pa,
-            heap_pa,
             mmio: [UserMapping::EMPTY; MAX_MMIO_MAPPINGS],
             mmio_count: 0,
             dma: [DmaMapping::EMPTY; MAX_DMA_MAPPINGS],
@@ -562,7 +565,6 @@ pub fn exit_current(code: u64) -> ! {
             USER_STACK_PAGES,
         );
         mmu::unmap(root, USER_BOOT_INFO_VA, 1);
-        mmu::unmap(root, USER_HEAP_BASE, USER_HEAP_SIZE / 4096);
 
         let mut i = 0;
         while i < CURRENT.mmio_count {
@@ -594,7 +596,6 @@ pub fn exit_current(code: u64) -> ! {
         }
         mem::free_pages(CURRENT.stack_pa, USER_STACK_PAGES);
         mem::free_page(CURRENT.boot_info_pa);
-        mem::free_pages(CURRENT.heap_pa, USER_HEAP_SIZE / 4096);
         i = 0;
         while i < CURRENT.dma_count {
             let mapping = CURRENT.dma[i];

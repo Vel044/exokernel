@@ -26,6 +26,7 @@ static ONLINE_MASK: AtomicU64 = AtomicU64::new(1);
 static STOPPED_MASK: AtomicU64 = AtomicU64::new(0);
 static SHARED_ROOT: AtomicU64 = AtomicU64::new(0);
 static TIMER_INTID: AtomicUsize = AtomicUsize::new(0);
+static USE_VIRTUAL_TIMER: AtomicUsize = AtomicUsize::new(0);
 #[no_mangle]
 static BOOT_PHASE: [AtomicU32; exo_abi::MAX_CPUS] = [
     AtomicU32::new(0),
@@ -120,12 +121,14 @@ pub fn boot_secondaries(
     topology: &crate::resources::CpuTopology,
     root: u64,
     timer_intid: u32,
+    use_hvc: bool,
 ) -> bool {
     if topology.count != exo_abi::MAX_CPUS {
         return false;
     }
     SHARED_ROOT.store(root, Ordering::Release);
     TIMER_INTID.store(timer_intid as usize, Ordering::Release);
+    USE_VIRTUAL_TIMER.store(use_hvc as usize, Ordering::Release);
     let mut stack_cpu = 1usize;
     while stack_cpu < topology.count {
         let Some(stack_pa) = crate::mem::alloc_pages_aligned(STACK_PAGES, STACK_PAGES) else {
@@ -151,7 +154,7 @@ pub fn boot_secondaries(
         crate::uart::puts(" entry=");
         crate::uart::hex(entry);
         crate::uart::puts("\r\n");
-        let result = psci_cpu_on(topology.mpidrs[cpu], entry, cpu as u64);
+        let result = psci_cpu_on(topology.mpidrs[cpu], entry, cpu as u64, use_hvc);
         crate::uart::puts("[exo] PSCI CPU_ON result=");
         crate::uart::hex(result as u64);
         crate::uart::puts("\r\n");
@@ -184,34 +187,51 @@ pub fn boot_secondaries(
     online_mask() == expected
 }
 
-fn psci_cpu_on(mpidr: u64, entry: u64, context: u64) -> i64 {
+fn psci_cpu_on(mpidr: u64, entry: u64, context: u64, use_hvc: bool) -> i64 {
     let result: i64;
-    unsafe {
-        core::arch::asm!(
-            "smc #0",
-            inlateout("x0") PSCI_CPU_ON_64 => result,
-            in("x1") mpidr,
-            in("x2") entry,
-            in("x3") context,
-            lateout("x4") _,
-            lateout("x5") _,
-            lateout("x6") _,
-            lateout("x7") _,
-            // SMCCC把x0..x17定义为调用者保存寄存器。若不显式声明，
-            // 编译器可能让Rust局部变量跨越smc保存在这些寄存器中，
-            // 固件改写后会破坏控制流或SMP等待状态。
-            lateout("x8") _,
-            lateout("x9") _,
-            lateout("x10") _,
-            lateout("x11") _,
-            lateout("x12") _,
-            lateout("x13") _,
-            lateout("x14") _,
-            lateout("x15") _,
-            lateout("x16") _,
-            lateout("x17") _,
-            options(nostack)
-        );
+    if use_hvc {
+        unsafe {
+            core::arch::asm!(
+                "hvc #0",
+                inlateout("x0") PSCI_CPU_ON_64 => result,
+                in("x1") mpidr,
+                in("x2") entry,
+                in("x3") context,
+                lateout("x4") _, lateout("x5") _, lateout("x6") _, lateout("x7") _,
+                lateout("x8") _, lateout("x9") _, lateout("x10") _, lateout("x11") _,
+                lateout("x12") _, lateout("x13") _, lateout("x14") _, lateout("x15") _,
+                lateout("x16") _, lateout("x17") _,
+                options(nostack)
+            );
+        }
+    } else {
+        unsafe {
+            core::arch::asm!(
+                "smc #0",
+                inlateout("x0") PSCI_CPU_ON_64 => result,
+                in("x1") mpidr,
+                in("x2") entry,
+                in("x3") context,
+                lateout("x4") _,
+                lateout("x5") _,
+                lateout("x6") _,
+                lateout("x7") _,
+                // SMCCC把x0..x17定义为调用者保存寄存器。若不显式声明，
+                // 编译器可能让Rust局部变量跨越smc保存在这些寄存器中，
+                // 固件改写后会破坏控制流或SMP等待状态。
+                lateout("x8") _,
+                lateout("x9") _,
+                lateout("x10") _,
+                lateout("x11") _,
+                lateout("x12") _,
+                lateout("x13") _,
+                lateout("x14") _,
+                lateout("x15") _,
+                lateout("x16") _,
+                lateout("x17") _,
+                options(nostack)
+            );
+        }
     }
     result
 }
@@ -245,7 +265,10 @@ extern "C" fn smp_secondary_rust_entry(cpu: u64) -> ! {
     }
     crate::gic::init_cpu_interface();
     BOOT_PHASE[cpu].store(5, Ordering::Release);
-    crate::scheduler::init(TIMER_INTID.load(Ordering::Acquire) as u32);
+    crate::scheduler::init(
+        TIMER_INTID.load(Ordering::Acquire) as u32,
+        USE_VIRTUAL_TIMER.load(Ordering::Acquire) != 0,
+    );
     BOOT_PHASE[cpu].store(6, Ordering::Release);
     ONLINE_MASK.fetch_or(1u64 << cpu, Ordering::AcqRel);
     BOOT_PHASE[cpu].store(7, Ordering::Release);

@@ -88,17 +88,33 @@ impl Default for BootInfo {
 }
 
 impl BootInfo {
-    /// 读 EL2 系统寄存器, 存快照
-    /// 放在 EBS 之后调用, 因为 EBS 不影响这些寄存器
-    pub fn read_el2(&mut self) {
-        self.el2 = El2Regs {
-            current_el: mrs!("CurrentEL"),
-            sctlr: mrs!("sctlr_el2"),
-            tcr: mrs!("tcr_el2"),
-            mair: mrs!("mair_el2"),
-            ttbr0: mrs!("ttbr0_el2"),
-            vbar: mrs!("vbar_el2"),
-            hcr: mrs!("hcr_el2"),
+    /// 保存固件交付时的当前异常级和地址翻译状态。
+    ///
+    /// Pi5与`virt,virtualization=on`从EL2启动；macOS HVF不支持嵌套EL2，
+    /// 会把UEFI应用直接放在EL1。EL1绝不能读取`*_EL2`，否则产生未定义指令。
+    /// 字段名保留为`el2`以维持BootInfo布局，但EL1路径保存对应的EL1寄存器，
+    /// `hcr`置零表示没有可用的EL2虚拟化控制状态。
+    pub fn read_cpu_state(&mut self, current_el: u64) {
+        self.el2 = if (current_el >> 2) & 3 == 2 {
+            El2Regs {
+                current_el,
+                sctlr: mrs!("sctlr_el2"),
+                tcr: mrs!("tcr_el2"),
+                mair: mrs!("mair_el2"),
+                ttbr0: mrs!("ttbr0_el2"),
+                vbar: mrs!("vbar_el2"),
+                hcr: mrs!("hcr_el2"),
+            }
+        } else {
+            El2Regs {
+                current_el,
+                sctlr: mrs!("sctlr_el1"),
+                tcr: mrs!("tcr_el1"),
+                mair: mrs!("mair_el1"),
+                ttbr0: mrs!("ttbr0_el1"),
+                vbar: mrs!("vbar_el1"),
+                hcr: 0,
+            }
         };
     }
 

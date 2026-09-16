@@ -1,0 +1,26 @@
+#!/bin/sh
+
+# 最小PID 1：挂载Kernel伪文件系统和实验ext4盘，然后执行Linux Rust正确性程序。
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t devtmpfs devtmpfs /dev
+mkdir -p /data
+
+# Alpine virt Kernel把块设备与ext4编译为模块；modprobe依据modules.dep装入依赖。
+modprobe virtio_mmio
+modprobe virtio_blk
+modprobe ext4
+
+echo "[linux-qemu] mounting ACT experiment disk"
+if ! mount -t ext4 -o rw /dev/vda /data; then
+    echo "[linux-qemu] failed to mount /dev/vda"
+    poweroff -f
+fi
+
+echo "[linux-qemu] starting Linux Rust act-runtime correctness test"
+/usr/bin/linux-act-correctness
+status=$?
+sync
+umount /data
+echo "[linux-qemu] runner exit status=$status"
+poweroff -f

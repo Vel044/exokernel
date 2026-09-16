@@ -1,0 +1,6 @@
+system,backend,case_id,output_count,duration_ms,mean_abs_error,rmse,max_abs_error,max_error_step,max_error_joint,failed_elements,valid
+Exokernel,HVF-AArch64-4core-row4,case-000,600,4350,0.000011046,0.000017819,0.000083923,88,1,0,true
+Exokernel,HVF-AArch64-4core-row4,case-001,600,4362,0.000016552,0.000026839,0.000137329,87,2,0,true
+Exokernel,HVF-AArch64-4core-row4,case-002,600,4450,0.000018612,0.000029390,0.000183105,34,2,0,true
+Exokernel,HVF-AArch64-4core-row4,case-003,600,4607,0.000013756,0.000023972,0.000167847,4,2,0,true
+Exokernel,HVF-AArch64-4core-row4,case-004,600,4656,0.000009207,0.000016248,0.000076294,51,3,0,true

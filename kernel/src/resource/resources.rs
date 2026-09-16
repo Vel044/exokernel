@@ -27,6 +27,8 @@ pub struct PlatformResources {
     pub gicc_pa: u64,
     pub pci: PciHostInfo,
     pub xhci: Option<(RegRange, IrqSpec)>,
+    /// 连续的virtio-mmio transport窗口。Kernel只授权MMIO，不识别块设备类型。
+    pub virtio_mmio: Option<RegRange>,
     pub timer_irq: IrqSpec,
     pub cpus: CpuTopology,
 }
@@ -41,8 +43,44 @@ pub fn discover(dtb_pa: u64) -> Option<PlatformResources> {
         gicc_pa,
         pci: crate::pci::from_dtb(dtb_pa).unwrap_or_default(),
         xhci: crate::dtb::find_rp1_xhci(dtb_pa),
+        virtio_mmio: discover_virtio_mmio_window(dtb_pa),
         timer_irq: crate::dtb::find_nonsecure_physical_timer_irq(dtb_pa)?,
         cpus: discover_cpus(dtb_pa)?,
+    })
+}
+
+/// 合并DTB中的连续`virtio,mmio`节点，供EL0自行读取device_id并选择驱动。
+///
+/// QEMU virt目前给出32个相邻的0x200字节transport。授权时按4KiB页向外
+/// 对齐，但仍从完整DTB计算窗口，避免把0x0a00_0000写死进Kernel策略。
+fn discover_virtio_mmio_window(dtb_pa: u64) -> Option<RegRange> {
+    let tree = unsafe { Fdt::from_ptr(dtb_pa as *const u8) }.ok()?;
+    let mut first = u64::MAX;
+    let mut last = 0u64;
+    let mut count = 0usize;
+    for node in tree.all_nodes() {
+        let compatible = node
+            .compatible()
+            .is_some_and(|list| list.all().any(|value| value == "virtio,mmio"));
+        if !compatible {
+            continue;
+        }
+        let region = node.reg()?.next()?;
+        let base = region.starting_address as u64;
+        let size = region.size? as u64;
+        let end = base.checked_add(size)?;
+        first = first.min(base);
+        last = last.max(end);
+        count += 1;
+    }
+    if count == 0 || first >= last {
+        return None;
+    }
+    let page_first = first & !(exo_abi::PAGE_SIZE - 1);
+    let page_last = last.checked_add(exo_abi::PAGE_SIZE - 1)? & !(exo_abi::PAGE_SIZE - 1);
+    Some(RegRange {
+        base: page_first,
+        size: page_last.checked_sub(page_first)?,
     })
 }
 

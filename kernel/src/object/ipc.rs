@@ -353,8 +353,12 @@ fn send_common(handle: u64, is_call: bool, frame: &mut TrapFrame) -> Result<*mut
             // 指向本函数局部副本的指针，否则函数退栈后ELR/SP等字段会失效。
             frame.x[0] = 0;
             if is_call {
+                // 必须在IPC锁内先把Caller标记为Blocked。否则Server可能在
+                // 本核释放锁后、Caller真正阻塞前完成Reply；wake看到的仍是
+                // Running并丢弃唤醒，Caller随后会永久睡眠。
+                thread::make_current_blocked(frame);
                 drop(guard);
-                Ok(thread::block_current(frame))
+                Ok(crate::scheduler::schedule_after_block())
             } else {
                 drop(guard);
                 Ok(crate::scheduler::preempt_if_needed(frame))
@@ -363,8 +367,11 @@ fn send_common(handle: u64, is_call: bool, frame: &mut TrapFrame) -> Result<*mut
             if !ENDPOINTS[endpoint_slot].push_sender(sender) {
                 return Err(exo_abi::SYS_ERR_NO_SLOT);
             }
+            // 发布到sender队列和切换为Blocked必须对Receiver呈现为一个
+            // 原子状态转换；IPC锁同时保护队列和这段阻塞准备。
+            thread::make_current_blocked(frame);
             drop(guard);
-            Ok(thread::block_current(frame))
+            Ok(crate::scheduler::schedule_after_block())
         }
     }
 }
@@ -399,8 +406,11 @@ pub fn endpoint_recv(handle: u64, frame: &mut TrapFrame) -> Result<*mut TrapFram
             {
                 return Err(exo_abi::SYS_ERR_BUSY);
             }
+            // 与发送侧相同：先Blocked再释放队列锁，避免Sender取走
+            // receiver后在线程尚为Running时产生一次无效wake。
+            thread::make_current_blocked(frame);
             drop(guard);
-            Ok(thread::block_current(frame))
+            Ok(crate::scheduler::schedule_after_block())
         }
     }
 }
@@ -465,8 +475,11 @@ pub fn endpoint_reply_recv(
                 return Err(exo_abi::SYS_ERR_BUSY);
             }
             let _ = caller;
+            // Reply已经完成，但本线程作为下一次Receiver入队。必须在锁内
+            // 完成Blocked状态发布，防止下一位Sender的唤醒落入竞态窗口。
+            thread::make_current_blocked(frame);
             drop(guard);
-            Ok(thread::block_current(frame))
+            Ok(crate::scheduler::schedule_after_block())
         }
     }
 }
@@ -522,9 +535,13 @@ pub fn notification_wait(handle: u64, frame: &mut TrapFrame) -> Result<*mut Trap
         if !NOTIFICATIONS[slot].waiters.push(thread::current_slot()) {
             return Err(exo_abi::SYS_ERR_BUSY);
         }
+        // waiter入队与Blocked状态必须在同一个IPC临界区完成。signal只有在
+        // 获得此锁后才能取走waiter，因此它一定观察到可被wake的Blocked，
+        // 不会在Running -> Blocked缝隙中丢失一次Notification。
+        thread::make_current_blocked(frame);
     }
     drop(guard);
-    Ok(thread::block_current(frame))
+    Ok(crate::scheduler::schedule_after_block())
 }
 
 pub fn notification_poll(handle: u64) -> u64 {

@@ -15,12 +15,9 @@ pub fn from_dtb(dtb_pa: u64) -> Option<PciHostInfo> {
     info.present = 1;
     info.ecam_pa = read_cells(&reg[0..8])?;
     info.ecam_size = read_cells(&reg[8..16])?;
-    info.dma_coherent = node.property("dma-coherent").is_some() as u32;
-
     if let Some(bus_range) = node.property("bus-range") {
         if bus_range.value.len() >= 8 {
             info.bus_start = read_u32(&bus_range.value[0..4])? as u8;
-            info.bus_end = read_u32(&bus_range.value[4..8])? as u8;
         }
     }
 
@@ -29,7 +26,6 @@ pub fn from_dtb(dtb_pa: u64) -> Option<PciHostInfo> {
             let index = info.range_count as usize;
             info.ranges[index] = PciRange {
                 flags: read_u32(&entry[0..4])?,
-                reserved: 0,
                 child_base: read_cells(&entry[4..12])?,
                 parent_base: read_cells(&entry[12..20])?,
                 size: read_cells(&entry[20..28])?,

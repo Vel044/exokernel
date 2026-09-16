@@ -1,0 +1,21 @@
+{
+  "format": "exokernel-act-observation-v1",
+  "handeye": {
+    "file": "handeye.jpg",
+    "bytes": 33217,
+    "sha256": "7e10bfc8920c1bba3996a6d5dbee1e545704bf1e39a2d566d34d64d0c5afe35a"
+  },
+  "fixed": {
+    "file": "fixed.jpg",
+    "bytes": 37912,
+    "sha256": "ca0309522c64accb12bc2fbbf501b4c2bcfb192a602d8dbe915361f8c8256215"
+  },
+  "state": [
+    -15.218185424804688,
+    -15.378082275390625,
+    42.766143798828125,
+    -8.657241821289062,
+    -3.7851028442382812,
+    27.61241340637207
+  ]
+}

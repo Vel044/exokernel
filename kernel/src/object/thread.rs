@@ -12,6 +12,8 @@ pub enum ThreadState {
     Ready,
     Running,
     Blocked,
+    /// 已创建但尚未加入 Ready Queue 的线程。
+    Suspended,
     Exited,
 }
 
@@ -19,6 +21,9 @@ pub enum ThreadState {
 struct Thread {
     generation: u32,
     owner: u32,
+    creator_owner: u32,
+    vspace_handle: u64,
+    vspace_root: u64,
     state: ThreadState,
     context: TrapFrame,
     stack_pa: u64,
@@ -37,6 +42,9 @@ impl Thread {
     const EMPTY: Self = Self {
         generation: 1,
         owner: 0,
+        creator_owner: 0,
+        vspace_handle: 0,
+        vspace_root: 0,
         state: ThreadState::Free,
         context: TrapFrame::ZERO,
         stack_pa: 0,
@@ -59,6 +67,7 @@ const STATE_RUNNING: u8 = 2;
 const STATE_BLOCKED: u8 = 3;
 const STATE_EXITED: u8 = 4;
 const STATE_RESERVED: u8 = 5;
+const STATE_SUSPENDED: u8 = 6;
 
 // SMP热路径元数据不能直接读写`static mut THREADS`。创建者先用CAS把槽位
 // 变为RESERVED，写完context/栈/亲和性后以Release发布READY；目标CPU用
@@ -113,6 +122,9 @@ fn ipc_va(slot: usize) -> u64 {
 
 /// 在首次进入 EL0 前登记主线程。IPC 页已由 kmain 分配和映射。
 pub fn install_initial(entry: u64, stack_top: u64, ipc_pa: u64) {
+    let owner = crate::task::current_owner();
+    let vspace_handle = crate::vspace::current_handle();
+    let vspace_root = mmu::active_table();
     let mut context = TrapFrame::ZERO;
     context.x[0] = exo_abi::USER_BOOT_INFO_VA;
     context.sp_el0 = stack_top;
@@ -121,7 +133,10 @@ pub fn install_initial(entry: u64, stack_top: u64, ipc_pa: u64) {
     unsafe {
         THREADS[0] = Thread {
             generation: THREADS[0].generation,
-            owner: crate::task::current_owner(),
+            owner,
+            creator_owner: owner,
+            vspace_handle,
+            vspace_root,
             state: ThreadState::Running,
             context,
             stack_pa: 0,
@@ -163,6 +178,19 @@ pub fn current_slot_on(cpu: usize) -> usize {
     CURRENT[cpu].load(Ordering::Acquire) as usize
 }
 
+/// 返回当前线程的资源 owner。任务表在多 VSpace 阶段仍保留单一任务入口，
+/// 但调度器切换到子 VSpace 线程后，Frame/IPC 检查必须能找到真实线程对象。
+pub fn owner_of_current() -> u32 {
+    if !is_initialized() {
+        return 0;
+    }
+    let slot = current_slot();
+    if slot >= MAX_THREADS {
+        return 0;
+    }
+    unsafe { THREADS[slot].owner }
+}
+
 pub fn resolve_handle(handle: u64) -> Result<usize, u64> {
     let Some((slot, generation)) = decode_handle(handle) else {
         return Err(exo_abi::SYS_ERR_INVALID);
@@ -171,6 +199,24 @@ pub fn resolve_handle(handle: u64) -> Result<usize, u64> {
         let thread = THREADS[slot];
         let state = STATES[slot].load(Ordering::Acquire);
         if thread.owner != crate::task::current_owner()
+            || thread.generation != generation
+            || matches!(state, STATE_FREE | STATE_EXITED | STATE_RESERVED)
+        {
+            return Err(exo_abi::SYS_ERR_NOT_FOUND);
+        }
+    }
+    Ok(slot)
+}
+
+fn resolve_control_handle(handle: u64) -> Result<usize, u64> {
+    let Some((slot, generation)) = decode_handle(handle) else {
+        return Err(exo_abi::SYS_ERR_INVALID);
+    };
+    let caller = crate::task::current_owner();
+    unsafe {
+        let thread = THREADS[slot];
+        let state = STATES[slot].load(Ordering::Acquire);
+        if thread.creator_owner != caller
             || thread.generation != generation
             || matches!(state, STATE_FREE | STATE_EXITED | STATE_RESERVED)
         {
@@ -283,9 +329,22 @@ pub fn create(entry: u64, arg: u64, cpu: u64, priority: u64, mcp: u64) -> u64 {
         context.sp_el0 = stack_va + stack_pages * exo_abi::PAGE_SIZE;
         context.elr_el1 = entry;
         context.spsr_el1 = 0;
+        let vspace_handle = crate::vspace::current_handle();
+        if crate::vspace::add_thread(vspace_handle).is_err() {
+            mmu::unmap(root, stack_va, stack_pages);
+            mmu::unmap(root, ipc_va(slot), 1);
+            mmu::flush_el1_tlb_range(stack_va, stack_pages);
+            mem::free_pages(stack_pa, stack_pages);
+            mem::free_page(ipc_pa);
+            STATES[slot].store(previous_state, Ordering::Release);
+            return exo_abi::SYS_ERR_BUSY;
+        }
         THREADS[slot] = Thread {
             generation,
             owner: crate::task::current_owner(),
+            creator_owner: crate::task::current_owner(),
+            vspace_handle,
+            vspace_root: root,
             state: ThreadState::Ready,
             context,
             stack_pa,
@@ -311,8 +370,209 @@ pub fn create(entry: u64, arg: u64, cpu: u64, priority: u64, mcp: u64) -> u64 {
     }
 }
 
+/// 在指定 VSpace 中创建一个尚未运行的线程。
+///
+/// 配置结构位于调用者当前地址空间，Kernel 在 SVC 期间复制后才使用；entry
+/// 和 stack_pointer 则在目标地址空间的页表中分别检查 RX/RW 权限。这样父级
+/// libOS 可以先完成全部 Frame 映射，最后显式 THREAD_START。
+pub fn create_in(target_vspace: u64, config_va: u64) -> u64 {
+    let caller = crate::task::current_owner();
+    let current_root = mmu::active_table();
+    if caller == 0
+        || (config_va & 7) != 0
+        || !mmu::is_user_readable(
+            current_root,
+            config_va,
+            core::mem::size_of::<exo_abi::ThreadCreateConfig>() as u64,
+        )
+    {
+        return exo_abi::SYS_ERR_INVALID;
+    }
+    let config =
+        unsafe { core::ptr::read_unaligned(config_va as *const exo_abi::ThreadCreateConfig) };
+    if config.reserved != 0
+        || config.cpu as usize >= crate::arch::aarch64::smp::cpu_count()
+        || config.priority > exo_abi::MAX_THREAD_PRIORITY
+        || config.max_control_priority > exo_abi::MAX_THREAD_PRIORITY
+        || config.priority > config.max_control_priority
+    {
+        return exo_abi::SYS_ERR_INVALID;
+    }
+    let Ok((target_root, _)) = crate::vspace::resolve_for_owner(caller, target_vspace) else {
+        return exo_abi::SYS_ERR_DENIED;
+    };
+    if !mmu::is_user_executable(target_root, config.entry)
+        || config.stack_pointer < exo_abi::PAGE_SIZE
+        || !mmu::is_user_writable(target_root, config.stack_pointer - 1, 1)
+    {
+        return exo_abi::SYS_ERR_DENIED;
+    }
+
+    let mut reserved = None;
+    for slot in 1..MAX_THREADS {
+        let state = STATES[slot].load(Ordering::Acquire);
+        if matches!(state, STATE_FREE | STATE_EXITED)
+            && STATES[slot]
+                .compare_exchange(state, STATE_RESERVED, Ordering::AcqRel, Ordering::Acquire)
+                .is_ok()
+        {
+            reserved = Some((slot, state));
+            break;
+        }
+    }
+    let Some((slot, previous_state)) = reserved else {
+        return exo_abi::SYS_ERR_NO_SLOT;
+    };
+    let Some(ipc_pa) = mem::alloc_page() else {
+        STATES[slot].store(previous_state, Ordering::Release);
+        return exo_abi::SYS_ERR_NO_MEMORY;
+    };
+    unsafe { core::ptr::write_bytes(ipc_pa as *mut u8, 0, exo_abi::PAGE_SIZE as usize) };
+    let target_ipc_va = ipc_va(slot);
+    if mmu::map_checked(target_root, target_ipc_va, ipc_pa, mmu::MMU_USER_RW, 1).is_err() {
+        mem::free_page(ipc_pa);
+        STATES[slot].store(previous_state, Ordering::Release);
+        return exo_abi::SYS_ERR_CONFLICT;
+    }
+    if crate::vspace::add_thread(target_vspace).is_err() {
+        mmu::unmap(target_root, target_ipc_va, 1);
+        mmu::flush_el1_tlb_range(target_ipc_va, 1);
+        mem::free_page(ipc_pa);
+        STATES[slot].store(previous_state, Ordering::Release);
+        return exo_abi::SYS_ERR_BUSY;
+    }
+
+    unsafe {
+        let generation = THREADS[slot].generation;
+        let handle = make_handle(slot, generation);
+        let mut context = TrapFrame::ZERO;
+        context.x[0] = config.arg0;
+        context.x[1] = config.arg1;
+        context.x[2] = handle;
+        context.x[3] = target_ipc_va;
+        context.sp_el0 = config.stack_pointer;
+        context.elr_el1 = config.entry;
+        THREADS[slot] = Thread {
+            generation,
+            owner: crate::vspace::resource_owner(caller, target_vspace).unwrap_or(caller),
+            creator_owner: caller,
+            vspace_handle: target_vspace,
+            vspace_root: target_root,
+            state: ThreadState::Suspended,
+            context,
+            stack_pa: 0,
+            stack_pages: 0,
+            stack_va: 0,
+            ipc_pa,
+            ipc_va: target_ipc_va,
+            affinity_cpu: config.cpu,
+            base_priority: config.priority,
+            effective_priority: config.priority,
+            max_control_priority: config.max_control_priority,
+            running_cpu: u8::MAX,
+        };
+        BASE_PRIORITIES[slot].store(config.priority, Ordering::Relaxed);
+        EFFECTIVE_PRIORITIES[slot].store(config.priority, Ordering::Relaxed);
+        RUNNING_CPUS[slot].store(u8::MAX, Ordering::Relaxed);
+        READY_SEQUENCES[slot].store(0, Ordering::Relaxed);
+        RUNTIME_TICKS[slot].store(0, Ordering::Relaxed);
+        STATES[slot].store(STATE_SUSPENDED, Ordering::Release);
+        handle
+    }
+}
+
+/// 将 Suspended 线程发布到指定 CPU 的 Ready Queue。
+pub fn start(handle: u64) -> u64 {
+    let Ok(slot) = resolve_control_handle(handle) else {
+        return exo_abi::SYS_ERR_NOT_FOUND;
+    };
+    if STATES[slot]
+        .compare_exchange(
+            STATE_SUSPENDED,
+            STATE_READY,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        )
+        .is_err()
+    {
+        return exo_abi::SYS_ERR_BUSY;
+    }
+    unsafe { THREADS[slot].state = ThreadState::Ready };
+    scheduler::on_thread_ready(slot);
+    0
+}
+
+/// 暂停一个还未运行或已经在 Ready Queue 的线程。正在运行的线程不能由
+/// 自己的控制者无条件拔走，第一版统一返回 BUSY。
+pub fn suspend(handle: u64) -> u64 {
+    let Ok(slot) = resolve_control_handle(handle) else {
+        return exo_abi::SYS_ERR_NOT_FOUND;
+    };
+    if STATES[slot]
+        .compare_exchange(
+            STATE_READY,
+            STATE_SUSPENDED,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        )
+        .is_ok()
+    {
+        unsafe { THREADS[slot].state = ThreadState::Suspended };
+        scheduler::on_thread_exit(slot);
+        return 0;
+    }
+    if STATES[slot].load(Ordering::Acquire) == STATE_SUSPENDED {
+        0
+    } else {
+        exo_abi::SYS_ERR_BUSY
+    }
+}
+
+/// 销毁一个非运行线程，并回收它自动分配的 IPC buffer。
+pub fn destroy(handle: u64) -> u64 {
+    let Ok(slot) = resolve_control_handle(handle) else {
+        return exo_abi::SYS_ERR_NOT_FOUND;
+    };
+    let state = STATES[slot].load(Ordering::Acquire);
+    if state == STATE_RUNNING || state == STATE_BLOCKED {
+        return exo_abi::SYS_ERR_BUSY;
+    }
+    if STATES[slot]
+        .compare_exchange(state, STATE_RESERVED, Ordering::AcqRel, Ordering::Acquire)
+        .is_err()
+    {
+        return exo_abi::SYS_ERR_BUSY;
+    }
+    unsafe {
+        let thread = THREADS[slot];
+        if thread.ipc_pa != 0 {
+            mmu::unmap(thread.vspace_root, thread.ipc_va, 1);
+            mem::free_page(thread.ipc_pa);
+        }
+        mmu::flush_el1_tlb_range(thread.ipc_va, 1);
+        crate::vspace::remove_thread(thread.vspace_handle);
+        THREADS[slot] = Thread {
+            generation: next_generation(thread.generation),
+            state: ThreadState::Exited,
+            ..Thread::EMPTY
+        };
+        BASE_PRIORITIES[slot].store(0, Ordering::Relaxed);
+        EFFECTIVE_PRIORITIES[slot].store(0, Ordering::Relaxed);
+        STATES[slot].store(STATE_EXITED, Ordering::Release);
+    }
+    scheduler::on_thread_exit(slot);
+    0
+}
+
 pub fn activate(slot: usize) -> *mut TrapFrame {
     let cpu = crate::arch::aarch64::cpu::id();
+    let handle = unsafe { THREADS[slot].vspace_handle };
+    if crate::vspace::switch_to(handle).is_err() {
+        crate::uart::puts("[exo] scheduler rejected VSpace switch\r\n");
+        loop {
+            unsafe { core::arch::asm!("wfe", options(nomem, nostack)) };
+        }
+    }
     unsafe {
         THREADS[slot].state = ThreadState::Running;
         THREADS[slot].running_cpu = cpu as u8;
@@ -350,11 +610,6 @@ pub fn yield_current(frame: &TrapFrame) -> *mut TrapFrame {
     scheduler::yield_current(frame)
 }
 
-pub fn block_current(frame: &TrapFrame) -> *mut TrapFrame {
-    make_current_blocked(frame);
-    scheduler::schedule_after_block()
-}
-
 pub fn wake(slot: usize, return_value: u64) {
     if slot >= MAX_THREADS
         || STATES[slot]
@@ -386,13 +641,14 @@ pub fn exit_current(frame: &TrapFrame) -> Option<*mut TrapFrame> {
     unsafe {
         let thread = THREADS[slot];
         if thread.stack_pages != 0 {
-            mmu::unmap(mmu::active_table(), thread.stack_va, thread.stack_pages);
+            mmu::unmap(thread.vspace_root, thread.stack_va, thread.stack_pages);
             mem::free_pages(thread.stack_pa, thread.stack_pages);
         }
         if thread.ipc_pa != 0 {
-            mmu::unmap(mmu::active_table(), thread.ipc_va, 1);
+            mmu::unmap(thread.vspace_root, thread.ipc_va, 1);
             mem::free_page(thread.ipc_pa);
         }
+        crate::vspace::remove_thread(thread.vspace_handle);
         mmu::flush_el1_tlb();
         THREADS[slot] = Thread {
             generation: next_generation(thread.generation),
@@ -408,7 +664,7 @@ pub fn exit_current(frame: &TrapFrame) -> Option<*mut TrapFrame> {
         while index < MAX_THREADS {
             let thread = THREADS[index];
             let state = STATES[index].load(Ordering::Acquire);
-            if thread.owner == crate::task::current_owner()
+            if thread.creator_owner == crate::task::current_owner()
                 && !matches!(state, STATE_FREE | STATE_EXITED)
             {
                 live = true;
@@ -509,13 +765,18 @@ pub fn cleanup_all(root: u64) {
             let thread = THREADS[slot];
             if thread.owner != 0 {
                 if thread.stack_pages != 0 {
-                    mmu::unmap(root, thread.stack_va, thread.stack_pages);
+                    mmu::unmap(
+                        thread.vspace_root.max(root),
+                        thread.stack_va,
+                        thread.stack_pages,
+                    );
                     mem::free_pages(thread.stack_pa, thread.stack_pages);
                 }
                 if thread.ipc_pa != 0 {
-                    mmu::unmap(root, thread.ipc_va, 1);
+                    mmu::unmap(thread.vspace_root.max(root), thread.ipc_va, 1);
                     mem::free_page(thread.ipc_pa);
                 }
+                crate::vspace::remove_thread(thread.vspace_handle);
                 THREADS[slot] = Thread {
                     generation: next_generation(thread.generation),
                     ..Thread::EMPTY

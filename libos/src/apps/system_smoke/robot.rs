@@ -5,8 +5,8 @@
 //! - 推理线程持续忙循环，故意不调用yield，验证Generic Timer强制抢占；
 //! - 控制线程通过Endpoint处理同步命令，并用Notification报告生命周期事件。
 //!
-//! 无xHCI feature时仍运行推理与控制线程；启用`qemu-xhci,usb-echo`时再加入
-//! QEMU模拟FTDI，从而覆盖Timer PPI和xHCI SPI同时到达的真实路径。
+//! 无xHCI能力时仍运行推理与控制线程；`system-smoke`场景启用xHCI能力时
+//! 固定加入USB回显任务，从而覆盖Timer PPI和xHCI SPI同时到达的真实路径。
 
 use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 

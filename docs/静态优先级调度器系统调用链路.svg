@@ -1,0 +1,126 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="970" viewBox="0 0 1600 970" role="img" aria-labelledby="title desc">
+  <title id="title">静态优先级调度器：从系统调用到线程切换</title>
+  <desc id="desc">展示线程、同步IPC、异步Notification和IRQ系统调用如何改变线程状态，以及四核静态优先级调度器如何选择下一个线程。</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#425466"/>
+    </marker>
+    <style>
+      text { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; fill: #17212b; letter-spacing: 0; }
+      .title { font-size: 34px; font-weight: 700; }
+      .subtitle { font-size: 17px; fill: #536273; }
+      .section { font-size: 22px; font-weight: 700; }
+      .box-title { font-size: 18px; font-weight: 700; }
+      .body { font-size: 15px; }
+      .small { font-size: 13px; fill: #536273; }
+      .mono { font-family: "SFMono-Regular", Menlo, Consolas, monospace; font-size: 14px; }
+      .arrow { fill: none; stroke: #425466; stroke-width: 2; marker-end: url(#arrow); }
+      .soft-arrow { fill: none; stroke: #7a8795; stroke-width: 1.6; stroke-dasharray: 6 5; marker-end: url(#arrow); }
+    </style>
+  </defs>
+
+  <rect width="1600" height="1280" fill="#f7f9fb"/>
+  <text x="70" y="58" class="title">静态优先级调度器：从系统调用到线程切换</text>
+  <text x="70" y="88" class="subtitle">固定CPU亲和性 · priority 0..63（越大越高） · 高优先级立即抢占 · 同优先级1ms FIFO轮转</text>
+
+  <!-- EL0 syscall surface -->
+  <rect x="55" y="120" width="1490" height="300" rx="8" fill="#e9f2fb" stroke="#77a6d4" stroke-width="2"/>
+  <text x="80" y="154" class="section">EL0 libOS：与调度有关的系统调用</text>
+
+  <rect x="80" y="175" width="455" height="215" rx="6" fill="#ffffff" stroke="#5d92c7"/>
+  <text x="102" y="205" class="box-title">线程生命周期与参数</text>
+  <text x="102" y="230" class="mono">THREAD_CREATE(entry,arg,cpu,priority,</text>
+  <text x="102" y="250" class="mono">              max_control_priority)</text>
+  <text x="102" y="272" class="mono">THREAD_CREATE_IN(vspace,config) → Suspended</text>
+  <text x="102" y="294" class="mono">THREAD_START / SUSPEND / DESTROY</text>
+  <text x="102" y="316" class="mono">THREAD_EXIT / YIELD</text>
+  <text x="102" y="338" class="mono">THREAD_SET_PRIORITY(handle,priority)</text>
+  <text x="102" y="360" class="mono">THREAD_RUNTIME(handle)</text>
+  <text x="102" y="382" class="small">max_control_priority限制可设置优先级；SUSPEND仅接受Ready</text>
+
+  <!-- Endpoint和Notification都是IPC/事件对象，对调度器的共同
+       效果是把线程在Blocked和Ready之间转换，因此使用一个大框统一表达。 -->
+  <rect x="550" y="168" width="970" height="222" rx="8" fill="#f8fafc" stroke="#9a8aa8" stroke-width="1.5"/>
+  <text x="570" y="197" class="box-title">IPC / 事件等待：等待时 Blocked，条件到来时 Ready</text>
+
+  <rect x="570" y="210" width="440" height="165" rx="6" fill="#fff8e8" stroke="#d0a64b"/>
+  <text x="592" y="238" class="box-title">Endpoint + Reply：同步IPC</text>
+  <text x="592" y="265" class="mono">SEND / RECV / CALL / REPLY / REPLY_RECV</text>
+  <text x="592" y="296" class="body">无匹配对端或等待Reply → Blocked</text>
+  <text x="592" y="325" class="body">对端到来或Reply → Ready</text>
+  <text x="592" y="354" class="small">CALL/REPLY额外建立可传递优先级继承</text>
+
+  <rect x="1030" y="210" width="475" height="165" rx="6" fill="#edf8f1" stroke="#62a87c"/>
+  <text x="1052" y="238" class="box-title">Notification + IRQ：异步事件</text>
+  <text x="1052" y="265" class="mono">SIGNAL / WAIT / POLL · IRQ_BIND / ACK</text>
+  <text x="1052" y="296" class="body">WAIT无pending badge → Blocked</text>
+  <text x="1052" y="325" class="body">Signal或IRQ到来 → Blocked → Ready</text>
+  <text x="1052" y="354" class="small">badge可合并；IRQ绑定Notification，不直绑Thread</text>
+
+  <!-- SVC boundary -->
+  <path d="M307 390 L307 455" class="arrow"/>
+  <path d="M782 390 L782 455" class="arrow"/>
+  <path d="M1275 390 L1275 455" class="arrow"/>
+  <rect x="250" y="445" width="1100" height="64" rx="6" fill="#334a62"/>
+  <text x="285" y="472" class="box-title" fill="#ffffff" style="fill:#ffffff">SVC #0 → AArch64 Vector保存TrapFrame → syscall::dispatch</text>
+  <text x="285" y="496" class="body" fill="#dfe9f2" style="fill:#dfe9f2">x8=编号，x0..x5=参数；返回的TrapFrame可以属于另一个线程</text>
+  <path d="M800 509 L800 550" class="arrow"/>
+
+  <!-- Kernel scheduling core -->
+  <rect x="55" y="550" width="1490" height="365" rx="8" fill="#f1ecf8" stroke="#8e72b3" stroke-width="2"/>
+  <text x="80" y="585" class="section">EL1 Kernel：状态转移与每核调度</text>
+
+  <rect x="80" y="610" width="600" height="270" rx="6" fill="#ffffff" stroke="#8e72b3"/>
+  <text x="104" y="640" class="box-title">线程状态机</text>
+  <rect x="115" y="670" width="130" height="58" rx="5" fill="#e7eef6" stroke="#7890a8"/>
+  <text x="148" y="694" class="body">Suspended</text>
+  <text x="137" y="716" class="small">控制者暂停线程</text>
+  <rect x="315" y="670" width="125" height="58" rx="5" fill="#dff2e5" stroke="#62a87c"/>
+  <text x="356" y="694" class="body">Ready</text>
+  <text x="342" y="716" class="small">等待调度器</text>
+  <rect x="520" y="674" width="110" height="46" rx="5" fill="#dceafa" stroke="#5d92c7"/>
+  <text x="545" y="703" class="body">Running</text>
+  <rect x="310" y="792" width="140" height="58" rx="5" fill="#fff0d1" stroke="#d0a64b"/>
+  <text x="351" y="816" class="body">Blocked</text>
+  <text x="326" y="838" class="small">线程主动等待事件</text>
+
+  <path d="M245 699 L315 699" class="arrow"/>
+  <text x="252" y="686" class="small">START</text>
+  <path d="M440 699 L520 699" class="arrow"/>
+  <text x="449" y="686" class="small">选中</text>
+  <path d="M520 720 C490 755 455 755 430 728" class="arrow"/>
+  <text x="423" y="765" class="small">Timer / YIELD / 抢占</text>
+  <path d="M560 720 C555 805 510 821 450 821" class="arrow"/>
+  <text x="494" y="789" class="small">WAIT / IPC等待</text>
+  <path d="M377 792 L377 729" class="arrow"/>
+  <text x="265" y="772" class="small">Signal / IRQ / Reply</text>
+  <path d="M315 714 C285 752 250 752 230 728" class="soft-arrow"/>
+  <text x="104" y="865" class="small">EXIT/DESTROY 进入Exited；Blocked或Running不能被THREAD_DESTROY强制销毁</text>
+
+  <rect x="710" y="610" width="810" height="270" rx="6" fill="#ffffff" stroke="#8e72b3"/>
+  <text x="734" y="640" class="box-title">每个CPU的选择算法</text>
+
+  <g>
+    <rect x="740" y="665" width="150" height="92" rx="5" fill="#e9f2fb" stroke="#5d92c7"/>
+    <text x="790" y="691" class="box-title">CPU 0</text>
+    <text x="760" y="718" class="mono">ready_bitmap</text>
+    <text x="755" y="744" class="mono">63 ... 32 ... 0</text>
+    <text x="915" y="718" class="section">…</text>
+    <rect x="965" y="665" width="150" height="92" rx="5" fill="#e9f2fb" stroke="#5d92c7"/>
+    <text x="1015" y="691" class="box-title">CPU 3</text>
+    <text x="985" y="718" class="mono">ready_bitmap</text>
+    <text x="980" y="744" class="mono">63 ... 32 ... 0</text>
+  </g>
+  <text x="1145" y="681" class="body">每个CPU：</text>
+  <text x="1225" y="681" class="mono">ready_bitmap</text>
+  <text x="1145" y="707" class="small">快速找到最高可运行优先级</text>
+  <text x="1145" y="735" class="body">每个线程：</text>
+  <text x="1145" y="758" class="small">affinity_cpu · state · effective_priority · ready_sequence</text>
+
+  <text x="740" y="795" class="body">例如CPU2的bitmap最高置位是48，Kernel再从Thread表中查找：</text>
+  <text x="760" y="821" class="mono">affinity_cpu == CPU2  &amp;&amp;  state == Ready</text>
+  <text x="760" y="846" class="mono">effective_priority == 48</text>
+  <text x="740" y="871" class="body">同优先级有多个 → ready_sequence最小 → 等待最久的FIFO队首</text>
+
+  <text x="70" y="950" class="small">边界：当前无线程迁移/负载均衡；强实时保证仍需WCET、IRQ延迟和Kernel临界区上界分析。</text>
+</svg>

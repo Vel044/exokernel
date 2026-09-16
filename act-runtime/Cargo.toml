@@ -1,0 +1,17 @@
+[package]
+name = "act-runtime"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+path = "src/lib.rs"
+
+[features]
+default = ["kernel-portable-neon"]
+kernel-portable-neon = ["rutorch-runtime-upstream/kernel-portable-neon"]
+kernel-acl-shared = ["rutorch-runtime-upstream/kernel-acl-shared"]
+acl-neon = ["kernel-acl-shared"]
+profile = ["rutorch-runtime-upstream/profile"]
+
+[dependencies]
+rutorch-runtime-upstream = { package = "rutorch-runtime", path = "../../rutorch/crates/rutorch-runtime", default-features = false, features = ["platform-libos"] }

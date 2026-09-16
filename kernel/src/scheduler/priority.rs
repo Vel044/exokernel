@@ -40,16 +40,19 @@ fn cpu() -> usize {
     crate::arch::aarch64::cpu::id()
 }
 
-pub fn init(timer_intid: u32) {
+pub fn init(timer_intid: u32, use_virtual_timer: bool) {
     let cpu = cpu();
     assert!(
-        super::timer::init(timer_intid),
+        super::timer::init(timer_intid, use_virtual_timer),
         "Generic Timer initialization failed"
     );
     CPUS[cpu].initialized.store(true, Ordering::Release);
+    // 启动时每核至多有一个运行线程，不需要为了“与自己轮转”每毫秒进入
+    // EL1。后续出现同优先级竞争者时，on_thread_ready会按需开启时间片。
+    super::timer::disarm();
     CPUS[cpu]
         .active_start
-        .store(super::timer::arm_full(), Ordering::Release);
+        .store(super::timer::counter(), Ordering::Release);
 }
 
 pub fn on_thread_ready(slot: usize) {
@@ -65,15 +68,42 @@ pub fn on_thread_ready(slot: usize) {
     // 醒来重扫自己的Ready Queue。仍在EL0运行的目标核则由下面SGI0强制
     // 进入异常入口，以实现高优先级立即抢占。
     unsafe { core::arch::asm!("sev", options(nomem, nostack)) };
-    if target_cpu != cpu() {
-        let running = thread::current_slot_on(target_cpu);
-        if running < thread::MAX_THREADS
-            && thread::is_running(running)
-            && thread::effective_priority(slot) > thread::effective_priority(running)
-        {
+    let running = thread::current_slot_on(target_cpu);
+    if running < thread::MAX_THREADS && thread::is_running(running) {
+        let ready_priority = thread::effective_priority(slot);
+        let running_priority = thread::effective_priority(running);
+        if target_cpu != cpu() && ready_priority >= running_priority {
+            // 更高优先级线程需要立即抢占；同优先级线程需要让目标核开启
+            // FIFO时间片。两种情况都用SGI0让远程核尽快重新判断。
             crate::arch::aarch64::smp::send_reschedule(target_cpu);
+        } else if target_cpu == cpu() && ready_priority == running_priority {
+            // 当前核在SVC/IRQ路径创建或唤醒了同级线程。先结算此前无时间片
+            // 的运行区间，再启动1ms轮转；否则必须等到另一事件才会开timer。
+            charge_current();
+            CPUS[target_cpu]
+                .active_start
+                .store(super::timer::arm_full(), Ordering::Release);
         }
     }
+}
+
+/// 判断某CPU上是否还有一个与即将运行线程同优先级的Ready线程。
+///
+/// `selected`在调用`thread::activate`前仍标记为Ready，必须显式排除；否则
+/// 调度器会把线程自己误判为竞争者，退化为永久1ms定时中断。
+fn has_same_priority_competitor(cpu: usize, priority: u8, selected: usize) -> bool {
+    let mut slot = 0usize;
+    while slot < thread::MAX_THREADS {
+        if slot != selected
+            && thread::is_ready(slot)
+            && thread::affinity(slot) == cpu
+            && thread::effective_priority(slot) == priority
+        {
+            return true;
+        }
+        slot += 1;
+    }
+    false
 }
 
 fn refresh_priority(cpu: usize, priority: u8) {
@@ -157,9 +187,16 @@ fn activate(slot: usize) -> *mut TrapFrame {
         }
     }
     refresh_priority(cpu, thread::effective_priority(slot));
-    CPUS[cpu]
-        .active_start
-        .store(super::timer::arm_full(), Ordering::Release);
+    let start = if has_same_priority_competitor(cpu, thread::effective_priority(slot), slot) {
+        // 同级竞争才需要1ms FIFO轮转。
+        super::timer::arm_full()
+    } else {
+        // 独占当前最高优先级时关闭timer。新高优先级线程通过SGI0抢占，
+        // 因此不会牺牲静态优先级响应时间。
+        super::timer::disarm();
+        super::timer::counter()
+    };
+    CPUS[cpu].active_start.store(start, Ordering::Release);
     thread::activate(slot)
 }
 
@@ -168,12 +205,11 @@ fn wait_and_activate() -> *mut TrapFrame {
         if let Some(slot) = next_runnable(cpu()) {
             return activate(slot);
         }
-        // 空Ready Queue也保留1ms本地Timer。正常情况下SGI0会立即唤醒
-        // 目标核；若平台GIC丢失重复SGI，Timer仍会让本核重新扫描队列，
-        // 把远程唤醒延迟限制在一个时间片内，而不是永久睡眠。
-        CPUS[cpu()]
-            .active_start
-            .store(super::timer::arm_full(), Ordering::Release);
+        // 空Ready Queue不需要时间片。线程创建/Notification/IPC唤醒会先
+        // Release发布Ready状态，再执行SEV；即使SEV早于WFE，event register
+        // 也会让WFE立即返回。依靠这个体系结构保证比每毫秒制造一次空转
+        // timer IRQ更可靠，也避免HVF为四个idle核承担持续VM-exit。
+        super::timer::disarm();
         unsafe {
             core::arch::asm!(
                 "msr daifclr, #2",
@@ -272,7 +308,16 @@ pub fn preempt_if_needed(frame: &TrapFrame) -> *mut TrapFrame {
     let Some(next) = next_runnable(cpu()) else {
         return frame as *const TrapFrame as *mut TrapFrame;
     };
-    if thread::effective_priority(next) <= thread::current_priority() {
+    if thread::effective_priority(next) < thread::current_priority() {
+        return frame as *const TrapFrame as *mut TrapFrame;
+    }
+    if thread::effective_priority(next) == thread::current_priority() {
+        // SGI0由同级线程变为Ready触发。当前线程继续跑到1ms期满即可，
+        // 这里只开启时间片，不在SGI边界提前破坏同优先级FIFO顺序。
+        charge_current();
+        CPUS[cpu()]
+            .active_start
+            .store(super::timer::arm_full(), Ordering::Release);
         return frame as *const TrapFrame as *mut TrapFrame;
     }
     charge_current();

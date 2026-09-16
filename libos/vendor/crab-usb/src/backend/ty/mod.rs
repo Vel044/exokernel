@@ -29,6 +29,14 @@ pub(crate) trait DeviceInfoOp: Send + Sync + Any + Debug + 'static {
     fn backend_name(&self) -> &str;
     fn descriptor(&self) -> &DeviceDescriptor;
     fn configuration_descriptors(&self) -> &[ConfigurationDescriptor];
+
+    /// 返回设备连接到xHCI Root Hub的端口号。
+    ///
+    /// 该信息只用于用户态按物理拓扑选择同型号设备；不参与权限判断。
+    /// 非xHCI或旧后端没有该信息时返回None。
+    fn root_port_id(&self) -> Option<u8> {
+        None
+    }
 }
 
 #[cfg(any(kmod, umod))]

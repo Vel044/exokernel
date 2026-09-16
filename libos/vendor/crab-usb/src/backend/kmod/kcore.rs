@@ -86,8 +86,11 @@ impl Core {
             let addr_infos = self.hub_changed_ports(id).await?;
             let parent_hub_id = self.hubs.get(id).unwrap().backend.slot_id();
             for addr_info in addr_infos {
+                // 保存Root Hub端口号；后面的Hub初始化会复用变量名info，
+                // 这里不能依赖被移动进DeviceAddressInfo的addr_info。
+                let root_port_id = addr_info.root_port_id;
                 let info = DeviceAddressInfo {
-                    root_port_id: addr_info.root_port_id,
+                    root_port_id,
                     port_speed: addr_info.port_speed,
                     parent_hub: Some(id),
                     port_id: addr_info.port_id,
@@ -108,7 +111,7 @@ impl Core {
                     let hub_device = HubDevice::new(
                         device_inner,
                         hub_settings,
-                        addr_info.root_port_id,
+                        root_port_id,
                         parent_hub_id,
                         self.backend.kernel(),
                     )
@@ -125,7 +128,12 @@ impl Core {
                     let hub_id = self.hubs.alloc(hub);
                     is_have_new_hub = true;
 
-                    let hub_info = Box::new(DeviceInfo::new(device_id, desc, &configs))
+                    let hub_info = Box::new(DeviceInfo::new(
+                        device_id,
+                        desc,
+                        &configs,
+                        root_port_id,
+                    ))
                         as Box<dyn DeviceInfoOp>;
                     out.push(ProbedDeviceInfoOp::Hub(hub_info));
 
@@ -136,7 +144,12 @@ impl Core {
 
                     self.inited_devices.insert(device_id, device);
 
-                    let device_info = Box::new(DeviceInfo::new(device_id, desc, &configs))
+                    let device_info = Box::new(DeviceInfo::new(
+                        device_id,
+                        desc,
+                        &configs,
+                        root_port_id,
+                    ))
                         as Box<dyn DeviceInfoOp>;
 
                     out.push(ProbedDeviceInfoOp::Device(device_info));
@@ -228,14 +241,21 @@ pub struct DeviceInfo {
     id: usize,
     desc: DeviceDescriptor,
     config_desc: Vec<ConfigurationDescriptor>,
+    root_port_id: u8,
 }
 
 impl DeviceInfo {
-    pub fn new(id: usize, desc: DeviceDescriptor, config_desc: &[ConfigurationDescriptor]) -> Self {
+    pub fn new(
+        id: usize,
+        desc: DeviceDescriptor,
+        config_desc: &[ConfigurationDescriptor],
+        root_port_id: u8,
+    ) -> Self {
         Self {
             id,
             desc,
             config_desc: config_desc.to_vec(),
+            root_port_id,
         }
     }
 }
@@ -255,5 +275,9 @@ impl DeviceInfoOp for DeviceInfo {
 
     fn configuration_descriptors(&self) -> &[ConfigurationDescriptor] {
         &self.config_desc
+    }
+
+    fn root_port_id(&self) -> Option<u8> {
+        Some(self.root_port_id)
     }
 }

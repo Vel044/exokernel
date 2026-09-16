@@ -1,0 +1,97 @@
+loading initial cache file /Users/vel/Work/RobotOS/Lerobot/sel4test-qemu-arm-virt/projects/act-inference-demo/settings.cmake
+-- ARM_CPU not set, defaulting to cortex-a53
+-- Extracting device tree from QEMU
+-- ARM_CPU not set, defaulting to cortex-a53
+-- Extracting device tree from QEMU
+-- Found GCC with prefix aarch64-linux-gnu-
+-- /Users/vel/Work/RobotOS/Lerobot/sel4test-qemu-arm-virt/build-act-inference-demo/kernel/gen_headers/plat/machine/devices_gen.h is out of date. Regenerating from DTB...
+-- libmuslc architecture: 'aarch64' (from KernelSel4Arch 'aarch64')
+-- Detecting cached version of: musllibc
+--   Found valid cache entry for musllibc
+-- Configuring done (1.0s)
+-- Generating done (0.0s)
+-- Build files have been written to: /Users/vel/Work/RobotOS/Lerobot/sel4test-qemu-arm-virt/build-act-inference-demo
+[0/2] Re-checking globbed directories...
+[1/43] Building C object kernel/CMakeFiles/kernel_all_pp_prune_wrapper_temp_lib.dir/kernel_all_pp_prune_wrapper_temp.c.obj
+[2/43] Generating kernel_all_pp_prune.c
+[3/43] Generating from generated/arch/object/structures.bf.pbf
+[4/43] Creating C input file for preprocessor
+[5/43] Building C object kernel/CMakeFiles/kernel_bf_gen_target_11_pbf_temp_lib.dir/kernel_bf_gen_target_11_pbf_temp.c.obj
+[6/43] Generating generated/sel4/shared_types.bf.pbf
+[7/43] Generating from generated/sel4/shared_types.bf.pbf
+[8/43] Creating C input file for preprocessor
+[9/43] Creating C input file for preprocessor
+[10/43] Building C object kernel/CMakeFiles/linker_ld_wrapper_temp_lib.dir/linker_ld_wrapper_temp.c.obj
+[11/43] Generating linker.lds_pp
+[12/43] Building C object kernel/CMakeFiles/kernel_i_wrapper_temp_lib.dir/kernel_all_copy.c.obj
+[13/43] Generating kernel_all.i
+[14/43] Generating circular_includes_valid
+[15/43] Building C object kernel/CMakeFiles/kernel.elf.dir/kernel_all.c.obj
+[16/43] Linking C executable kernel/kernel.elf
+[17/43] Generating kernel.elf
+[18/43] Generate CPIO archive archive.o
+[19/43] Generating gen_headers/image_start_addr.h, gen_headers/platform_info.h
+[20/43] Generating linker.lds_pp
+[21/43] Generating gen_headers/devices_gen.h
+[22/43] Building C object elfloader/CMakeFiles/elfloader.dir/src/drivers/smp/common.c.obj
+[23/43] Building C object elfloader/CMakeFiles/elfloader.dir/src/arch-arm/drivers/smp-psci.c.obj
+[24/43] Building C object elfloader/CMakeFiles/elfloader.dir/src/arch-arm/smp_boot.c.obj
+[25/43] Building C object elfloader/CMakeFiles/elfloader.dir/src/arch-arm/drivers/smp-imx6.c.obj
+[26/43] Building C object elfloader/CMakeFiles/elfloader.dir/src/arch-arm/drivers/smp-spin-table.c.obj
+[27/43] Building C object elfloader/CMakeFiles/elfloader.dir/src/drivers/timer/arm_generic_timer.c.obj
+[28/43] Building C object elfloader/CMakeFiles/elfloader.dir/src/drivers/uart/8250-uart.c.obj
+[29/43] Building C object elfloader/CMakeFiles/elfloader.dir/src/drivers/uart/bcm-uart.c.obj
+[30/43] Building C object elfloader/CMakeFiles/elfloader.dir/src/arch-arm/drivers/smp-zynq7000.c.obj
+[31/43] Building C object elfloader/CMakeFiles/elfloader.dir/src/drivers/driver.c.obj
+[32/43] Building C object elfloader/CMakeFiles/elfloader.dir/src/drivers/uart/common.c.obj
+[33/43] Building C object elfloader/CMakeFiles/elfloader.dir/src/drivers/uart/exynos-uart.c.obj
+[34/43] Building C object elfloader/CMakeFiles/elfloader.dir/src/drivers/uart/imx-lpuart.c.obj
+[35/43] Building C object elfloader/CMakeFiles/elfloader.dir/src/drivers/uart/meson-uart.c.obj
+[36/43] Building C object elfloader/CMakeFiles/elfloader.dir/src/drivers/uart/pl011-uart.c.obj
+[37/43] Building C object elfloader/CMakeFiles/elfloader.dir/src/drivers/uart/stm32mp2-uart.c.obj
+[38/43] Building C object elfloader/CMakeFiles/elfloader.dir/src/drivers/uart/xilinx-uart.c.obj
+[39/43] Building C object elfloader/CMakeFiles/elfloader.dir/src/drivers/uart/imx-uart.c.obj
+[40/43] Building C object elfloader/CMakeFiles/elfloader.dir/src/drivers/uart/msm-uart.c.obj
+[41/43] Linking C executable elfloader/elfloader
+[42/43] Generating ../../images/act-inference-root-image-arm-qemu-arm-virt
+seL4 ACT image: /Users/vel/Work/RobotOS/Lerobot/sel4test-qemu-arm-virt/build-act-inference-demo/images/act-inference-root-image-arm-qemu-arm-virt
+/Users/vel/Work/RobotOS/Lerobot/sel4test-qemu-arm-virt/build-act-inference-demo/images/act-inference-root-image-arm-qemu-arm-virt: ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), statically linked, with debug_info, not stripped
+
+ELF-loader started on CPU: ARM Ltd. Cortex-A53 r0p4
+  paddr=[51069000..5dcc508f]
+No DTB passed in from boot loader.
+Looking for DTB in CPIO archive...found at 510a6430.
+Loaded DTB from 510a6430.
+   paddr=[4023d000..4023efff]
+ELF-loading image 'kernel' to 40000000
+  paddr=[40000000..4023cfff]
+  vaddr=[ffffff8040000000..ffffff804023cfff]
+  virt_entry=ffffff8040000000
+ELF-loading image 'rootserver' to 4023f000
+  paddr=[4023f000..51048fff]
+  vaddr=[400000..11209fff]
+  virt_entry=42bee0
+Enabling MMU and jumping to entry point...
+
+Bootstrapping kernel
+Warning: Could not infer GIC interrupt target ID, assuming 0.
+available phys memory regions: 1
+  [40000000..80000000)
+reserved virt address space regions: 3
+  [ffffff8040000000..ffffff804023d000)
+  [ffffff804023d000..ffffff804023ee11)
+  [ffffff804023f000..ffffff8051049000)
+Booting all finished, dropped to user space
+TIMERDIAG EL=0x4 CNTFRQ=62500000 CNTV_CTL_init=0x5 CNTVCT 24278625->24591125 delta=312500
+TIMERDIAG after5ms CNTV_CTL=0x5 ISTATUS(bit2)=1 IMASK(bit1)=0
+TIMERDIAG GICD_CTLR=0x1 GICC_CTLR=0x1 GICC_PMR=0xf0
+TIMERDIAG IRQ27 group=0 enabled=1 pending=1 active=0 prio=0x0
+
+Warning: using printf before serial is set up. This only works as your
+printf is backed by seL4_Debug_PutChar()
+
+[sel4-act] five-case ACT correctness experiment
+[sel4-act] bundle bytes=213627660; entering shared Rust runtime
+[sel4-act] model parsed; counter_frequency=62500000
+[sel4-act] case-000 elapsed_ms=166064 mean_abs_x1e9=11046 max_abs_x1e9=83923 failed=0
+qemu-system-aarch64: terminating on signal 15 from pid 88362 (<unknown process>)

@@ -1,0 +1,15 @@
+[package]
+name = "act-kernels-acl"
+version = "0.1.0"
+edition = "2021"
+build = false
+
+# 该 crate 只保存 EL0 freestanding ACL 的窄 C ABI；静态 ACL archive 由
+# exokernel/scripts/build_acl_freestanding.sh 构建并由最终 libOS 目标链接。
+
+[features]
+default = []
+acl-freestanding = ["rutorch-kernels-acl-shared/acl-freestanding"]
+
+[dependencies]
+rutorch-kernels-acl-shared = { path = "../../rutorch/crates/rutorch-kernels-acl-shared", default-features = false }

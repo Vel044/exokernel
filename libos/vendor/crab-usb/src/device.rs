@@ -50,6 +50,14 @@ impl ProbedDevice {
         }
     }
 
+    /// 返回设备所在的xHCI Root Hub端口，供应用固定handeye/fixed/串口角色。
+    pub fn root_port_id(&self) -> Option<u8> {
+        match self {
+            Self::Device(info) => info.root_port_id(),
+            Self::Hub(info) => info.root_port_id(),
+        }
+    }
+
     pub fn product_id(&self) -> u16 {
         self.descriptor().product_id
     }
@@ -104,6 +112,11 @@ impl DeviceInfo {
         self.inner.configuration_descriptors()
     }
 
+    /// 返回设备所在的xHCI Root Hub端口；Hub下游设备仍返回其物理Root端口。
+    pub fn root_port_id(&self) -> Option<u8> {
+        self.inner.root_port_id()
+    }
+
     pub fn interface_descriptors<'a>(
         &'a self,
     ) -> impl Iterator<Item = &'a InterfaceDescriptor> + 'a {
@@ -135,6 +148,11 @@ impl HubDeviceInfo {
 
     pub fn configurations(&self) -> &[ConfigurationDescriptor] {
         self.inner.configuration_descriptors()
+    }
+
+    /// 返回Hub所在的xHCI Root Hub端口。
+    pub fn root_port_id(&self) -> Option<u8> {
+        self.inner.root_port_id()
     }
 
     pub fn product_id(&self) -> u16 {

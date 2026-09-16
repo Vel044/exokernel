@@ -21,11 +21,12 @@ use crate::uart;
 use exo_abi::{
     SYS_DMA_ALLOC, SYS_DMA_FREE, SYS_ENDPOINT_CALL, SYS_ENDPOINT_CREATE, SYS_ENDPOINT_DESTROY,
     SYS_ENDPOINT_RECV, SYS_ENDPOINT_REPLY, SYS_ENDPOINT_REPLY_RECV, SYS_ENDPOINT_SEND, SYS_EXIT,
-    SYS_FRAME_ALLOC, SYS_FRAME_FREE, SYS_FRAME_MAP, SYS_FRAME_UNMAP, SYS_IRQ_ACK, SYS_IRQ_BIND,
-    SYS_IRQ_UNBIND, SYS_MAP_MMIO, SYS_NOTIFICATION_CREATE, SYS_NOTIFICATION_DESTROY,
+    SYS_FRAME_ALLOC, SYS_FRAME_FREE, SYS_FRAME_MAP, SYS_FRAME_MAP_TO, SYS_FRAME_UNMAP, SYS_IRQ_ACK,
+    SYS_IRQ_BIND, SYS_IRQ_UNBIND, SYS_MAP_MMIO, SYS_NOTIFICATION_CREATE, SYS_NOTIFICATION_DESTROY,
     SYS_NOTIFICATION_POLL, SYS_NOTIFICATION_SIGNAL, SYS_NOTIFICATION_WAIT, SYS_PUTS,
-    SYS_THREAD_CREATE, SYS_THREAD_EXIT, SYS_THREAD_RUNTIME, SYS_THREAD_SET_PRIORITY,
-    SYS_THREAD_YIELD, SYS_UNMAP_MMIO,
+    SYS_THREAD_CREATE, SYS_THREAD_CREATE_IN, SYS_THREAD_DESTROY, SYS_THREAD_EXIT,
+    SYS_THREAD_RUNTIME, SYS_THREAD_SET_PRIORITY, SYS_THREAD_START, SYS_THREAD_SUSPEND,
+    SYS_THREAD_YIELD, SYS_UNMAP_MMIO, SYS_VSPACE_CREATE, SYS_VSPACE_DESTROY,
 };
 
 #[derive(Clone, Copy)]
@@ -139,6 +140,35 @@ pub fn enter_el1_kernel(entry_pc: u64, stack_top: u64, boot_info_ptr: u64, next_
     }
 }
 
+/// 固件已经在EL1运行时，切换到外核自有栈并直接进入EL1主入口。
+///
+/// 这条路径用于不提供嵌套EL2的macOS HVF。它不执行`eret`，也不访问任何
+/// EL2寄存器；目标入口会自行安装VBAR和新的stage-1页表。`BootInfo`位于
+/// EBS后仍保留的loader memory中，并在新页表建立前保持identity可访问。
+pub fn enter_el1_direct(entry_pc: u64, _stack_top: u64, boot_info_ptr: u64) -> ! {
+    // 与EL2降级路径保持相同的EL1执行前提：关闭固件可能留下的普通/栈
+    // 严格对齐检查，并允许Kernel和后续EL0使用FP/SIMD。页表和cache状态
+    // 暂时继承UEFI，el1_main随后会安装外核自己的stage-1。
+    msr!(
+        "sctlr_el1",
+        mrs!("sctlr_el1") & !((1u64 << 1) | (1u64 << 3) | (1u64 << 4))
+    );
+    msr!("cpacr_el1", mrs!("cpacr_el1") | (3u64 << 20));
+    unsafe { core::arch::asm!("isb", options(nomem, nostack)) };
+    // 这里暂时沿用UEFI loader stack。固件已经用Normal属性映射该栈，且其
+    // LoaderData页不会进入BootInfo的Conventional空闲范围。直接切到EFI
+    // image内的静态栈会继承固件对image section的特殊页属性，HVF下可能让
+    // LLVM生成的非对齐128位栈访问触发Alignment fault。
+    unsafe {
+        core::arch::asm!(
+            "br x9",
+            in("x0") boot_info_ptr,
+            in("x9") entry_pc,
+            options(noreturn)
+        );
+    }
+}
+
 /// EL1 外核进入 EL0 libOS。
 pub fn enter_el0(entry_pc: u64, stack_top: u64, arg0: u64) -> ! {
     // 允许 EL0 读取虚拟计数器 CNTVCT_EL0，供无 syscall 的短延时/超时使用。
@@ -231,7 +261,7 @@ pub extern "C" fn el1_sync_handler_frame(frame: *mut TrapFrame) -> *mut TrapFram
     }
     // AArch64 SVC 异常进入 EL1 时，ELR_EL1 已指向 SVC 后的下一条指令。
     // 返回地址不能再次增加，否则会跳过用户态系统调用封装中的一条指令。
-    // SVC编号位于保存的x8，参数位于x0..x4。分发完成后返回的TrapFrame
+    // SVC编号位于保存的x8，参数位于x0..x5。分发完成后返回的TrapFrame
     // 会由异常返回汇编恢复，并通过eret回到EL0的SVC下一条指令。
     handle_svc_frame(frame)
 }
@@ -262,6 +292,7 @@ pub extern "C" fn el1_irq_handler_frame(frame: *mut TrapFrame) -> *mut TrapFrame
             crate::arch::aarch64::smp::acknowledge_stop_and_park();
         } else if crate::scheduler::timer::is_timer_irq(intid) {
             crate::scheduler::timer::disarm();
+            crate::gic::clear_private_pending(intid);
             crate::gic::write_eoir(iar_token);
             // M[3:0]=0表示异常来自EL0t。所有线程Blocked时Kernel会在
             // EL1 WFI并短暂打开IRQ；此时若收到旧pending timer，只完成
@@ -315,9 +346,14 @@ fn handle_svc_frame(frame: &mut TrapFrame) -> *mut TrapFrame {
     let arg2 = frame.x[2];
     let arg3 = frame.x[3];
     let arg4 = frame.x[4];
+    let arg5 = frame.x[5];
 
     match sysno {
         SYS_THREAD_CREATE => finish(frame, crate::thread::create(arg0, arg1, arg2, arg3, arg4)),
+        SYS_THREAD_CREATE_IN => finish(frame, crate::thread::create_in(arg0, arg1)),
+        SYS_THREAD_START => finish(frame, crate::thread::start(arg0)),
+        SYS_THREAD_SUSPEND => finish(frame, crate::thread::suspend(arg0)),
+        SYS_THREAD_DESTROY => finish(frame, crate::thread::destroy(arg0)),
         SYS_THREAD_EXIT => match crate::thread::exit_current(frame) {
             Some(next) => next,
             None => crate::task::exit_current(arg0),
@@ -369,13 +405,22 @@ fn handle_svc_frame(frame: &mut TrapFrame) -> *mut TrapFrame {
         SYS_NOTIFICATION_DESTROY => finish(frame, crate::ipc::notification_destroy(arg0)),
         SYS_THREAD_RUNTIME => finish(frame, crate::thread::runtime(arg0)),
         _ => {
-            let result = handle_svc(frame.elr_el1, sysno, arg0, arg1, arg2, arg3, arg4);
+            let result = handle_svc(frame.elr_el1, sysno, arg0, arg1, arg2, arg3, arg4, arg5);
             finish(frame, result)
         }
     }
 }
 
-fn handle_svc(elr: u64, sysno: u64, arg0: u64, arg1: u64, arg2: u64, arg3: u64, arg4: u64) -> u64 {
+fn handle_svc(
+    elr: u64,
+    sysno: u64,
+    arg0: u64,
+    arg1: u64,
+    arg2: u64,
+    arg3: u64,
+    arg4: u64,
+    arg5: u64,
+) -> u64 {
     msr!("elr_el1", elr);
 
     match sysno {
@@ -398,7 +443,20 @@ fn handle_svc(elr: u64, sysno: u64, arg0: u64, arg1: u64, arg2: u64, arg3: u64, 
         SYS_FRAME_MAP => {
             crate::vspace::map_frame(crate::task::current_owner(), arg0, arg1, arg2, arg3, arg4)
         }
+        // x0=FrameHandle, x1=目标VSpaceHandle, x2=offset_pages, x3=pages,
+        // x4=目标VA, x5=R/RW/RX rights。x5通过libOS的svc6封装传入。
+        SYS_FRAME_MAP_TO => crate::vspace::map_frame_to(
+            crate::task::current_owner(),
+            arg1,
+            arg0,
+            arg2,
+            arg3,
+            arg4,
+            arg5,
+        ),
         SYS_FRAME_UNMAP => crate::vspace::unmap_handle(crate::task::current_owner(), arg0),
+        SYS_VSPACE_CREATE => crate::vspace::create(crate::task::current_owner()),
+        SYS_VSPACE_DESTROY => crate::vspace::destroy(crate::task::current_owner(), arg0),
         _ => {
             uart::puts("\r\n[exo] unknown SVC sysno=");
             uart::hex(sysno);

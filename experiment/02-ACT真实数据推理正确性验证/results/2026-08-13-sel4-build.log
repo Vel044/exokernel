@@ -1,0 +1,222 @@
+loading initial cache file /Users/vel/Work/RobotOS/Lerobot/sel4test-qemu-arm-virt/projects/act-inference-demo/settings.cmake
+-- ARM_CPU not set, defaulting to cortex-a53
+-- Extracting device tree from QEMU
+-- ARM_CPU not set, defaulting to cortex-a53
+-- Extracting device tree from QEMU
+-- Found GCC with prefix aarch64-linux-gnu-
+-- /Users/vel/Work/RobotOS/Lerobot/sel4test-qemu-arm-virt/build-act-inference-demo/kernel/gen_headers/plat/machine/devices_gen.h is out of date. Regenerating from DTB...
+-- libmuslc architecture: 'aarch64' (from KernelSel4Arch 'aarch64')
+-- Detecting cached version of: musllibc
+--   Found valid cache entry for musllibc
+-- Configuring done (1.0s)
+-- Generating done (0.0s)
+-- Build files have been written to: /Users/vel/Work/RobotOS/Lerobot/sel4test-qemu-arm-virt/build-act-inference-demo
+[0/2] Re-checking globbed directories...
+[1/207] Creating C input file for preprocessor
+[2/207] Creating C input file for preprocessor
+[3/207] Building ASM object apps/sel4runtime/CMakeFiles/sel4runtime_crt_obj.dir/crt/sel4_arch/aarch64/crt0.S.obj
+[4/207] Building C object libsel4/CMakeFiles/libsel4_shared_types_gen_pbf_temp_lib.dir/libsel4_shared_types_gen_pbf_temp.c.obj
+[5/207] Building ASM object apps/sel4runtime/CMakeFiles/sel4runtime_crt_obj.dir/crt/sel4_arch/aarch64/crtn.S.obj
+[6/207] Generating include/sel4/shared_types.pbf
+[7/207] Building ASM object apps/sel4runtime/CMakeFiles/sel4runtime_crt_obj.dir/crt/sel4_arch/aarch64/sel4_crt0.S.obj
+[8/207] Building C object apps/util_libs/libcpio/CMakeFiles/cpio.dir/src/cpio.c.obj
+[9/207] Building ASM object apps/sel4runtime/CMakeFiles/sel4runtime_crt_obj.dir/crt/sel4_arch/aarch64/crti.S.obj
+[10/207] Building C object libsel4/CMakeFiles/libsel4_sel4_arch_types_gen_pbf_temp_lib.dir/libsel4_sel4_arch_types_gen_pbf_temp.c.obj
+[11/207] Generating sel4_arch_include/aarch64/sel4/sel4_arch/types.pbf
+[12/207] Using cache musllibc build
+[13/207] Linking C static library apps/util_libs/libcpio/libcpio.a
+[14/207] Generating generated/invocations_all.json
+[15/207] Creating C input file for preprocessor
+[16/207] Building C object apps/util_libs/libutils/CMakeFiles/utils.dir/src/xml.c.obj
+[17/207] Building C object apps/util_libs/libfdt/CMakeFiles/fdt.dir/fdt_addresses.c.obj
+[18/207] Building C object apps/util_libs/libutils/CMakeFiles/utils.dir/src/debug.c.obj
+[19/207] Building C object apps/util_libs/libfdt/CMakeFiles/fdt.dir/fdt_empty_tree.c.obj
+[20/207] Building C object apps/util_libs/libutils/CMakeFiles/utils.dir/src/arch/arm/stack.c.obj
+[21/207] Creating C input file for preprocessor
+[22/207] Building C object apps/util_libs/libfdt/CMakeFiles/fdt.dir/fdt.c.obj
+[23/207] Building C object apps/util_libs/libutils/CMakeFiles/utils.dir/src/cbor64.c.obj
+[24/207] Building C object apps/util_libs/libutils/CMakeFiles/utils.dir/src/list.c.obj
+[25/207] Generating from /Users/vel/Work/RobotOS/Lerobot/sel4test-qemu-arm-virt/build-act-inference-demo/libsel4/include/sel4/shared_types.pbf
+[26/207] Building C object apps/util_libs/libutils/CMakeFiles/utils.dir/src/zf_log.c.obj
+[27/207] Generating from /Users/vel/Work/RobotOS/Lerobot/sel4test-qemu-arm-virt/build-act-inference-demo/libsel4/sel4_arch_include/aarch64/sel4/sel4_arch/types.pbf
+[28/207] Building C object kernel/CMakeFiles/kernel_bf_gen_target_1_pbf_temp_lib.dir/kernel_bf_gen_target_1_pbf_temp.c.obj
+[29/207] Building C object apps/util_libs/libfdt/CMakeFiles/fdt.dir/fdt_strerror.c.obj
+[30/207] Generating generated/arch/object/structures.bf.pbf
+[31/207] Linking C static library apps/util_libs/libutils/libutils.a
+[32/207] Building C object apps/util_libs/libfdt/CMakeFiles/fdt.dir/fdt_sw.c.obj
+[33/207] Building C object apps/util_libs/libfdt/CMakeFiles/fdt.dir/fdt_wip.c.obj
+[34/207] Building C object apps/util_libs/libfdt/CMakeFiles/fdt.dir/fdt_overlay.c.obj
+[35/207] Building C object apps/util_libs/libfdt/CMakeFiles/fdt.dir/fdtget.c.obj
+[36/207] Building C object apps/seL4_libs/libsel4debug/CMakeFiles/sel4debug.dir/src/alloc.c.obj
+[37/207] Building C object libsel4/CMakeFiles/sel4.dir/src/sel4_bootinfo.c.obj
+[38/207] Building C object apps/util_libs/libplatsupport/CMakeFiles/platsupport.dir/src/fdt.c.obj
+[39/207] Building C object apps/seL4_libs/libsel4debug/CMakeFiles/sel4debug.dir/src/backtrace.c.obj
+[40/207] Building C object apps/seL4_libs/libsel4debug/CMakeFiles/sel4debug.dir/src/identity.c.obj
+[41/207] Building C object kernel/CMakeFiles/kernel_all_pp_prune_wrapper_temp_lib.dir/kernel_all_pp_prune_wrapper_temp.c.obj
+[42/207] Building C object apps/seL4_libs/libsel4debug/CMakeFiles/sel4debug.dir/src/stack.c.obj
+[43/207] Linking C static library libsel4/libsel4.a
+[44/207] Building C object apps/seL4_libs/libsel4debug/CMakeFiles/sel4debug.dir/src/caps.c.obj
+[45/207] Building C object apps/seL4_libs/libsel4debug/CMakeFiles/sel4debug.dir/src/bootinfo.c.obj
+[46/207] Generating kernel_all_pp_prune.c
+[47/207] Building C object apps/seL4_libs/libsel4debug/CMakeFiles/sel4debug.dir/src/trace.c.obj
+[48/207] Building C object apps/seL4_libs/libsel4debug/CMakeFiles/sel4debug.dir/src/register_dump.c.obj
+[49/207] Building C object apps/seL4_libs/libsel4debug/CMakeFiles/sel4debug.dir/src/printf.c.obj
+[50/207] Building C object apps/util_libs/libfdt/CMakeFiles/fdt.dir/fdt_rw.c.obj
+[51/207] Building C object apps/seL4_libs/libsel4vka/CMakeFiles/sel4vka.dir/src/null-vka.c.obj
+[52/207] Building ASM object apps/sel4runtime/CMakeFiles/sel4runtime.dir/crt/sel4_arch/aarch64/crti.S.obj
+[53/207] Building C object apps/seL4_libs/libsel4vspace/CMakeFiles/sel4vspace.dir/src/arch/arm/mapping.c.obj
+[54/207] Linking C static library apps/seL4_libs/libsel4debug/libsel4debug.a
+[55/207] Building ASM object apps/sel4runtime/CMakeFiles/sel4runtime.dir/crt/sel4_arch/aarch64/crt0.S.obj
+[56/207] Building ASM object apps/sel4runtime/CMakeFiles/sel4runtime.dir/crt/sel4_arch/aarch64/crtn.S.obj
+[57/207] Building ASM object apps/sel4runtime/CMakeFiles/sel4runtime.dir/crt/sel4_arch/aarch64/sel4_crt0.S.obj
+[58/207] Building C object apps/seL4_libs/libsel4vspace/CMakeFiles/sel4vspace.dir/src/sel4_arch/aarch64/mapping.c.obj
+[59/207] Building C object apps/util_libs/libfdt/CMakeFiles/fdt.dir/fdt_ro.c.obj
+[60/207] Building C object apps/sel4runtime/CMakeFiles/sel4runtime.dir/src/crt1.c.obj
+[61/207] Building C object apps/sel4runtime/CMakeFiles/sel4runtime.dir/src/start.c.obj
+[62/207] Building C object apps/sel4runtime/CMakeFiles/sel4runtime.dir/src/memset.c.obj
+[63/207] Building C object apps/sel4runtime/CMakeFiles/sel4runtime.dir/src/init.c.obj
+[64/207] Building C object apps/sel4runtime/CMakeFiles/sel4runtime.dir/src/vsyscall.c.obj
+[65/207] Building C object apps/seL4_libs/libsel4simple/CMakeFiles/sel4simple.dir/src/simple.c.obj
+[66/207] Building C object apps/sel4runtime/CMakeFiles/sel4runtime.dir/src/start_root.c.obj
+[67/207] Building C object apps/sel4runtime/CMakeFiles/sel4runtime.dir/src/memcpy.c.obj
+[68/207] Building C object apps/seL4_libs/libsel4vspace/CMakeFiles/sel4vspace.dir/src/vspace.c.obj
+[69/207] Building C object apps/util_libs/libplatsupport/CMakeFiles/platsupport.dir/src/plat/qemu-arm-virt/chardev.c.obj
+[70/207] Building C object apps/util_libs/libplatsupport/CMakeFiles/platsupport.dir/src/arch/arm/delay.c.obj
+[71/207] Building C object apps/seL4_libs/libsel4vka/CMakeFiles/sel4vka.dir/src/debug-vka.c.obj
+[72/207] Building C object apps/util_libs/libplatsupport/CMakeFiles/platsupport.dir/src/io.c.obj
+[73/207] Building C object apps/util_libs/libplatsupport/CMakeFiles/platsupport.dir/src/arch/arm/dma330.c.obj
+[74/207] Building C object apps/util_libs/libplatsupport/CMakeFiles/platsupport.dir/src/serial.c.obj
+[75/207] Building C object apps/util_libs/libplatsupport/CMakeFiles/platsupport.dir/src/plat/qemu-arm-virt/serial.c.obj
+[76/207] Building C object apps/util_libs/libplatsupport/CMakeFiles/platsupport.dir/src/arch/arm/clock.c.obj
+[77/207] Linking C static library apps/seL4_libs/libsel4vka/libsel4vka.a
+[78/207] Building C object apps/util_libs/libplatsupport/CMakeFiles/platsupport.dir/src/arch/arm/i2c_bitbang.c.obj
+[79/207] Building C object apps/util_libs/libplatsupport/CMakeFiles/platsupport.dir/src/arch/arm/generic_timer.c.obj
+[80/207] Building C object apps/util_libs/libplatsupport/CMakeFiles/platsupport.dir/src/tqueue.c.obj
+[81/207] Building C object apps/util_libs/libplatsupport/CMakeFiles/platsupport.dir/src/arch/arm/irqchip/gic.c.obj
+[82/207] Building C object apps/util_libs/libplatsupport/CMakeFiles/platsupport.dir/src/local_time_manager.c.obj
+[83/207] Building C object apps/util_libs/libplatsupport/CMakeFiles/platsupport.dir/src/arch/arm/irqchip/tegra.c.obj
+[84/207] Building C object apps/util_libs/libplatsupport/CMakeFiles/platsupport.dir/src/arch/arm/irqchip/gicv3.c.obj
+[85/207] Building C object apps/sel4runtime/CMakeFiles/sel4runtime.dir/src/env.c.obj
+[86/207] Linking C static library apps/util_libs/libfdt/libfdt.a
+[87/207] Linking C static library apps/seL4_libs/libsel4simple/libsel4simple.a
+[88/207] Linking C static library apps/seL4_libs/libsel4vspace/libsel4vspace.a
+[89/207] Building C object apps/util_libs/libplatsupport/CMakeFiles/platsupport.dir/src/arch/arm/irqchip/omap3.c.obj
+[90/207] Building C object apps/util_libs/libelf/CMakeFiles/elf.dir/src/elf64.c.obj
+[91/207] Linking C static library apps/sel4runtime/libsel4runtime.a
+[92/207] Building C object apps/util_libs/libelf/CMakeFiles/elf.dir/src/elf32.c.obj
+[93/207] Building C object apps/seL4_libs/libsel4simple-default/CMakeFiles/sel4simple-default.dir/src/arch/arm/default.c.obj
+[94/207] Building C object apps/util_libs/libplatsupport/CMakeFiles/platsupport.dir/src/arch/arm/i2c.c.obj
+[95/207] Building C object apps/seL4_libs/libsel4platsupport/CMakeFiles/sel4platsupport.dir/src/bootinfo.c.obj
+[96/207] Building C object apps/util_libs/libelf/CMakeFiles/elf.dir/src/elf.c.obj
+[97/207] Building ASM object apps/seL4_libs/libsel4platsupport/CMakeFiles/sel4platsupport.dir/src/sel4_arch/aarch64/crt0.S.obj
+[98/207] Linking C static library apps/util_libs/libplatsupport/libplatsupport.a
+[99/207] Building C object apps/seL4_libs/libsel4platsupport/CMakeFiles/sel4platsupport.dir/src/arch/arm/device.c.obj
+[100/207] Building C object apps/seL4_libs/libsel4platsupport/CMakeFiles/sel4platsupport.dir/src/arch/arm/io_port_ops.c.obj
+[101/207] Generating from generated/arch/object/structures.bf.pbf
+[102/207] Building C object apps/seL4_libs/libsel4platsupport/CMakeFiles/sel4platsupport.dir/src/arch/arm/pmem.c.obj
+[103/207] Creating C input file for preprocessor
+[104/207] Linking C static library apps/util_libs/libelf/libelf.a
+[105/207] Building C object apps/seL4_libs/libsel4utils/CMakeFiles/sel4utils.dir/src/iommu_dma.c.obj
+[106/207] Building C object apps/seL4_libs/libsel4simple-default/CMakeFiles/sel4simple-default.dir/src/libsel4simple-default.c.obj
+[107/207] Building C object kernel/CMakeFiles/kernel_bf_gen_target_11_pbf_temp_lib.dir/kernel_bf_gen_target_11_pbf_temp.c.obj
+[108/207] Building C object apps/seL4_libs/libsel4platsupport/CMakeFiles/sel4platsupport.dir/src/device.c.obj
+[109/207] Building C object apps/seL4_libs/libsel4platsupport/CMakeFiles/sel4platsupport.dir/src/serial.c.obj
+[110/207] Generating generated/sel4/shared_types.bf.pbf
+[111/207] Building C object apps/seL4_libs/libsel4platsupport/CMakeFiles/sel4platsupport.dir/src/common.c.obj
+[112/207] Linking C static library apps/seL4_libs/libsel4simple-default/libsel4simple-default.a
+[113/207] Building C object apps/seL4_libs/libsel4utils/CMakeFiles/sel4utils.dir/src/profile.c.obj
+[114/207] Building C object apps/seL4_libs/libsel4platsupport/CMakeFiles/sel4platsupport.dir/src/io.c.obj
+[115/207] Building C object apps/seL4_libs/libsel4utils/CMakeFiles/sel4utils.dir/src/mapping.c.obj
+[116/207] Generating from generated/sel4/shared_types.bf.pbf
+[117/207] Building C object apps/seL4_libs/libsel4utils/CMakeFiles/sel4utils.dir/src/sel4_arch/aarch64/arch.c.obj
+[118/207] Building C object apps/seL4_libs/libsel4platsupport/CMakeFiles/sel4platsupport.dir/src/timer.c.obj
+[119/207] Building C object apps/seL4_libs/libsel4utils/CMakeFiles/sel4utils.dir/src/slab.c.obj
+[120/207] Creating C input file for preprocessor
+[121/207] Building C object apps/seL4_libs/libsel4platsupport/CMakeFiles/sel4platsupport.dir/src/irq.c.obj
+[122/207] Building C object apps/seL4_libs/libsel4utils/CMakeFiles/sel4utils.dir/src/page_dma.c.obj
+[123/207] Building C object apps/seL4_libs/libsel4utils/CMakeFiles/sel4utils.dir/src/irq_server/irq_server.c.obj
+[124/207] Building C object apps/seL4_libs/libsel4utils/CMakeFiles/sel4utils.dir/src/strerror.c.obj
+[125/207] Linking C static library apps/seL4_libs/libsel4platsupport/libsel4platsupport.a
+[126/207] Building C object apps/seL4_libs/libsel4utils/CMakeFiles/sel4utils.dir/src/stack.c.obj
+[127/207] Building C object kernel/CMakeFiles/kernel_i_wrapper_temp_lib.dir/kernel_all_copy.c.obj
+[128/207] Building C object apps/seL4_libs/libsel4muslcsys/CMakeFiles/sel4muslcsys.dir/src/sys_exit.c.obj
+[129/207] Building C object apps/seL4_libs/libsel4utils/CMakeFiles/sel4utils.dir/src/time_server/client.c.obj
+[130/207] Building C object apps/seL4_libs/libsel4muslcsys/CMakeFiles/sel4muslcsys.dir/src/sys_thread.c.obj
+[131/207] Generating kernel_all.i
+[132/207] Creating C input file for preprocessor
+[133/207] Building C object apps/seL4_libs/libsel4muslcsys/CMakeFiles/sel4muslcsys.dir/src/sys_yield.c.obj
+[134/207] Building C object apps/seL4_libs/libsel4muslcsys/CMakeFiles/sel4muslcsys.dir/src/sys_io.c.obj
+[135/207] Building C object apps/seL4_libs/libsel4muslcsys/CMakeFiles/sel4muslcsys.dir/src/sys_morecore.c.obj
+[136/207] Building C object kernel/CMakeFiles/linker_ld_wrapper_temp_lib.dir/linker_ld_wrapper_temp.c.obj
+[137/207] Building C object apps/seL4_libs/libsel4utils/CMakeFiles/sel4utils.dir/src/thread.c.obj
+[138/207] Building C object apps/seL4_libs/libsel4utils/CMakeFiles/sel4utils.dir/src/elf.c.obj
+[139/207] Generating linker.lds_pp
+[140/207] Building C object apps/seL4_libs/libsel4utils/CMakeFiles/sel4utils.dir/src/process.c.obj
+[141/207] Building C object apps/seL4_libs/libsel4muslcsys/CMakeFiles/sel4muslcsys.dir/src/vsyscall.c.obj
+[142/207] Building C object apps/seL4_libs/libsel4utils/CMakeFiles/sel4utils.dir/src/vspace/bootstrap.c.obj
+[143/207] Generating circular_includes_valid
+[144/207] Building C object apps/seL4_libs/libsel4utils/CMakeFiles/sel4utils.dir/src/vspace/vspace.c.obj
+[145/207] Building ASM object kernel/CMakeFiles/kernel.elf.dir/src/arch/arm/64/head.S.obj
+[146/207] Building ASM object kernel/CMakeFiles/kernel.elf.dir/src/arch/arm/64/traps.S.obj
+[147/207] Building ASM object kernel/CMakeFiles/kernel.elf.dir/src/arch/arm/64/idle.S.obj
+[148/207] Building ASM object kernel/CMakeFiles/kernel.elf.dir/src/arch/arm/armv/armv8-a/64/machine_asm.S.obj
+[149/207] Linking C static library apps/seL4_libs/libsel4utils/libsel4utils.a
+[150/207] Linking C static library apps/seL4_libs/libsel4muslcsys/libsel4muslcsys.a
+[151/207] Building C object apps/root/CMakeFiles/act-inference-root.dir/src/main.c.obj
+[152/207] Linking C executable apps/root/act-inference-root
+[153/207] Building C object kernel/CMakeFiles/kernel.elf.dir/kernel_all.c.obj
+[154/207] Linking C executable kernel/kernel.elf
+[155/207] Generating kernel.elf
+[156/207] Generating rootserver
+[157/207] Generate CPIO archive archive.o
+[158/207] Generating gen_headers/image_start_addr.h, gen_headers/platform_info.h
+[159/207] Generating linker.lds_pp
+[160/207] Generating gen_headers/devices_gen.h
+[161/207] Building ASM object elfloader/CMakeFiles/elfloader.dir/src/arch-arm/64/crt0.S.obj
+[162/207] Building C object elfloader/CMakeFiles/elfloader.dir/src/arch-arm/64/structures.c.obj
+[163/207] Building ASM object elfloader/CMakeFiles/elfloader.dir/src/arch-arm/armv/armv8-a/64/mmu.S.obj
+[164/207] Building C object elfloader/CMakeFiles/elfloader.dir/src/arch-arm/armv/armv8-a/64/smp.c.obj
+[165/207] Building ASM object elfloader/CMakeFiles/elfloader.dir/src/arch-arm/armv/armv8-a/64/psci_asm.S.obj
+[166/207] Building ASM object elfloader/CMakeFiles/elfloader.dir/src/arch-arm/64/traps.S.obj
+[167/207] Building C object elfloader/CMakeFiles/elfloader.dir/src/arch-arm/64/cpuid.c.obj
+[168/207] Building C object elfloader/CMakeFiles/elfloader.dir/src/arch-arm/64/mmu.c.obj
+[169/207] Building ASM object elfloader/CMakeFiles/elfloader.dir/src/arch-arm/armv/armv8-a/64/mmu-hyp.S.obj
+[170/207] Building C object elfloader/CMakeFiles/elfloader.dir/src/arch-arm/64/debug.c.obj
+[171/207] Building C object elfloader/CMakeFiles/elfloader.dir/src/arch-arm/drivers/smp-imx6.c.obj
+[172/207] Building C object elfloader/CMakeFiles/elfloader.dir/src/arch-arm/cpuid.c.obj
+[173/207] Building C object elfloader/CMakeFiles/elfloader.dir/src/arch-arm/drivers/smp-spin-table.c.obj
+[174/207] Building C object elfloader/CMakeFiles/elfloader.dir/src/arch-arm/scu.c.obj
+[175/207] Building C object elfloader/CMakeFiles/elfloader.dir/src/arch-arm/smp_boot.c.obj
+[176/207] Building C object elfloader/CMakeFiles/elfloader.dir/src/arch-arm/psci.c.obj
+[177/207] Building C object elfloader/CMakeFiles/elfloader.dir/src/arch-arm/drivers/smp-psci.c.obj
+[178/207] Building C object elfloader/CMakeFiles/elfloader.dir/src/arch-arm/drivers/smp-zynq7000.c.obj
+[179/207] Building C object elfloader/CMakeFiles/elfloader.dir/src/arch-arm/sys_boot.c.obj
+[180/207] Building C object elfloader/CMakeFiles/elfloader.dir/src/binaries/elf/elf32.c.obj
+[181/207] Building C object elfloader/CMakeFiles/elfloader.dir/src/binaries/elf/elf64.c.obj
+[182/207] Building C object elfloader/CMakeFiles/elfloader.dir/src/defaults.c.obj
+[183/207] Building C object elfloader/CMakeFiles/elfloader.dir/src/common.c.obj
+[184/207] Building C object elfloader/CMakeFiles/elfloader.dir/src/binaries/elf/elf.c.obj
+[185/207] Building C object elfloader/CMakeFiles/elfloader.dir/src/drivers/uart/8250-uart.c.obj
+[186/207] Building C object elfloader/CMakeFiles/elfloader.dir/src/drivers/smp/common.c.obj
+[187/207] Building C object elfloader/CMakeFiles/elfloader.dir/src/drivers/timer/arm_generic_timer.c.obj
+[188/207] Building C object elfloader/CMakeFiles/elfloader.dir/src/drivers/driver.c.obj
+[189/207] Building C object elfloader/CMakeFiles/elfloader.dir/src/drivers/uart/bcm-uart.c.obj
+[190/207] Building C object elfloader/CMakeFiles/elfloader.dir/src/drivers/uart/common.c.obj
+[191/207] Building C object elfloader/CMakeFiles/elfloader.dir/src/drivers/uart/exynos-uart.c.obj
+[192/207] Building C object elfloader/CMakeFiles/elfloader.dir/src/drivers/uart/imx-uart.c.obj
+[193/207] Building C object elfloader/CMakeFiles/elfloader.dir/src/drivers/uart/imx-lpuart.c.obj
+[194/207] Building C object elfloader/CMakeFiles/elfloader.dir/src/drivers/uart/msm-uart.c.obj
+[195/207] Building C object elfloader/CMakeFiles/elfloader.dir/src/drivers/uart/meson-uart.c.obj
+[196/207] Building C object elfloader/CMakeFiles/elfloader.dir/src/drivers/uart/pl011-uart.c.obj
+[197/207] Building C object elfloader/CMakeFiles/elfloader.dir/src/drivers/uart/stm32mp2-uart.c.obj
+[198/207] Building C object elfloader/CMakeFiles/elfloader.dir/src/fdt.c.obj
+[199/207] Building C object elfloader/CMakeFiles/elfloader.dir/src/string.c.obj
+[200/207] Building C object elfloader/CMakeFiles/elfloader.dir/src/utils/crypt_sha256.c.obj
+[201/207] Building C object elfloader/CMakeFiles/elfloader.dir/src/drivers/uart/xilinx-uart.c.obj
+[202/207] Building C object elfloader/CMakeFiles/elfloader.dir/src/utils/crypt_md5.c.obj
+[203/207] Building C object elfloader/CMakeFiles/elfloader.dir/src/printf.c.obj
+[204/207] Building C object elfloader/CMakeFiles/elfloader.dir/src/utils/hash.c.obj
+[205/207] Linking C executable elfloader/elfloader
+[206/207] Generating ../../images/act-inference-root-image-arm-qemu-arm-virt
+seL4 ACT image: /Users/vel/Work/RobotOS/Lerobot/sel4test-qemu-arm-virt/build-act-inference-demo/images/act-inference-root-image-arm-qemu-arm-virt
+/Users/vel/Work/RobotOS/Lerobot/sel4test-qemu-arm-virt/build-act-inference-demo/images/act-inference-root-image-arm-qemu-arm-virt: ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), statically linked, with debug_info, not stripped

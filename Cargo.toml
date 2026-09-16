@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["abi", "kernel", "libos"]
+members = ["abi", "kernel", "libos", "act-runtime", "act-kernels-acl"]
 
 [workspace.package]
 edition = "2021"
@@ -11,4 +11,8 @@ panic = "abort"
 
 [profile.release]
 panic = "abort"
-opt-level = 2
+# ACT卷积/GEMM依赖内联、循环展开和AArch64自动向量化；`s`/`2`更偏向
+# 编译速度或代码尺寸，会明显拖慢用户态推理。
+opt-level = 3
+lto = "thin"
+codegen-units = 1

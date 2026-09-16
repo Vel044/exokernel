@@ -321,6 +321,16 @@ pub fn find_uart_irq(dtb_paddr: u64) -> Option<IrqSpec> {
 /// non-secure physical、virtual、hypervisor。EL1 使用第二项，对应
 /// CNTP_* 寄存器；QEMU virt 和 Pi5 上通常都是 GIC INTID 30。
 pub fn find_nonsecure_physical_timer_irq(dtb_paddr: u64) -> Option<IrqSpec> {
+    find_timer_irq(dtb_paddr, 1)
+}
+
+/// 找到ARM Generic Timer的virtual timer PPI，对应`CNTV_*`寄存器。
+/// binding中的第三组interrupt specifier通常映射为GIC INTID 27。
+pub fn find_virtual_timer_irq(dtb_paddr: u64) -> Option<IrqSpec> {
+    find_timer_irq(dtb_paddr, 2)
+}
+
+fn find_timer_irq(dtb_paddr: u64, interrupt_index: usize) -> Option<IrqSpec> {
     if dtb_paddr == 0 {
         return None;
     }
@@ -387,9 +397,12 @@ pub fn find_nonsecure_physical_timer_irq(dtb_paddr: u64) -> Option<IrqSpec> {
                 } else if cstr_eq_status(name) {
                     disabled[node] =
                         prop_is_disabled(unsafe { sp.add(i) } as *const u8, len as usize);
-                } else if cstr_eq_interrupts(name) && len >= 24 {
-                    // 跳过第一组三个cell，解析第二组non-secure physical PPI。
-                    irq[node] = parse_gic_interrupts(sp, i + 3, len - 12);
+                } else if cstr_eq_interrupts(name) && len as usize >= (interrupt_index + 1) * 12 {
+                    irq[node] = parse_gic_interrupts(
+                        sp,
+                        i + interrupt_index * 3,
+                        len - (interrupt_index as u32 * 12),
+                    );
                 }
                 i += ((len + 3) / 4) as usize;
             }

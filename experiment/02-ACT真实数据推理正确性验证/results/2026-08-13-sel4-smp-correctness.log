@@ -1,0 +1,113 @@
+loading initial cache file /Users/vel/Work/RobotOS/Lerobot/sel4test-qemu-arm-virt/projects/act-inference-demo/settings.cmake
+-- ARM_CPU not set, defaulting to cortex-a53
+-- Extracting device tree from QEMU
+-- ARM_CPU not set, defaulting to cortex-a53
+-- Extracting device tree from QEMU
+-- Found GCC with prefix aarch64-linux-gnu-
+-- /Users/vel/Work/RobotOS/Lerobot/sel4test-qemu-arm-virt/build-act-inference-demo/kernel/gen_headers/plat/machine/devices_gen.h is out of date. Regenerating from DTB...
+-- libmuslc architecture: 'aarch64' (from KernelSel4Arch 'aarch64')
+-- Detecting cached version of: musllibc
+--   Found valid cache entry for musllibc
+-- Configuring done (1.0s)
+-- Generating done (0.1s)
+-- Build files have been written to: /Users/vel/Work/RobotOS/Lerobot/sel4test-qemu-arm-virt/build-act-inference-demo
+[0/2] Re-checking globbed directories...
+[1/46] Building C object kernel/CMakeFiles/kernel_all_pp_prune_wrapper_temp_lib.dir/kernel_all_pp_prune_wrapper_temp.c.obj
+[2/46] Generating kernel_all_pp_prune.c
+[3/46] Building C object apps/root/CMakeFiles/act-inference-root.dir/src/parallel.c.obj
+[4/46] Generating from generated/arch/object/structures.bf.pbf
+[5/46] Creating C input file for preprocessor
+[6/46] Building C object kernel/CMakeFiles/kernel_bf_gen_target_11_pbf_temp_lib.dir/kernel_bf_gen_target_11_pbf_temp.c.obj
+[7/46] Generating generated/sel4/shared_types.bf.pbf
+[8/46] Generating from generated/sel4/shared_types.bf.pbf
+[9/46] Creating C input file for preprocessor
+[10/46] Creating C input file for preprocessor
+[11/46] Building C object kernel/CMakeFiles/linker_ld_wrapper_temp_lib.dir/linker_ld_wrapper_temp.c.obj
+[12/46] Generating linker.lds_pp
+[13/46] Building C object kernel/CMakeFiles/kernel_i_wrapper_temp_lib.dir/kernel_all_copy.c.obj
+[14/46] Generating kernel_all.i
+[15/46] Generating circular_includes_valid
+[16/46] Linking C executable apps/root/act-inference-root
+[17/46] Building C object kernel/CMakeFiles/kernel.elf.dir/kernel_all.c.obj
+[18/46] Linking C executable kernel/kernel.elf
+[19/46] Generating kernel.elf
+[20/46] Generating rootserver
+[21/46] Generate CPIO archive archive.o
+[22/46] Generating gen_headers/image_start_addr.h, gen_headers/platform_info.h
+[23/46] Generating linker.lds_pp
+[24/46] Generating gen_headers/devices_gen.h
+[25/46] Building C object elfloader/CMakeFiles/elfloader.dir/src/arch-arm/drivers/smp-psci.c.obj
+[26/46] Building C object elfloader/CMakeFiles/elfloader.dir/src/drivers/timer/arm_generic_timer.c.obj
+[27/46] Building C object elfloader/CMakeFiles/elfloader.dir/src/drivers/uart/8250-uart.c.obj
+[28/46] Building C object elfloader/CMakeFiles/elfloader.dir/src/drivers/uart/common.c.obj
+[29/46] Building C object elfloader/CMakeFiles/elfloader.dir/src/arch-arm/drivers/smp-spin-table.c.obj
+[30/46] Building C object elfloader/CMakeFiles/elfloader.dir/src/arch-arm/smp_boot.c.obj
+[31/46] Building C object elfloader/CMakeFiles/elfloader.dir/src/drivers/driver.c.obj
+[32/46] Building C object elfloader/CMakeFiles/elfloader.dir/src/drivers/smp/common.c.obj
+[33/46] Building C object elfloader/CMakeFiles/elfloader.dir/src/arch-arm/drivers/smp-imx6.c.obj
+[34/46] Building C object elfloader/CMakeFiles/elfloader.dir/src/drivers/uart/bcm-uart.c.obj
+[35/46] Building C object elfloader/CMakeFiles/elfloader.dir/src/arch-arm/drivers/smp-zynq7000.c.obj
+[36/46] Building C object elfloader/CMakeFiles/elfloader.dir/src/drivers/uart/exynos-uart.c.obj
+[37/46] Building C object elfloader/CMakeFiles/elfloader.dir/src/drivers/uart/meson-uart.c.obj
+[38/46] Building C object elfloader/CMakeFiles/elfloader.dir/src/drivers/uart/imx-uart.c.obj
+[39/46] Building C object elfloader/CMakeFiles/elfloader.dir/src/drivers/uart/imx-lpuart.c.obj
+[40/46] Building C object elfloader/CMakeFiles/elfloader.dir/src/drivers/uart/stm32mp2-uart.c.obj
+[41/46] Building C object elfloader/CMakeFiles/elfloader.dir/src/drivers/uart/pl011-uart.c.obj
+[42/46] Building C object elfloader/CMakeFiles/elfloader.dir/src/drivers/uart/msm-uart.c.obj
+[43/46] Building C object elfloader/CMakeFiles/elfloader.dir/src/drivers/uart/xilinx-uart.c.obj
+[44/46] Linking C executable elfloader/elfloader
+[45/46] Generating ../../images/act-inference-root-image-arm-qemu-arm-virt
+seL4 ACT image: /Users/vel/Work/RobotOS/Lerobot/sel4test-qemu-arm-virt/build-act-inference-demo/images/act-inference-root-image-arm-qemu-arm-virt
+/Users/vel/Work/RobotOS/Lerobot/sel4test-qemu-arm-virt/build-act-inference-demo/images/act-inference-root-image-arm-qemu-arm-virt: ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), statically linked, with debug_info, not stripped
+
+ELF-loader started on CPU: ARM Ltd. Cortex-A53 r0p4
+  paddr=[711bd000..7de5c0a7]
+No DTB passed in from boot loader.
+Looking for DTB in CPIO archive...found at 71204518.
+Loaded DTB from 71204518.
+   paddr=[60250000..60252fff]
+ELF-loading image 'kernel' to 60000000
+  paddr=[60000000..6024ffff]
+  vaddr=[8060000000..806024ffff]
+  virt_entry=8060000000
+ELF-loading image 'rootserver' to 60253000
+  paddr=[60253000..7119cfff]
+  vaddr=[400000..11349fff]
+  virt_entry=42cfa8
+Boot cpu id = 0x0, index=0
+Core 1 is up with logic id 1
+Core 2 is up with logic id 2
+Core 3 is up with logic id 3
+Enabling hypervisor MMU and jumping to entry point...
+
+Bootstrapping kernel
+available phys memory regions: 1
+  [60000000..80000000)
+reserved virt address space regions: 3
+  [8060000000..8060250000)
+  [8060250000..80602520aa)
+  [8060253000..807119d000)
+Booting all finished, dropped to user space
+TIMERDIAG EL=0x8 CNTFRQ=62500000 CNTV_CTL_init=0x5 CNTVCT 29943375->30255875 delta=312500
+TIMERDIAG after5ms CNTV_CTL=0x5 ISTATUS(bit2)=1 IMASK(bit1)=0
+TIMERDIAG GICD_CTLR=0x1 GICC_CTLR=0x1 GICC_PMR=0xf0
+TIMERDIAG IRQ27 group=0 enabled=1 pending=0 active=0 prio=0x0
+
+Warning: using printf before serial is set up. This only works as your
+printf is backed by seL4_Debug_PutChar()
+
+[sel4-act] five-case ACT correctness experiment
+[sel4-act] bundle bytes=213627660; entering shared Rust runtime
+[sel4-act] model parsed; counter_frequency=62500000
+[sel4-act] worker started
+[sel4-act] worker started
+[[sseell44--aacctt]]  four-lane rowwo-rpkaerrallel  bsackend ready
+tarted
+[sel4-act] case-000 elapsed_ms=79296 mean_abs_x1e9=11046 max_abs_x1e9=83923 failed=0
+[sel4-act] case-001 elapsed_ms=79636 mean_abs_x1e9=16551 max_abs_x1e9=137329 failed=0
+[sel4-act] case-002 elapsed_ms=76122 mean_abs_x1e9=18612 max_abs_x1e9=183105 failed=0
+[sel4-act] case-003 elapsed_ms=69199 mean_abs_x1e9=13755 max_abs_x1e9=167846 failed=0
+[sel4-act] case-004 elapsed_ms=69833 mean_abs_x1e9=9206 max_abs_x1e9=76293 failed=0
+[sel4-act] PASS: five cases match PyTorch reference
+[sel4-act] experiment result=0
+qemu-system-aarch64: terminating on signal 15 from pid 7223 (<unknown process>)

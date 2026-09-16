@@ -3,6 +3,14 @@ set -euo pipefail
 cd "$(dirname "$0")"
 export PATH="$HOME/.cargo/bin:$PATH"
 
+if [ -n "${LIBOS_FEATURES:-}" ]; then
+    echo "ERROR: LIBOS_FEATURES已不再是公开接口，请改用LIBOS_APP。" >&2
+    exit 1
+fi
+LIBOS_APP="${LIBOS_APP:-scservo}"
+source ./scripts/libos_features.sh
+RESOLVED_LIBOS_FEATURES="$(resolve_libos_features pi5 "$LIBOS_APP" "${LIBOS_ENABLE_XHCI:-0}")"
+
 select_objcopy() {
     if [ -n "${OBJCOPY:-}" ]; then
         printf '%s\n' "$OBJCOPY"
@@ -20,9 +28,9 @@ sudo_keychain_prepare
 
 echo "==> 1. 编译 libos (EL0) - Pi5 RP1 xHCI CDC ACM"
 cd libos
-LIBOS_FEATURES="${LIBOS_FEATURES:-pi5-xhci,scservo}"
-echo "    libOS features: ${LIBOS_FEATURES}"
-cargo build --release --target aarch64-unknown-none --no-default-features --features "${LIBOS_FEATURES}"
+echo "    libOS app:      ${LIBOS_APP}"
+echo "    cargo features: ${RESOLVED_LIBOS_FEATURES}"
+cargo build --release --target aarch64-unknown-none --no-default-features --features "${RESOLVED_LIBOS_FEATURES}"
 cd ..
 
 echo ""

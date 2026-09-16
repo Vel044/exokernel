@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1500" height="1120" viewBox="0 0 1500 1120" role="img" aria-labelledby="title desc">
   <title id="title">Exokernel Kernel 与 libOS 架构图</title>
-  <desc id="desc">上层为 EL0 libOS 驱动与协议，下层把 EL1 Kernel 分为功能模块和系统调用接口两部分。</desc>
+  <desc id="desc">上层为 EL0 libOS 的舵机控制链、ACT推理、UVC观测链和运行时服务，下层把 EL1 Kernel 分为功能模块和系统调用接口两部分。</desc>
 
   <defs>
     <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
@@ -25,53 +25,79 @@
 
   <!-- EL0 libOS -->
   <g filter="url(#shadow)">
-    <rect x="55" y="120" width="1390" height="300" rx="8" fill="#ffffff" stroke="#1565c0" stroke-width="2"/>
-    <rect x="55" y="120" width="185" height="300" rx="8" fill="#1565c0"/>
-    <rect x="232" y="120" width="8" height="300" fill="#1565c0"/>
+    <rect x="55" y="120" width="1390" height="320" rx="8" fill="#ffffff" stroke="#1565c0" stroke-width="2"/>
+    <rect x="55" y="120" width="185" height="320" rx="8" fill="#1565c0"/>
+    <rect x="232" y="120" width="8" height="320" fill="#1565c0"/>
   </g>
   <text x="85" y="170" class="layer-title">EL0 libOS</text>
-  <text x="85" y="199" style="font-size:14px;fill:#d8eaff">驱动与策略</text>
-  <text x="85" y="242" style="font-size:14px;fill:#ffffff">• UART</text>
-  <text x="85" y="269" style="font-size:14px;fill:#ffffff">• PCI</text>
-  <text x="85" y="296" style="font-size:14px;fill:#ffffff">• xHCI</text>
-  <text x="85" y="323" style="font-size:14px;fill:#ffffff">• USB Serial</text>
-  <text x="85" y="350" style="font-size:14px;fill:#ffffff">• SCServo</text>
+  <text x="85" y="199" style="font-size:14px;fill:#d8eaff">四类用户态模块</text>
+  <text x="85" y="243" style="font-size:14px;fill:#ffffff">• 舵机控制链</text>
+  <text x="85" y="280" style="font-size:14px;fill:#ffffff">• ACT 推理</text>
+  <text x="85" y="317" style="font-size:14px;fill:#ffffff">• UVC 观测链</text>
+  <text x="85" y="354" style="font-size:14px;fill:#ffffff">• 运行时与系统服务</text>
 
   <g>
-    <rect x="275" y="165" width="210" height="190" rx="7" fill="#e8f2fc" stroke="#90caf9"/>
-    <text x="295" y="202" class="card-title">UART</text>
-    <text x="295" y="234" class="body">UserBootInfo.uart</text>
-    <text x="295" y="260" class="body">映射 PL011 MMIO</text>
-    <text x="295" y="286" class="body">TX 日志 / RX 回显</text>
-    <text x="295" y="312" class="body">Notification WAIT / IRQ ACK</text>
+    <!-- 舵机控制链：上层协议依赖下层传输和主控制器。 -->
+    <rect x="260" y="150" width="275" height="252" rx="7" fill="#eef6fb" stroke="#90caf9"/>
+    <text x="280" y="174" class="card-title">1. 舵机控制链</text>
 
-    <rect x="500" y="165" width="210" height="190" rx="7" fill="#e8f2fc" stroke="#90caf9"/>
-    <text x="520" y="202" class="card-title">PCI</text>
-    <text x="520" y="234" class="body">UserBootInfo.pci</text>
-    <text x="520" y="260" class="body">映射 ECAM / 扫描 BDF</text>
-    <text x="520" y="286" class="body">解析 BAR 与 INTx</text>
-    <text x="520" y="312" class="body">启用 Bus Master</text>
+    <rect x="280" y="184" width="235" height="38" rx="5" fill="#e3f4e8" stroke="#81c784"/>
+    <text x="292" y="207" class="body" style="font-weight:700">SCServo：Protocol 0 / 运动策略</text>
+    <text x="398" y="234" text-anchor="middle" class="small">↓</text>
 
-    <rect x="725" y="165" width="210" height="190" rx="7" fill="#e8f2fc" stroke="#90caf9"/>
-    <text x="745" y="202" class="card-title">xHCI</text>
-    <text x="745" y="234" class="body">CrabUSB Host Controller</text>
-    <text x="745" y="260" class="body">Command / Event Ring</text>
-    <text x="745" y="286" class="body">枚举与 Endpoint</text>
-    <text x="745" y="312" class="body">QEMU PCI / Pi5 RP1</text>
+    <rect x="280" y="237" width="235" height="38" rx="5" fill="#e8f2fc" stroke="#90caf9"/>
+    <text x="292" y="260" class="body" style="font-weight:700">USB Serial：CDC ACM / FTDI</text>
+    <text x="398" y="287" text-anchor="middle" class="small">↓</text>
 
-    <rect x="950" y="165" width="210" height="190" rx="7" fill="#e8f2fc" stroke="#90caf9"/>
-    <text x="970" y="202" class="card-title">USB Serial</text>
-    <text x="970" y="234" class="body">CDC ACM / FTDI</text>
-    <text x="970" y="260" class="body">1 Mbps / 8N1</text>
-    <text x="970" y="286" class="body">Control / Vendor Request</text>
-    <text x="970" y="312" class="body">Bulk IN / Bulk OUT</text>
+    <rect x="280" y="290" width="235" height="38" rx="5" fill="#e8f2fc" stroke="#90caf9"/>
+    <text x="292" y="313" class="body" style="font-weight:700">xHCI：CrabUSB / Event Ring</text>
+    <text x="398" y="340" text-anchor="middle" class="small">↓</text>
 
-    <rect x="1175" y="165" width="210" height="190" rx="7" fill="#e3f4e8" stroke="#81c784"/>
-    <text x="1195" y="202" class="card-title">SCServo</text>
-    <text x="1195" y="234" class="body">Protocol 0</text>
-    <text x="1195" y="260" class="body">FeetechMotorsBus</text>
-    <text x="1195" y="286" class="body">STS3215：ID 1–6</text>
-    <text x="1195" y="312" class="body">PING / READ / WRITE</text>
+    <rect x="280" y="343" width="235" height="38" rx="5" fill="#f4eee6" stroke="#bcaaa4"/>
+    <text x="292" y="366" class="body" style="font-weight:700">平台：QEMU PCI / Pi5 RP1</text>
+
+    <!-- ACT是独立应用，通过舵机接口读取状态并提交目标位置。 -->
+    <rect x="555" y="150" width="275" height="252" rx="7" fill="#f2eafb" stroke="#b39ddb"/>
+    <text x="575" y="174" class="card-title">2. ACT 推理</text>
+    <rect x="575" y="190" width="235" height="48" rx="5" fill="#ffffff" stroke="#d1c4e9"/>
+    <text x="590" y="211" class="body" style="font-weight:700">模型与存储</text>
+    <text x="590" y="229" class="body">safetensors · ext4 · workspace</text>
+    <rect x="575" y="246" width="235" height="48" rx="5" fill="#ffffff" stroke="#d1c4e9"/>
+    <text x="590" y="267" class="body" style="font-weight:700">输入</text>
+    <text x="590" y="285" class="body">双路UVC图像 + 舵机位置</text>
+    <rect x="575" y="302" width="235" height="48" rx="5" fill="#ffffff" stroke="#d1c4e9"/>
+    <text x="590" y="323" class="body" style="font-weight:700">输出</text>
+    <text x="590" y="341" class="body">动作序列 → SCServo</text>
+    <text x="575" y="378" class="small">双路观测 + 六轴状态</text>
+
+    <!-- UVC观测链与舵机链平行，复用xHCI并按平台选择PCI或RP1后端。 -->
+    <rect x="850" y="150" width="275" height="252" rx="7" fill="#eef6fb" stroke="#90caf9"/>
+    <text x="870" y="174" class="card-title">3. UVC 观测链</text>
+
+    <rect x="870" y="190" width="235" height="48" rx="5" fill="#e3f4e8" stroke="#81c784"/>
+    <text x="885" y="219" class="body" style="font-weight:700">UVC：MJPEG / Probe-Commit</text>
+    <text x="988" y="253" text-anchor="middle" class="small">↓</text>
+
+    <rect x="870" y="258" width="235" height="48" rx="5" fill="#e8f2fc" stroke="#90caf9"/>
+    <text x="885" y="287" class="body" style="font-weight:700">xHCI：CrabUSB / Event Ring</text>
+    <text x="988" y="321" text-anchor="middle" class="small">↓</text>
+
+    <rect x="870" y="326" width="235" height="48" rx="5" fill="#f4eee6" stroke="#bcaaa4"/>
+    <text x="885" y="355" class="body" style="font-weight:700">平台：QEMU PCI / Pi5 RP1</text>
+
+    <!-- 运行时和系统服务为多个EL0应用共享的支撑层。 -->
+    <rect x="1145" y="150" width="275" height="252" rx="7" fill="#f5f7f8" stroke="#90a4ae"/>
+    <text x="1165" y="174" class="card-title">4. 运行时与系统服务</text>
+    <rect x="1165" y="190" width="235" height="35" rx="5" fill="#ffffff" stroke="#b0bec5"/>
+    <text x="1177" y="212" class="body">UART / Logger：启动与调试</text>
+    <rect x="1165" y="232" width="235" height="35" rx="5" fill="#ffffff" stroke="#b0bec5"/>
+    <text x="1177" y="254" class="body">Frame + VSpace：内存管理</text>
+    <rect x="1165" y="274" width="235" height="35" rx="5" fill="#ffffff" stroke="#b0bec5"/>
+    <text x="1177" y="296" class="body">Thread + Scheduler：线程调度</text>
+    <rect x="1165" y="316" width="235" height="35" rx="5" fill="#ffffff" stroke="#b0bec5"/>
+    <text x="1177" y="338" class="body">Endpoint / Notification：IPC事件</text>
+    <rect x="1165" y="358" width="235" height="35" rx="5" fill="#ffffff" stroke="#b0bec5"/>
+    <text x="1177" y="380" class="body">FS / ext4：模型与观测文件</text>
   </g>
 
   <!-- EL1 Kernel: function modules and syscall modules -->
@@ -140,10 +166,10 @@
 
   <rect x="690" y="612" width="260" height="112" rx="6" fill="#ffffff" stroke="#ffb74d"/>
   <text x="708" y="638" style="font-size:16px;font-weight:700">Frame + VSpace</text>
-  <text x="708" y="660" class="mono">FRAME_ALLOC → FrameHandle</text>
-  <text x="708" y="678" class="mono">FRAME_MAP → MappingHandle</text>
-  <text x="708" y="696" class="mono">FRAME_UNMAP(mapping)</text>
-  <text x="708" y="714" class="mono">FRAME_FREE(FrameHandle)</text>
+  <text x="708" y="660" class="mono">VSPACE_CREATE / DESTROY</text>
+  <text x="708" y="678" class="mono">FRAME_ALLOC / FRAME_FREE</text>
+  <text x="708" y="696" class="mono">FRAME_MAP / FRAME_MAP_TO</text>
+  <text x="708" y="714" class="mono">FRAME_UNMAP</text>
 
   <rect x="965" y="612" width="215" height="112" rx="6" fill="#ffffff" stroke="#ffb74d"/>
   <text x="983" y="638" style="font-size:16px;font-weight:700">MMIO</text>
@@ -163,11 +189,11 @@
 
   <rect x="1050" y="756" width="370" height="132" rx="7" fill="#ffffff" stroke="#ffb74d"/>
   <text x="1070" y="782" class="card-title">Thread + Scheduler</text>
-  <text x="1070" y="805" class="mono">THREAD_CREATE        创建线程并设置CPU/优先级</text>
-  <text x="1070" y="822" class="mono">THREAD_SET_PRIORITY  修改线程优先级</text>
-  <text x="1070" y="839" class="mono">THREAD_RUNTIME       查询线程运行时间</text>
-  <text x="1070" y="856" class="mono">THREAD_YIELD         让出同级时间片</text>
-  <text x="1070" y="873" class="mono">THREAD_EXIT          退出当前线程</text>
+  <text x="1070" y="805" class="mono">THREAD_CREATE / THREAD_CREATE_IN</text>
+  <text x="1070" y="822" class="mono">THREAD_START / THREAD_SUSPEND</text>
+  <text x="1070" y="839" class="mono">THREAD_DESTROY / THREAD_EXIT</text>
+  <text x="1070" y="856" class="mono">THREAD_SET_PRIORITY / THREAD_RUNTIME</text>
+  <text x="1070" y="873" class="mono">THREAD_YIELD · CPU亲和性 · 静态优先级</text>
 
   <!-- Endpoint与Notification都属于广义IPC/Event机制，外框表达共同归属。 -->
   <rect x="675" y="902" width="745" height="143" rx="7" fill="#fff9ee" stroke="#f0a43a" stroke-width="1.5"/>

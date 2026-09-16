@@ -3,4 +3,6 @@
 pub(crate) mod endpoint;
 pub(crate) mod frame;
 pub(crate) mod notification;
+pub(crate) mod process;
 pub(crate) mod thread;
+pub(crate) mod vspace;

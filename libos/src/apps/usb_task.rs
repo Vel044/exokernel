@@ -23,20 +23,26 @@ extern "C" fn dedicated_usb_entry(boot_info: u64, _thread: u64, _ipc: u64) -> ! 
     run(info)
 }
 
-/// 普通机器人构建把USB栈固定到CPU2。CPU0只负责启动和协调，随后阻塞，
-/// xHCI SPI由USB线程在CPU2执行IRQ_BIND时直接路由到同一CPU。
+/// 创建固定运行在 CPU2 的 USB 线程，并让当前启动线程停放等待。
 pub(crate) fn run_dedicated(info: &exo_abi::UserBootInfo) -> ! {
+    // 本应用要求 CPU2 在线，用它专门运行 USB 栈。
     if info.cpu_count < 3 {
         fail("SMP CPU2 is not online", 0x20e);
     }
+
+    // 把入口、UserBootInfo 地址和调度参数交给 Kernel，创建一个 CPU2 线程。
     let _usb = crate::thread::Thread::spawn(
         dedicated_usb_entry,
         info as *const exo_abi::UserBootInfo as u64,
         crate::thread::ThreadConfig::new(2, 48, 48),
     )
     .unwrap_or_else(|error| fail_with_code("failed to create USB thread", error));
+
+    // 创建一个仅用于停放当前启动线程的 Notification，不负责 USB 中断。
     let parked = crate::notification::Notification::create()
         .unwrap_or_else(|error| fail_with_code("failed to park main thread", error));
+
+    // CPU0 永久阻塞，把执行权留给 CPU2 上的 USB 线程。
     loop {
         let _ = parked.wait();
     }
@@ -47,7 +53,8 @@ pub(crate) fn run_dedicated(info: &exo_abi::UserBootInfo) -> ! {
 /// 返回类型为`!`：成功后上层应用永久运行；失败时调用SYS_EXIT终止任务。
 pub(crate) fn run_with_ready_signal(
     info: &exo_abi::UserBootInfo,
-    ready_signal: Option<ReadySignal>,
+    // uvc-smoke没有协调线程；下划线允许该独立feature不产生未使用参数告警。
+    _ready_signal: Option<ReadySignal>,
 ) -> ! {
     // 注册CrabUSB使用的log facade。最终输出仍走libOS已经接管的PL011。
     crate::logger::init();
@@ -64,8 +71,49 @@ pub(crate) fn run_with_ready_signal(
     let mut xhci = crate::drivers::xhci::initialize(info)
         .unwrap_or_else(|(message, code)| fail(message, code));
 
+    #[cfg(feature = "app-robot-act-once")]
+    {
+        // 机器人策略拥有同一Host、EventHandler、INTID和Notification；它只
+        // 编排设备角色与动作，不重复初始化xHCI或另建IRQ通道。
+        crate::apps::robot_act_once::run_with_resources(
+            info,
+            &mut xhci.host,
+            &xhci.handler,
+            xhci.intid,
+            &xhci.notification,
+        )
+    }
+
+    #[cfg(feature = "app-robot-observation")]
+    {
+        crate::apps::robot_observation::run_with_resources(
+            info,
+            &mut xhci.host,
+            &xhci.handler,
+            xhci.intid,
+            &xhci.notification,
+        )
+    }
+
+    // UVC smoke只验证一台摄像头的协议协商和单帧等时接收。设备策略放在
+    // apps::uvc_smoke，UVC描述符与数据包协议放在drivers::uvc。
+    #[cfg(feature = "app-uvc-smoke")]
+    {
+        crate::apps::uvc_smoke::run(
+            info,
+            &mut xhci.host,
+            &xhci.handler,
+            xhci.intid,
+            &xhci.notification,
+        )
+    }
+
     // SCServo构建把USB串口当作半双工字节流，不包含回显策略。
-    #[cfg(feature = "scservo")]
+    #[cfg(any(
+        feature = "ide",
+        feature = "app-scservo",
+        feature = "app-robot-action-replay"
+    ))]
     {
         // open_scservo_transport是async：枚举、控制传输和端点配置都可能Pending。
         // block_on_usb负责在Pending时等待xHCI Notification并推进Event Ring。
@@ -84,22 +132,37 @@ pub(crate) fn run_with_ready_signal(
             }
         };
         // 到这里USB Host和串口端点已经完成配置；把业务控制权交给舵机应用。
+        #[cfg(any(feature = "ide", feature = "app-scservo"))]
         crate::apps::scservo_app::run(
             &mut transport,
             &xhci.handler,
             xhci.intid,
             &xhci.notification,
-            ready_signal,
-        )
+            _ready_signal,
+        );
+        #[cfg(feature = "app-robot-action-replay")]
+        match crate::runtime::usb_executor::block_on_usb(
+            crate::apps::robot_action_replay::run(info, &mut transport),
+            &xhci.handler,
+            xhci.intid,
+            &xhci.notification,
+        ) {
+            Ok(()) => crate::runtime::exit(0),
+            Err(code) => fail_with_code("ACT action replay failed", code),
+        }
     }
 
-    #[cfg(all(not(feature = "scservo"), feature = "usb-echo"))]
+    #[cfg(any(
+        feature = "ide",
+        feature = "app-usb-echo",
+        feature = "app-system-smoke"
+    ))]
     {
         // usb_echo::run本身是一个永久Future：枚举USB设备 识别CDC ACM或FTDI
         // 持续提交Bulk IN，再把payload
         // 通过Bulk OUT写回。正常情况下该调用永远不会返回。
         if let Err(stage) = crate::runtime::usb_executor::block_on_usb(
-            crate::apps::usb_echo::run(&mut xhci.host, &xhci.handler, ready_signal),
+            crate::apps::usb_echo::run(&mut xhci.host, &xhci.handler, _ready_signal),
             &xhci.handler,
             xhci.intid,
             &xhci.notification,
@@ -113,7 +176,16 @@ pub(crate) fn run_with_ready_signal(
         fail("USB echo returned unexpectedly", 0x20a)
     }
 
-    #[cfg(not(any(feature = "scservo", feature = "usb-echo")))]
+    #[cfg(not(any(
+        feature = "ide",
+        feature = "app-scservo",
+        feature = "app-uvc-smoke",
+        feature = "app-usb-echo",
+        feature = "app-system-smoke",
+        feature = "app-robot-act-once",
+        feature = "app-robot-observation",
+        feature = "app-robot-action-replay"
+    )))]
     fail("no xHCI application feature selected", 0x20b)
 }
 

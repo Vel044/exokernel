@@ -185,6 +185,19 @@ pub fn disable_private(intid: u32) {
     barrier();
 }
 
+/// 清除当前CPU banked的SGI/PPI pending位。
+///
+/// Generic Timer先撤销自己的level信号，再调用本函数清掉GIC已经采样的
+/// pending状态。这个顺序对HVF尤其重要：只关闭CNTV_CTL并不能保证已注入
+/// 的虚拟PPI立即消失，若直接EOI可能马上再次进入同一个IRQ。
+pub fn clear_private_pending(intid: u32) {
+    if !ready() || !(16..32).contains(&intid) {
+        return;
+    }
+    gicd_write(GICD_ICPENDR, 1u32 << intid);
+    barrier();
+}
+
 /// 在 GICD 中使能一个 SPI。
 pub fn enable_spi(intid: u32) {
     if !ready() || intid < 32 {

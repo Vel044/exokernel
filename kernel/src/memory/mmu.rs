@@ -12,6 +12,7 @@
 //! 读写页表 (不在 EL2 的虚拟地址空间里)。
 //!
 use crate::mem;
+use core::sync::atomic::{AtomicU64, Ordering};
 
 // ── 页表条目格式 ──
 const DESC_TABLE: u64 = 0b11; // L1/L2 表项的 bit[1:0]=11: 指向下级表
@@ -50,7 +51,10 @@ pub const MMU_USER_DEV: u64 =
 pub const MMU_USER_DMA: u64 =
     AP_RW_EL0 | (ATTR_NORMAL_NC << 2) | SH_INNER | (1 << 10) | (1 << 53) | (1 << 54);
 
-static mut ACTIVE_TABLE: u64 = 0;
+// 每个CPU记录自己当前运行线程所属的页表根。以前这里只有一个全局根，
+// 适用于单VSpace；独立进程后不能让CPU0切换页表影响CPU2的当前地址空间。
+static ACTIVE_TABLES: [AtomicU64; exo_abi::MAX_CPUS] =
+    [const { AtomicU64::new(0) }; exo_abi::MAX_CPUS];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MapError {
@@ -76,6 +80,19 @@ pub fn create_table() -> u64 {
     pa
 }
 
+/// 尝试创建一个新的 L1 页表根。
+///
+/// VSpace 是可由 EL0 请求创建的对象，失败必须返回错误码，不能像启动阶段
+/// 那样 panic。因此它与启动路径使用的 `create_table` 分开，避免改变原有
+/// bring-up 路径的行为。
+pub fn try_create_table() -> Option<u64> {
+    let pa = mem::alloc_page()?;
+    unsafe {
+        core::ptr::write_bytes(pa as *mut u8, 0, exo_abi::PAGE_SIZE as usize);
+    }
+    Some(pa)
+}
+
 pub fn map_block_2m(table_pa: u64, va: u64, pa: u64, flags: u64) {
     unsafe {
         let l1_ptr = table_pa as *mut u64;
@@ -91,6 +108,28 @@ pub fn map_block_2m(table_pa: u64, va: u64, pa: u64, flags: u64) {
         let l2_ptr = l2_pa as *mut u64;
         *l2_ptr.add(l2_index(va)) = (pa & !0x1f_ffff) | flags | DESC_BLOCK;
     }
+}
+
+/// 可失败的 2MiB block 映射版本，供 EL0 请求创建 VSpace 使用。
+///
+/// 启动阶段的 `map_block_2m` 使用 `expect` 是因为页表耗尽属于不可恢复的
+/// 启动错误；运行时创建地址空间则必须把同一个条件转换为 `NO_MEMORY`，不能
+/// 让不可信的 EL0 请求直接终止整个 Kernel。
+pub fn try_map_block_2m(table_pa: u64, va: u64, pa: u64, flags: u64) -> bool {
+    unsafe {
+        let l1_ptr = table_pa as *mut u64;
+        let l1e = l1_ptr.add(l1_index(va));
+        if *l1e == 0 {
+            let Some(l2_pa) = mem::alloc_page() else {
+                return false;
+            };
+            core::ptr::write_bytes(l2_pa as *mut u8, 0, 4096);
+            *l1e = l2_pa | DESC_TABLE;
+        }
+        let l2_pa = *l1e & !0xfff;
+        *(l2_pa as *mut u64).add(l2_index(va)) = (pa & !0x1f_ffff) | flags | DESC_BLOCK;
+    }
+    true
 }
 
 pub fn map_range_2m(
@@ -258,6 +297,86 @@ pub fn is_user_executable(table_pa: u64, va: u64) -> bool {
     }
 }
 
+/// 读取目标 VSpace 中某个用户地址对应的 PTE。
+///
+/// 该函数只在 Kernel 已经确认 `table_pa` 属于自己的页表对象后使用；它不
+/// 接受 EL0 提供的页表地址，因此裸指针解引用不会把任意 PA 变成 Kernel 的
+/// 页表。
+fn user_pte(table_pa: u64, va: u64) -> Option<u64> {
+    unsafe {
+        let l1e = core::ptr::read_volatile((table_pa as *const u64).add(l1_index(va)));
+        if (l1e & 0b11) != DESC_TABLE {
+            return None;
+        }
+        let l2 = (l1e & OUTPUT_ADDRESS_MASK) as *const u64;
+        let l2e = core::ptr::read_volatile(l2.add(l2_index(va)));
+        if (l2e & 0b11) != DESC_TABLE {
+            return None;
+        }
+        let l3 = (l2e & OUTPUT_ADDRESS_MASK) as *const u64;
+        let pte = core::ptr::read_volatile(l3.add(((va >> 12) & 0x1ff) as usize));
+        if (pte & 0b11) != DESC_PAGE {
+            None
+        } else {
+            Some(pte)
+        }
+    }
+}
+
+/// 检查一段地址是否全部是 EL0 可读映射。
+pub fn is_user_readable(table_pa: u64, va: u64, bytes: u64) -> bool {
+    if bytes == 0 {
+        return false;
+    }
+    let Some(end) = va.checked_add(bytes) else {
+        return false;
+    };
+    let first = va & !(exo_abi::PAGE_SIZE - 1);
+    let last = (end - 1) & !(exo_abi::PAGE_SIZE - 1);
+    let mut page = first;
+    loop {
+        let Some(pte) = user_pte(table_pa, page) else {
+            return false;
+        };
+        // AP[2:1]=01/11 表示 EL0 可访问；PXN/UXN不影响读取。
+        if (pte & (1 << 6)) == 0 && (pte & (1 << 7)) == 0 {
+            return false;
+        }
+        if page == last {
+            break;
+        }
+        page = page.saturating_add(exo_abi::PAGE_SIZE);
+    }
+    true
+}
+
+/// 检查一段地址是否全部是 EL0 可写映射。
+pub fn is_user_writable(table_pa: u64, va: u64, bytes: u64) -> bool {
+    if bytes == 0 {
+        return false;
+    }
+    let Some(end) = va.checked_add(bytes) else {
+        return false;
+    };
+    let first = va & !(exo_abi::PAGE_SIZE - 1);
+    let last = (end - 1) & !(exo_abi::PAGE_SIZE - 1);
+    let mut page = first;
+    loop {
+        let Some(pte) = user_pte(table_pa, page) else {
+            return false;
+        };
+        // AP=01 为 EL0/EL1 RW；AP=11 是只读，因此必须明确检查 AP bit1。
+        if (pte & (1 << 6)) == 0 || (pte & (1 << 7)) != 0 {
+            return false;
+        }
+        if page == last {
+            break;
+        }
+        page = page.saturating_add(exo_abi::PAGE_SIZE);
+    }
+    true
+}
+
 pub fn range_unmapped(table_pa: u64, va: u64, count: u64) -> bool {
     let mut index = 0u64;
     while index < count {
@@ -331,7 +450,8 @@ pub fn unmap_matching(table_pa: u64, va: u64, pa: u64, count: u64) -> bool {
 }
 
 pub fn active_table() -> u64 {
-    unsafe { ACTIVE_TABLE }
+    let cpu = crate::arch::aarch64::cpu::id();
+    ACTIVE_TABLES[cpu.min(exo_abi::MAX_CPUS - 1)].load(Ordering::Acquire)
 }
 
 pub fn flush_el1_tlb() {
@@ -392,9 +512,8 @@ pub fn sync_for_exec(pa: u64, pages: u64) {
 /// 写 SCTLR_EL1.M=1 (开 MMU)
 /// 清 TLB + 内存屏障 (确保新配置生效)
 pub fn activate(table_pa: u64) {
-    unsafe {
-        ACTIVE_TABLE = table_pa;
-    }
+    let cpu = crate::arch::aarch64::cpu::id();
+    ACTIVE_TABLES[cpu.min(exo_abi::MAX_CPUS - 1)].store(table_pa, Ordering::Release);
 
     // TTBR0_EL1: 页表物理地址
     msr!("ttbr0_el1", table_pa);
@@ -429,4 +548,53 @@ pub fn activate(table_pa: u64) {
                    | (1 << 29); // RES1
     msr!("sctlr_el1", sctlr);
     unsafe { core::arch::asm!("isb") };
+}
+
+/// 在已经配置好TCR/MAIR/MMU的CPU上切换到另一个VSpace。
+///
+/// ASID由vspace模块分配并随TTBR0一起写入。这里不清空全部TLB，依靠ASID
+/// 隔离不同地址空间；页表修改本身仍由映射路径执行全核TLB shootdown。
+pub fn switch_to(table_pa: u64, asid: u16) {
+    let cpu = crate::arch::aarch64::cpu::id();
+    ACTIVE_TABLES[cpu.min(exo_abi::MAX_CPUS - 1)].store(table_pa, Ordering::Release);
+    let ttbr = table_pa | ((asid as u64) << 48);
+    unsafe {
+        core::arch::asm!(
+            "dsb ish",
+            "msr ttbr0_el1, {ttbr}",
+            "isb",
+            ttbr = in(reg) ttbr,
+            options(nostack)
+        );
+    }
+}
+
+/// 释放一个独立VSpace拥有的页表根及其下级页表页。
+///
+/// 该函数只接收新建VSpace的私有根；启动根永远不经过这里，因此不会释放
+/// Kernel启动页表或其中的EL1共享映射。
+pub fn destroy_table(root: u64) {
+    if root == 0 {
+        return;
+    }
+    unsafe {
+        let l1 = root as *mut u64;
+        for l1_index in 0..512usize {
+            let l1_entry = core::ptr::read_volatile(l1.add(l1_index));
+            if (l1_entry & 0b11) != DESC_TABLE {
+                continue;
+            }
+            let l2_pa = l1_entry & OUTPUT_ADDRESS_MASK;
+            let l2 = l2_pa as *mut u64;
+            for l2_index in 0..512usize {
+                let l2_entry = core::ptr::read_volatile(l2.add(l2_index));
+                if (l2_entry & 0b11) == DESC_TABLE {
+                    let l3_pa = l2_entry & OUTPUT_ADDRESS_MASK;
+                    mem::free_page(l3_pa);
+                }
+            }
+            mem::free_page(l2_pa);
+        }
+        mem::free_page(root);
+    }
 }

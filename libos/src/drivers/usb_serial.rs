@@ -10,7 +10,13 @@ use crab_usb::usb_if::{
     host::ControlSetup,
     transfer::{Direction, Recipient, Request, RequestType},
 };
-#[cfg(feature = "scservo")]
+#[cfg(any(
+    feature = "ide",
+    feature = "app-scservo",
+    feature = "app-robot-act-once",
+    feature = "app-robot-observation",
+    feature = "app-robot-action-replay"
+))]
 use crab_usb::EventHandler;
 use crab_usb::{Endpoint, ProbedDevice, USBHost};
 
@@ -98,10 +104,31 @@ impl UsbSerialTransport {
 }
 
 /// 为SCServo寻找CDC ACM设备；诊断时也兼容QEMU模拟FTDI。
-#[cfg(feature = "scservo")]
+#[cfg(any(
+    feature = "ide",
+    feature = "app-scservo",
+    feature = "app-robot-act-once",
+    feature = "app-robot-observation",
+    feature = "app-robot-action-replay"
+))]
 pub(crate) async fn open_scservo_transport(
     host: &mut USBHost,
     handler: &EventHandler,
+) -> Result<UsbSerialTransport, u64> {
+    open_scservo_transport_filtered(host, handler, None).await
+}
+
+#[cfg(any(
+    feature = "ide",
+    feature = "app-scservo",
+    feature = "app-robot-act-once",
+    feature = "app-robot-observation",
+    feature = "app-robot-action-replay"
+))]
+async fn open_scservo_transport_filtered(
+    host: &mut USBHost,
+    handler: &EventHandler,
+    root_port: Option<u8>,
 ) -> Result<UsbSerialTransport, u64> {
     crate::runtime::puts(b"[libos] probing USB devices\r\n");
     // 允许设备晚于xHCI启动插入，所以没有设备时持续探测。
@@ -120,10 +147,16 @@ pub(crate) async fn open_scservo_transport(
     for device in &devices {
         log_device(device);
         if let ProbedDevice::Device(info) = device {
-            if selected_cdc.is_none() && is_cdc_acm(info) {
+            if root_port.map_or(true, |port| device.root_port_id() == Some(port))
+                && selected_cdc.is_none()
+                && is_cdc_acm(info)
+            {
                 selected_cdc = Some(info);
             }
-            if selected_ftdi.is_none() && is_ftdi(info) {
+            if root_port.map_or(true, |port| device.root_port_id() == Some(port))
+                && selected_ftdi.is_none()
+                && is_ftdi(info)
+            {
                 selected_ftdi = Some(info);
             }
         }
@@ -138,6 +171,24 @@ pub(crate) async fn open_scservo_transport(
         return configure_ftdi(host, info, 3, true).await;
     }
     Err(2)
+}
+
+/// 使用已经完成枚举的DeviceInfo配置串口。
+///
+/// 机器人场景一次性取得三个root-port设备后调用此函数，避免再次探测时
+/// 由于端口变化标志已经被消费而看不到串口板。
+#[cfg(any(feature = "app-robot-act-once", feature = "app-robot-observation"))]
+pub(crate) async fn configure_scservo(
+    host: &mut USBHost,
+    info: &crab_usb::DeviceInfo,
+) -> Result<UsbSerialTransport, u64> {
+    if is_cdc_acm(info) {
+        configure_cdc_acm(host, info).await
+    } else if is_ftdi(info) {
+        configure_ftdi(host, info, 3, true).await
+    } else {
+        Err(2)
+    }
 }
 
 pub(crate) fn log_device(device: &ProbedDevice) {

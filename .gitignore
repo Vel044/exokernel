@@ -1,8 +1,22 @@
 target/
 qemu/esp.img
 qemu/vars.fd
+qemu/act-model.ext4
+qemu/act-model.ext4.tmp
 *.iso
 *.bin
 .direnv/
 .envrc
 qemu/tempCodeRunnerFile.sh
+experiment/02-ACT真实数据推理正确性验证/linux-qemu/build/
+experiment/02-ACT真实数据推理正确性验证/scripts/__pycache__/
+# 每个 correctness case 的临时 ACT 数据盘由 benchmark runner 生成。
+qemu/act-benchmark*.ext4
+qemu/robot-act-model.ext4
+
+# 协作仓库只保存源码、设备树和明确归档的实验结果。
+.DS_Store
+libos/libos.elf
+qemu/*.ext4
+qemu/*.log
+/robot-*.log

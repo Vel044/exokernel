@@ -51,6 +51,54 @@ impl Thread {
         self.handle
     }
 
+    /// 在目标 VSpace 中创建一个 Suspended 线程。Kernel只在本次 SVC期间
+    /// 读取栈上的固定 ABI 配置，不保存这个用户态指针。
+    pub fn spawn_in(
+        target: &crate::vspace::VSpace,
+        entry: u64,
+        stack_pointer: u64,
+        arg0: u64,
+        arg1: u64,
+        config: ThreadConfig,
+    ) -> Result<Self, u64> {
+        let create = exo_abi::ThreadCreateConfig {
+            entry,
+            stack_pointer,
+            arg0,
+            arg1,
+            cpu: config.cpu,
+            priority: config.priority,
+            max_control_priority: config.max_control_priority,
+            reserved: 0,
+        };
+        let value = crate::runtime::svc(
+            exo_abi::SYS_THREAD_CREATE_IN,
+            target.handle().0,
+            (&create as *const exo_abi::ThreadCreateConfig) as u64,
+            0,
+        );
+        if exo_abi::is_sys_error(value) {
+            Err(value)
+        } else {
+            Ok(Self {
+                handle: exo_abi::ThreadHandle(value),
+            })
+        }
+    }
+
+    /// 将 Suspended 线程发布到调度器。
+    pub fn start(&self) -> Result<(), u64> {
+        result(crate::runtime::svc(exo_abi::SYS_THREAD_START, self.handle.0, 0, 0))
+    }
+
+    pub fn suspend(&self) -> Result<(), u64> {
+        result(crate::runtime::svc(exo_abi::SYS_THREAD_SUSPEND, self.handle.0, 0, 0))
+    }
+
+    pub fn destroy(self) -> Result<(), u64> {
+        result(crate::runtime::svc(exo_abi::SYS_THREAD_DESTROY, self.handle.0, 0, 0))
+    }
+
     pub fn set_priority(&self, priority: u8) -> Result<(), u64> {
         result(crate::runtime::svc(
             exo_abi::SYS_THREAD_SET_PRIORITY,

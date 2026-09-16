@@ -1,6 +1,6 @@
 # Kernel 与 libOS 模块实现清单
 
-开发顺序与各阶段验收标准见：[Kernel开发Timeline.md](./Kernel开发Timeline.md)。
+首次参与驱动迁移请从[驱动协作入口](./驱动移植/README.md)阅读。
 **Frame + VSpace、四核Thread、Endpoint/Reply、Notification和静态优先级抢占调度已完成**；
 下一阶段是真机SMP验收与实时性分析。
 
@@ -11,7 +11,7 @@
 - 定义 syscall 编号和 AArch64 寄存器调用约定。
 - 定义 `UserBootInfo`、`DeviceResource`、`PciHostInfo`、`PciRange`、`PciIntxRoute`。
 - `UserBootInfo` 包含可选的直接 xHCI 资源和 `XHCI_TRANSPORT_PCI/DIRECT` 传输类型。
-- ABI version 6包含`cpu_count`和完整Endpoint生命周期；当前QEMU和Pi5目标要求4个逻辑CPU上线。
+- ABI version 8包含`cpu_count`、独立`VSpaceHandle`和目标VSpace线程创建参数；当前QEMU和Pi5目标要求4个逻辑CPU上线。
 - 定义 BootInfo、UART、ECAM、xHCI BAR、heap、stack、DMA arena和Frame arena的固定EL0 VA。
 - 使用 `magic + version + size` 校验 EL1 与 EL0 的 ABI。
 
@@ -99,7 +99,7 @@ SYS_DEVICE_RELEASE(device_handle)
 
 - 保存 DTB 生成的平台 MMIO grant 和 IRQ grant；MMIO、IRQ、DMA 仍是分开的资源类型。
 - 当前任务只允许映射自己的 grant，不能仅凭 `UserBootInfo` 中的地址伪造资源请求。
-- 保存当前任务拥有的 ELF、BootInfo、heap、stack、MMIO、DMA 和 IRQ 状态。
+- 保存当前任务拥有的 ELF、BootInfo、stack、MMIO、DMA 和 IRQ 状态；heap 不再由任务记账，改由 EL0 以普通 Frame 自建。
 - `SYS_MAP_MMIO` 检查完整页对齐后的 PA 范围和用户 VA 重叠；`SYS_IRQ_BIND` 按 DTB flags 配置 level/edge。
 - 任务退出时禁用 IRQ、完成 active IRQ 的 EOI、撤销映射并释放 DMA 与普通页。
 
@@ -113,6 +113,12 @@ SYS_DEVICE_RELEASE(device_handle)
 - 普通Frame只允许R、RW、RX的Normal Cacheable映射；同一Frame不能同时存在RW与RX别名。
 - checked map拒绝覆盖已有PTE；unmap核对预期PA后清PTE并执行DSB、TLBI、ISB。
 - 任务退出时先撤销全部Mapping，TLBI完成后再释放所属Frame。
+- `VSPACE_CREATE`创建只含EL1共享映射的空地址空间；用户代码、数据、stack和IPC
+  buffer必须由创建者显式分配Frame并映射进去。
+- `VSPACE_DESTROY`只允许销毁没有线程和活动Mapping的地址空间；页表根和ASID由
+  Kernel内部回收，EL0只保存不透明句柄。
+- `FRAME_MAP_TO`允许创建者把自己的Frame映射到自己创建的目标VSpace；目标VA、
+  Frame范围、W^X和目标PTE均由Kernel检查。
 
 ### 5. ELF Loader（拉起libos.elf）
 
@@ -174,11 +180,12 @@ x1 = arg1
 x2 = arg2
 x3 = arg3
 x4 = arg4
+x5 = arg5
 svc #0
 ```
 
 - `kernel/src/arch/aarch64/vectors.rs`接收EL0 SVC，`kernel/src/syscall/dispatch.rs`按`x8`分发接口。
-- `x0..x4`中的Handle、VA、PA、size、alignment、rights和INTID全部是不可信输入。
+- `x0..x5`中的Handle、VA、PA、size、alignment、rights和INTID全部是不可信输入。
 - Kernel必须检查授权范围、任务所有权、地址对齐、整数溢出和状态转换。
 
 ### 1. 内存相关接口
@@ -187,14 +194,17 @@ svc #0
 
 | syscall | 输入 | 返回 | Kernel处理 |
 | --- | --- | --- | --- |
+| `SYS_VSPACE_CREATE` | 无 | `VSpaceHandle` | 分配独立页表根和内部ASID，只保留EL1共享映射。 |
+| `SYS_VSPACE_DESTROY` | `x0=VSpaceHandle` | `0/error` | 仅在无线程、无活动Mapping时撤销页表并回收VSpace。 |
 | `SYS_FRAME_ALLOC` | `x0=pages, x1=align_pages` | `FrameHandle` | 分配连续、对齐、清零的普通RAM。 |
 | `SYS_FRAME_FREE` | `x0=FrameHandle` | `0`成功 | 校验owner、generation和无活动Mapping后释放。 |
-| `SYS_FRAME_MAP` | `x0=FrameHandle, x1=offset_pages, x2=pages, x3=VA, x4=rights` | `MappingHandle` | 在Frame arena建立Normal Cacheable部分映射并保持W^X。 |
+| `SYS_FRAME_MAP` | `x0=FrameHandle, x1=offset_pages, x2=pages, x3=VA, x4=rights` | `MappingHandle` | 在Frame arena建立Normal Cacheable部分映射并保持W^X；自建heap时额外允许映射到`USER_HEAP_BASE`窗口。 |
+| `SYS_FRAME_MAP_TO` | `x0=FrameHandle, x1=VSpaceHandle, x2=offset_pages, x3=pages, x4=VA, x5=rights` | `MappingHandle` | 把Frame映射到创建者拥有的目标VSpace，检查目标页表和W^X。 |
 | `SYS_FRAME_UNMAP` | `x0=MappingHandle` | `0`成功 | 核对精确VA/PA范围，撤销PTE并TLBI。 |
 
 Frame arena为`0x2_0000_0000..0x2_1000_0000`。映射成功后libOS直接访问VA，
-不需要每次读写携带Handle。当前固定4MiB heap不自动扩容；普通`Box/Vec`仍由
-libOS allocator在已有heap内管理。
+不需要每次读写携带Handle。当前固定4MiB heap由EL0启动时用`FRAME_ALLOC`+`FRAME_MAP`
+自建、不自动扩容；普通`Box/Vec`仍由libOS allocator在已有heap内管理。
 
 #### 1.2 MMIO接口
 
@@ -252,6 +262,31 @@ IRQ必须绑定到有效Notification且badge非零，不再提供直接在系统
 | `SYS_THREAD_YIELD` | 无 | `0` | 仅放弃当前同优先级时间片，把线程移到该级FIFO队尾。 |
 | `SYS_THREAD_RUNTIME` | `x0=ThreadHandle` | Generic Timer ticks | 返回该线程累计执行时间，供libOS监控。 |
 
+目标 VSpace 的进程线程使用两阶段生命周期：创建时保持 `Suspended`，完成代码、
+数据、stack和IPC buffer映射后再 `START`。创建者只能操作自己创建的 VSpace 和线程。
+
+| syscall | 输入 | 返回/行为 | Kernel处理 |
+| --- | --- | --- | --- |
+| `SYS_THREAD_CREATE_IN` | `x0=VSpaceHandle, x1=ThreadCreateConfig*` | `ThreadHandle` | 复制并校验固定布局配置，确认entry为RX、stack为RW，创建Suspended线程。 |
+| `SYS_THREAD_START` | `x0=ThreadHandle` | `0/error` | 把目标线程放入其CPU的Ready Queue。 |
+| `SYS_THREAD_SUSPEND` | `x0=ThreadHandle` | `0/error` | 暂停尚未运行或已Ready的线程；运行中线程返回BUSY。 |
+| `SYS_THREAD_DESTROY` | `x0=ThreadHandle` | `0/error` | 销毁非运行线程，撤销其IPC buffer并递增generation。 |
+
+`ThreadCreateConfig`包含`entry`、`stack_pointer`、`arg0`、`arg1`、`cpu`、
+`priority`和`max_control_priority`；Kernel不保存配置指针，只保存复制后的上下文。
+
+### 3.1 VSpace与ProcessBuilder封装
+
+实现位置：`libos/src/kernel_api/vspace.rs`、`libos/src/kernel_api/process.rs`
+
+- `VSpace::create/destroy`只管理不透明地址空间句柄。
+- `ProcessBuilder::new(image)`在libOS校验AArch64 ELF，按`PT_LOAD`分配Frame，
+  临时RW映射复制文件和BSS，再以RX/RO/RW权限映射到目标VSpace。
+- builder随后分配stack、创建Suspended主线程；任一步失败都按
+  `Mapping -> Frame -> VSpace`顺序回滚。
+- 当前`process-smoke`只验证两个目标VSpace可在同一EL0 VA建立独立映射，未启动
+  外部子ELF；完整进程入口由同一个ProcessBuilder接口负责。
+
 线程入口约定为 `extern "C" fn(arg, thread_handle, ipc_buffer_va) -> !`。
 
 ### 4. Endpoint与Reply接口
@@ -293,7 +328,7 @@ IRQ必须绑定到有效Notification且badge非零，不再提供直接在系统
 实现位置：`libos/src/main.rs`、`libos/src/runtime/mod.rs`
 
 - 从`x0`读取并校验`UserBootInfo`。
-- 初始化固定用户态heap和global allocator。
+- 通过`FRAME_ALLOC`+`FRAME_MAP`自建固定用户态heap，并初始化global allocator。
 - 封装所有AArch64 SVC接口。
 - UART接管前`runtime::puts`使用`SYS_PUTS`，接管后直接写PL011 MMIO。
 - 使用`CNTVCT_EL0/CNTFRQ_EL0`实现忙等delay。
@@ -419,7 +454,7 @@ FTDI状态头处理、SCServo封包和运动策略仍全部在EL0 libOS中执行
 ```bash
 QEMU_USB_MODE=serial-bridge \
 QEMU_SERIAL_PATH=/dev/cu.usbmodem5A7C1191771 \
-LIBOS_FEATURES=qemu-xhci,scservo,scservo-move \
+LIBOS_APP=scservo-move \
 bash qemu/run.sh
 ```
 
@@ -427,7 +462,7 @@ bash qemu/run.sh
 位置/状态读取均成功，并由EL0移动到`[0, 0, 0, 0, 0, 50]`后关闭扭矩。
 
 不带环境变量时，QEMU默认构建和启动SCServo应用，并选择上述CDC ACM设备；
-FTDI回归需要显式使用`LIBOS_FEATURES=qemu-xhci,usb-echo`和
+FTDI回归需要显式使用`LIBOS_APP=usb-echo`和
 `QEMU_USB_MODE=ftdi`。
 
 Hub 路径使用 QEMU 模拟 Hub，而不是透传 Mac 的物理 Hub。`usb-host`
@@ -462,14 +497,41 @@ CrabUSB 的 Hub descriptor、下游端口、route string 和 Transaction Transla
 - 固定提供 SO100/SO101 的 1 到 6 号 `sts3215` 配置及夹爪 `0..100` 归一化。
 - 默认启动只 PING 和读取位置/状态，不使能扭矩、不写目标位置。
 
-默认构建启用 `qemu-xhci,scservo` 或 `pi5-xhci,scservo`。
+默认构建选择`LIBOS_APP=scservo`；构建脚本再根据QEMU或Pi5平台自动启用对应
+xHCI能力，调用者不直接组合底层Cargo feature。
 USB 回显是显式诊断构建：
 
 ```bash
-LIBOS_FEATURES=qemu-xhci,usb-echo QEMU_USB_MODE=ftdi bash qemu/run.sh
+LIBOS_APP=usb-echo QEMU_USB_MODE=ftdi bash qemu/run.sh
 ```
 
-### 11. 日志
+### 11. ACT双相机用户态推理
+
+实现位置：`act-runtime/src`、`libos/src/drivers/act.rs`、`libos/src/apps/act_inference.rs`、`libos/src/fs/ext4.rs`、`libos/src/drivers/virtio_blk.rs`
+
+- EL1从DTB发现并授权QEMU virtio-mmio窗口，不读取文件、不解析ext4或模型格式。
+- EL0通过virtio-blk读取只读ext4镜像，打开`model.safetensors`和LeRobot
+  normalizer，并通过普通Frame保存文件内容。
+- `act-runtime`为`no_std`零拷贝safetensors解析器及固定ACT前向实现：共享
+  ResNet18、4层Encoder、1层Decoder、100步动作头。
+- 输入为handeye/fixed两张`640x360 RGB HWC`图像和六维舵机位置，输出
+  `100x6`动作块；图像、state和action归一化参数来自训练仓库。
+- libOS使用普通Frame保存约197MiB权重，并使用五个普通Frame拼接约68MiB
+  连续VA工作区。块IO需要DMA syscall，文件和工作区建立需要Frame syscall；
+  卷积、注意力和输出计算全部直接访问EL0 VA。
+- QEMU确定性输入已与同一Hugging Face权重的PyTorch结果对照，代表动作
+  误差约`1e-4`。实时双摄输入需要后续UVC任务调用现有`Policy::predict`接口。
+
+运行：
+
+```bash
+bash scripts/fetch_act_model.sh
+LIBOS_APP=act-inference bash qemu/run.sh
+```
+
+推理入口见`libos/src/apps/act_inference.rs`，现有实验见[experiment/README.md](../experiment/README.md)。
+
+### 12. 日志
 
 实现位置：`libos/src/runtime/logger.rs`
 
@@ -481,12 +543,12 @@ LIBOS_FEATURES=qemu-xhci,usb-echo QEMU_USB_MODE=ftdi bash qemu/run.sh
 
 | libOS模块      | 使用的Kernel接口                                                                  |
 | -------------- | --------------------------------------------------------------------------------- |
-| `runtime.rs`   | 封装全部SVC；初始化固定普通heap；切换早期/直接UART日志。                          |
-| `memory.rs`    | `FRAME_ALLOC/MAP/UNMAP/FREE`；映射后向调用者提供直接VA访问。                    |
-| `thread.rs`    | `THREAD_CREATE/SET_PRIORITY/YIELD/EXIT/RUNTIME`；提供CPU亲和性和优先级配置。 |
-| `ipc.rs`       | `ENDPOINT_CREATE/DESTROY/SEND/RECV/CALL/REPLY/REPLY_RECV`；固定IPC Buffer。     |
-| `notification.rs` | `NOTIFICATION_CREATE/SIGNAL/WAIT/POLL/DESTROY`和Notification IRQ绑定。       |
-| `uart_echo.rs` | `MAP_MMIO`、`IRQ_BIND/WAIT/ACK/UNBIND`。                                          |
+| `runtime/mod.rs` | 封装全部SVC；自建固定普通heap；切换早期/直接UART日志。                          |
+| `kernel_api/frame.rs` | `FRAME_ALLOC/MAP/UNMAP/FREE`；映射后向调用者提供直接VA访问。                    |
+| `kernel_api/thread.rs` | `THREAD_CREATE/SET_PRIORITY/YIELD/EXIT/RUNTIME`；提供CPU亲和性和优先级配置。 |
+| `kernel_api/endpoint.rs` | `ENDPOINT_CREATE/DESTROY/SEND/RECV/CALL/REPLY/REPLY_RECV`；固定IPC Buffer。     |
+| `kernel_api/notification.rs` | `NOTIFICATION_CREATE/SIGNAL/WAIT/POLL/DESTROY`和Notification IRQ绑定。       |
+| `apps/uart_echo.rs` | `MAP_MMIO`、`IRQ_BIND/ACK/UNBIND`、`NOTIFICATION_WAIT`。                      |
 | `pci.rs`       | QEMU路径使用`MAP_MMIO`映射ECAM；配置空间读写不再进入Kernel；Pi5路径不使用。       |
 | `dma.rs`       | `DMA_ALLOC/FREE`。                                                                |
 | `xhci.rs`      | QEMU映射xHCI BAR，Pi5映射直接xHCI资源；使用`MAP_MMIO`和Notification IRQ绑定。    |
@@ -495,4 +557,8 @@ LIBOS_FEATURES=qemu-xhci,usb-echo QEMU_USB_MODE=ftdi bash qemu/run.sh
 | `usb_task.rs`  | 组合xHCI、USB串口和具体应用；自身不实现硬件协议。                               |
 | `scservo.rs`   | 在USB串口Bulk IN/OUT之上实现Protocol 0和FeetechMotorsBus。                      |
 | `scservo_app.rs` | 执行PING、读取和可选中位运动策略，不新增Kernel syscall。                       |
+| `act.rs`       | 使用`FRAME_ALLOC/MAP`建立推理工作区；映射后直接执行safetensors/ACT前向。       |
+| `virtio_blk.rs` | 使用`MAP_MMIO`和`DMA_ALLOC/FREE`访问QEMU virtio块设备。                       |
+| `fs/ext4.rs`    | 在EL0解析ext4并把文件读取到普通Frame，不新增文件系统syscall。                  |
+| `act_inference.rs` | 提供两张RGB图像与六维状态，检查`100x6`动作块的PyTorch参考结果。             |
 | panic/错误退出 | `SYS_EXIT`。                                                                      |
