@@ -3,9 +3,6 @@
   <desc id="desc">上层为 EL0 libOS 的舵机控制链、ACT推理、UVC观测链和运行时服务，下层把 EL1 Kernel 分为功能模块和系统调用接口两部分。</desc>
 
   <defs>
-    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
-      <feDropShadow dx="0" dy="3" stdDeviation="4" flood-color="#263238" flood-opacity="0.13"/>
-    </filter>
     <style>
       text { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; fill: #172126; }
       .title { font-size: 34px; font-weight: 700; }
@@ -19,12 +16,13 @@
     </style>
   </defs>
 
-  <rect width="1500" height="1120" fill="#f4f7f8"/>
+  <!-- 画布不绘制底色，导入文档时保持透明。 -->
   <text x="60" y="57" class="title">Exokernel：Kernel 与 libOS 架构</text>
   <text x="60" y="87" class="subtitle">EL1 提供资源保护机制；EL0 直接实现设备驱动、协议栈与应用策略</text>
 
   <!-- EL0 libOS -->
-  <g filter="url(#shadow)">
+  <!-- 使用普通实色形状，避免 Office 导入时依赖 SVG 阴影滤镜。 -->
+  <g>
     <rect x="55" y="120" width="1390" height="320" rx="8" fill="#ffffff" stroke="#1565c0" stroke-width="2"/>
     <rect x="55" y="120" width="185" height="320" rx="8" fill="#1565c0"/>
     <rect x="232" y="120" width="8" height="320" fill="#1565c0"/>
@@ -101,7 +99,7 @@
   </g>
 
   <!-- EL1 Kernel: function modules and syscall modules -->
-  <g filter="url(#shadow)">
+  <g>
     <rect x="55" y="485" width="1390" height="570" rx="8" fill="#ffffff" stroke="#37474f" stroke-width="2"/>
   </g>
 
