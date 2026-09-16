@@ -1,6 +1,6 @@
-# 目标侧接口：先 UART，再 DMA
+# 目标侧接口：UART 与 xHCI
 
-本文根据当前源码梳理；是接口走读，不是所有硬件和并发情形的正确性证明。
+本文根据当前源码梳理，供会后查询。会议按“分层 → UART → xHCI”讲解即可，接口表和 DMA 细节按需展开。现有驱动基于 Rust 库与本项目接口适配，并非对照 Linux 实现。
 
 ## 1. 三层边界
 
@@ -47,7 +47,20 @@ Notification 的创建、等待与销毁见 [notification.rs](../../libos/src/ke
 
 `smoke_test` 只覆盖 MMIO 发字节及 IRQ 绑定/解绑；要演示真实 IRQ 等待和回显，需要运行 `uart-echo` 的 `run` 路径。UART 例子没有 DMA。
 
-## 4. DMA：CPU 与设备使用不同地址
+## 4. xHCI 的中断完成链路
+
+[xhci.rs](../../libos/src/drivers/xhci.rs) 取得 BAR/DTB 资源，映射 MMIO、绑定 Notification，再创建 CrabUSB Host；[usb_executor.rs](../../libos/src/runtime/usb_executor.rs) 负责 poll Future。
+
+```text
+设备更新 Event Ring 并触发 IRQ
+→ EL1 禁用 SPI → EOI → 记录待 ACK → Notification
+→ EL0 handle_event() 消费 Event Ring、推进完成状态
+→ IRQ_ACK 重新使能 SPI → 再次 poll Future
+```
+
+Event Ring 与 USB 协议在 EL0；内核不解析 TRB。USB 串口、UVC 和上层应用不应各自复制一份 DMA 或 IRQ 管理机制。
+
+## 5. DMA 细节（会后参考）
 
 主入口：[dma.rs](../../libos/src/drivers/dma.rs)，调用方是 CrabUSB 的 `DmaOp`。另一个适配例子是 [virtio_blk.rs](../../libos/src/drivers/virtio_blk.rs) 的 `ExoVirtioHal`。
 
@@ -66,19 +79,6 @@ CrabUSB 请求 size / align / 地址约束
 - streaming 映射采用 bounce buffer。ToDevice/Bidirectional 在 `sync_map_for_device` 复制到 bounce；FromDevice/Bidirectional 在 `sync_map_for_cpu` 复制回来；释放在 `unmap_streaming`。`map_streaming` 本身不是完整传输。
 - 描述符发布、doorbell、completion 的具体先后要连同第三方 ring 实现审核。这里只陈述适配行为，不据此宣称任意硬件上的屏障位置都已验证。
 - 释放之前必须确认设备不再使用 buffer；`SYS_DMA_FREE` 的所有权检查并不代替设备停机或完成同步。
-
-## 5. xHCI 的中断完成链路
-
-[xhci.rs](../../libos/src/drivers/xhci.rs) 取得 BAR/DTB 资源，映射 MMIO、绑定 Notification，再创建 CrabUSB Host；[usb_executor.rs](../../libos/src/runtime/usb_executor.rs) 负责 poll Future。
-
-```text
-设备更新 Event Ring 并触发 IRQ
-→ EL1 禁用 SPI → EOI → 记录待 ACK → Notification
-→ EL0 handle_event() 消费 Event Ring、推进完成状态
-→ IRQ_ACK 重新使能 SPI → 再次 poll Future
-```
-
-Event Ring 与 USB 协议在 EL0；内核不解析 TRB。USB 串口、UVC 和上层应用不应各自复制一份 DMA 或 IRQ 管理机制。
 
 ## 6. 目标侧约束
 
