@@ -15,6 +15,10 @@
 
 两图依据 `abi/src/lib.rs` 的 ABI v12，使用透明画布和显式实色填充，可作为 PPT 插图。
 
+## xHCI 讲解配图
+
+- [初始化流程与内核接口](xHCI初始化流程.svg)：左侧按 `xhci::initialize()` 展示五步接入过程，右侧对应 MMIO、Notification 和 DMA 系统调用。
+
 ## 第一阶段分别交付什么
 
 | 维护者提供 | IR 工具开发者提供 | 双方一起确定 |

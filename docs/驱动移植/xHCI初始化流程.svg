@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1020" viewBox="0 0 1800 1020" role="img" aria-labelledby="title desc">
+<title id="title">xHCI 初始化：从资源描述到主控制器就绪</title>
+<desc id="desc">左侧按 initialize 的顺序展示资源发现、MMIO 映射、中断绑定、CrabUSB 接入与控制器初始化；右侧列出 EL1 提供的 MMIO、Notification 和 DMA 系统调用。</desc>
+<!-- 透明画布；使用显式实色属性，无滤镜、外部样式或外部图片。 -->
+<text x="40" y="53" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="36" font-weight="700" fill="#172126">xHCI 初始化：从资源描述到主控制器就绪</text>
+<text x="40" y="91" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="23" font-weight="400" fill="#52636b">入口：xhci::initialize(info)  ·  蓝色为 EL0 流程，橙色为进入 EL1 的系统调用</text>
+<text x="108" y="130" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="25" font-weight="700" fill="#1565c0">EL0｜资源适配 + CrabUSB 驱动库</text>
+<text x="1180" y="130" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="25" font-weight="700" fill="#a84b00">EL1｜内核提供的三类能力</text>
+<rect x="108" y="151" width="1010" height="224" rx="10" fill="#fff" stroke="#dce4ec" stroke-width="1.5"/>
+<rect x="40" y="165" width="48" height="42" rx="8" fill="#1565c0" stroke="#1565c0" stroke-width="1.5"/>
+<text x="54" y="195" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="26" font-weight="700" fill="#fff">1</text>
+<text x="132" y="190" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="27" font-weight="700" fill="#1565c0">取得控制器资源：discover_resource(info)</text>
+<text x="132" y="223" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="23" font-weight="400" fill="#52636b">根据 info.xhci_transport 选择平台路径</text>
+<rect x="132" y="240" width="462" height="76" rx="10" fill="#edf5ff" stroke="#b9d4ef" stroke-width="1.5"/>
+<text x="150" y="268" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="23" font-weight="700" fill="#1565c0">QEMU：info.pci → PCI 枚举</text>
+<text x="150" y="299" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="20" font-weight="400" fill="#172126">映射 ECAM 后读配置空间，取得 BAR / INTx</text>
+<rect x="620" y="240" width="474" height="76" rx="10" fill="#edf8f5" stroke="#b3d8ce" stroke-width="1.5"/>
+<text x="638" y="268" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="23" font-weight="700" fill="#087f75">Pi5：直接读取 info.xhci</text>
+<text x="638" y="299" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="20" font-weight="400" fill="#172126">使用内核从 DTB 整理好的 MMIO / IRQ</text>
+<text x="132" y="352" font-family="Menlo, Consolas, PingFang SC, Microsoft YaHei, monospace" font-size="24" font-weight="700" fill="#172126">汇合为 HostResource { base: PA, size, intid }</text>
+<line x1="612" y1="379" x2="612" y2="395" stroke="#1565c0" stroke-width="2.5"/>
+<polygon points="612,395 606,386 618,386" fill="#1565c0"/>
+<rect x="108" y="399" width="1010" height="93" rx="10" fill="#fff" stroke="#dce4ec" stroke-width="1.5"/>
+<rect x="40" y="413" width="48" height="42" rx="8" fill="#1565c0" stroke="#1565c0" stroke-width="1.5"/>
+<text x="54" y="443" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="26" font-weight="700" fill="#fff">2</text>
+<text x="132" y="438" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="27" font-weight="700" fill="#1565c0">映射 xHCI 寄存器</text>
+<text x="132" y="472" font-family="Menlo, Consolas, PingFang SC, Microsoft YaHei, monospace" font-size="24" font-weight="400" fill="#172126">map_mmio(base, size, XHCI_VA)；成功后包装 MMIO 指针</text>
+<line x1="612" y1="496" x2="612" y2="512" stroke="#1565c0" stroke-width="2.5"/>
+<polygon points="612,512 606,503 618,503" fill="#1565c0"/>
+<rect x="108" y="516" width="1010" height="99" rx="10" fill="#fff" stroke="#dce4ec" stroke-width="1.5"/>
+<rect x="40" y="530" width="48" height="42" rx="8" fill="#1565c0" stroke="#1565c0" stroke-width="1.5"/>
+<text x="54" y="560" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="26" font-weight="700" fill="#fff">3</text>
+<text x="132" y="555" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="27" font-weight="700" fill="#1565c0">建立内核侧中断通知</text>
+<text x="132" y="589" font-family="Menlo, Consolas, PingFang SC, Microsoft YaHei, monospace" font-size="24" font-weight="400" fill="#172126">Notification::create() → bind_irq(intid, badge)</text>
+<line x1="612" y1="619" x2="612" y2="635" stroke="#1565c0" stroke-width="2.5"/>
+<polygon points="612,635 606,626 618,626" fill="#1565c0"/>
+<rect x="108" y="639" width="1010" height="115" rx="10" fill="#fff" stroke="#dce4ec" stroke-width="1.5"/>
+<rect x="40" y="653" width="48" height="42" rx="8" fill="#1565c0" stroke="#1565c0" stroke-width="1.5"/>
+<text x="54" y="683" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="26" font-weight="700" fill="#fff">4</text>
+<text x="132" y="678" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="27" font-weight="700" fill="#1565c0">把 MMIO 地址与资源适配接口交给 CrabUSB</text>
+<text x="132" y="710" font-family="Menlo, Consolas, PingFang SC, Microsoft YaHei, monospace" font-size="25" font-weight="400" fill="#172126">USBHost::new_xhci(mmio, &amp;USB_KERNEL)</text>
+<text x="132" y="741" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="21" font-weight="400" fill="#52636b">再调用 create_event_handler()，得到用户态事件处理器。</text>
+<line x1="612" y1="758" x2="612" y2="774" stroke="#1565c0" stroke-width="2.5"/>
+<polygon points="612,774 606,765 618,765" fill="#1565c0"/>
+<rect x="108" y="778" width="1010" height="138" rx="10" fill="#fff" stroke="#dce4ec" stroke-width="1.5"/>
+<rect x="40" y="792" width="48" height="42" rx="8" fill="#1565c0" stroke="#1565c0" stroke-width="1.5"/>
+<text x="54" y="822" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="26" font-weight="700" fill="#fff">5</text>
+<text x="132" y="817" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="27" font-weight="700" fill="#1565c0">初始化控制器，并打开设备侧中断</text>
+<text x="132" y="846" font-family="Menlo, Consolas, PingFang SC, Microsoft YaHei, monospace" font-size="24" font-weight="400" fill="#172126">block_on_usb(host.init(), ...)</text>
+<text x="132" y="878" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="22" font-weight="400" fill="#172126">复位、设置队列地址、启动 → handle_event() → host.enable_irq()</text>
+<text x="132" y="904" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="20" font-weight="400" fill="#52636b">enable_irq() 写 xHCI 寄存器；与第 3 步的 IRQ_BIND 分工不同。</text>
+<rect x="1180" y="151" width="580" height="216" rx="10" fill="#fff8ee" stroke="#edcba7" stroke-width="1.5"/>
+<text x="1204" y="190" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="27" font-weight="700" fill="#a84b00">① / ②  MMIO 映射</text>
+<text x="1204" y="231" font-family="Menlo, Consolas, PingFang SC, Microsoft YaHei, monospace" font-size="26" font-weight="400" fill="#a84b00">SYS_MAP_MMIO</text>
+<text x="1204" y="270" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="22" font-weight="400" fill="#172126">检查 PA 授权范围，建立 Device 映射。</text>
+<text x="1204" y="306" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="21" font-weight="400" fill="#172126">QEMU：先映射 ECAM，再映射 xHCI BAR。</text>
+<text x="1204" y="343" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="21" font-weight="400" fill="#52636b">映射之后，EL0 直接读写设备寄存器。</text>
+<rect x="1180" y="388" width="580" height="216" rx="10" fill="#fff8ee" stroke="#edcba7" stroke-width="1.5"/>
+<text x="1204" y="427" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="27" font-weight="700" fill="#a84b00">③  中断通知</text>
+<text x="1204" y="468" font-family="Menlo, Consolas, PingFang SC, Microsoft YaHei, monospace" font-size="24" font-weight="400" fill="#a84b00">SYS_NOTIFICATION_CREATE</text>
+<text x="1204" y="505" font-family="Menlo, Consolas, PingFang SC, Microsoft YaHei, monospace" font-size="24" font-weight="400" fill="#a84b00">SYS_IRQ_BIND</text>
+<text x="1204" y="544" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="22" font-weight="400" fill="#172126">创建通知对象，检查 IRQ 归属并绑定。</text>
+<text x="1204" y="581" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="21" font-weight="400" fill="#52636b">后续由内核把硬件 IRQ 投递给驱动线程。</text>
+<rect x="1180" y="625" width="580" height="291" rx="10" fill="#fff8ee" stroke="#edcba7" stroke-width="1.5"/>
+<text x="1204" y="664" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="27" font-weight="700" fill="#a84b00">④ / ⑤  DMA 内存</text>
+<text x="1204" y="705" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="23" font-weight="400" fill="#172126">CrabUSB 需要队列或缓冲区时</text>
+<text x="1204" y="740" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="21" font-weight="400" fill="#172126">→ USB_KERNEL / DmaOp（EL0 适配）</text>
+<text x="1204" y="777" font-family="Menlo, Consolas, PingFang SC, Microsoft YaHei, monospace" font-size="23" font-weight="400" fill="#172126">→ runtime::dma_alloc()</text>
+<text x="1204" y="814" font-family="Menlo, Consolas, PingFang SC, Microsoft YaHei, monospace" font-size="25" font-weight="400" fill="#a84b00">→ SYS_DMA_ALLOC</text>
+<text x="1204" y="854" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="22" font-weight="400" fill="#172126">内核分配连续物理页并建立映射。</text>
+<text x="1204" y="891" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="22" font-weight="400" fill="#a84b00">CPU 使用 VA；控制器使用 DMA address。</text>
+<rect x="40" y="940" width="1720" height="53" rx="10" fill="#edf5ff" stroke="#b9d4ef" stroke-width="1.5"/>
+<text x="61" y="975" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="26" font-weight="700" fill="#1565c0">得到 XhciContext { host, handler, intid, notification }：主控制器就绪，下一页讲 USB 请求如何完成。</text>
+<text x="42" y="1013" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="17" font-weight="400" fill="#52636b">源码：libos/src/drivers/xhci.rs · DMA 适配：libos/src/drivers/dma.rs · USB_KERNEL 是 EL0 对象。</text>
+</svg>
