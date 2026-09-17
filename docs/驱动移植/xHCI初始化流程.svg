@@ -49,16 +49,14 @@
 <text x="70" y="847" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="21" font-weight="400" fill="#172126">ERSTBA ← 事件环段表地址；ERDP ← 事件环读取位置。</text>
 <text x="70" y="889" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="20" font-weight="400" fill="#172126">handle_event() 处理遗留事件；host.enable_irq() 打开设备侧中断。</text>
 <rect x="1140" y="642" width="620" height="280" rx="10" fill="#edf8f5" stroke="#b3d8ce" stroke-width="1.5"/>
-<text x="1164" y="683" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="27" font-weight="700" fill="#087f75">⑤ 控制器怎样使用 DMA 内存</text>
-<text x="1164" y="724" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="22" font-weight="400" fill="#172126">同一块内存，两种访问地址：</text>
-<rect x="1164" y="743" width="270" height="84" rx="10" fill="#fff" stroke="#b3d8ce" stroke-width="1.5"/>
-<text x="1181" y="775" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="23" font-weight="700" fill="#087f75">CPU：EL0 VA</text>
-<text x="1181" y="807" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="20" font-weight="400" fill="#172126">填命令、读完成事件</text>
-<rect x="1450" y="743" width="286" height="84" rx="10" fill="#fff" stroke="#b3d8ce" stroke-width="1.5"/>
-<text x="1467" y="775" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="22" font-weight="700" fill="#087f75">xHCI：DMA address</text>
-<text x="1467" y="807" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="20" font-weight="400" fill="#172126">读命令、写完成事件</text>
-<text x="1164" y="862" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="20" font-weight="400" fill="#52636b">当前无 IOMMU，DMA address 等于物理地址。</text>
-<text x="1164" y="897" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="20" font-weight="700" fill="#087f75">后续 USB 请求的数据缓冲区也走 DMA。</text>
+<text x="1164" y="683" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="27" font-weight="700" fill="#087f75">⑤ 初始化期间涉及的系统调用</text>
+<text x="1164" y="727" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="23" font-weight="700" fill="#a84b00">实际｜SYS_DMA_ALLOC</text>
+<text x="1164" y="757" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="19" font-weight="400" fill="#172126">分配 DCBAA；需要时再分配 Scratchpad。</text>
+<text x="1164" y="794" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="21" font-weight="700" fill="#a84b00">日志｜SYS_PUTS（当前 USB 入口）</text>
+<text x="1164" y="821" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="19" font-weight="400" fill="#172126">CrabUSB 日志经 EL1 UART 输出。</text>
+<text x="1164" y="854" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="19" font-weight="700" fill="#a84b00">条件｜SYS_NOTIFICATION_WAIT → SYS_IRQ_ACK</text>
+<text x="1164" y="881" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="19" font-weight="400" fill="#172126">等 IRQ → 读 Event Ring → ACK 重开 IRQ。</text>
+<text x="1164" y="907" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="18" font-weight="400" fill="#52636b">当前 init 自唤醒轮询，通常不进入等待分支。</text>
 <rect x="40" y="942" width="1720" height="51" rx="10" fill="#edf5ff" stroke="#b9d4ef" stroke-width="1.5"/>
 <text x="61" y="976" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="25" font-weight="700" fill="#1565c0">得到 XhciContext { host, handler, intid, notification }；控制器就绪，下一页讲 USB 请求。</text>
 <text x="42" y="1013" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="17" font-weight="400" fill="#52636b">源码：libos/src/drivers/xhci.rs · DMA 适配：libos/src/drivers/dma.rs · CrabUSB xHCI：host.rs</text>
