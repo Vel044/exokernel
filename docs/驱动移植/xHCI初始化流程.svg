@@ -25,11 +25,11 @@
 <rect x="40" y="350" width="1080" height="260" rx="10" fill="#fff" stroke="#dce4ec" stroke-width="1.5"/>
 <rect x="58" y="369" width="52" height="47" rx="8" fill="#1565c0" stroke="#1565c0" stroke-width="1.5"/>
 <text x="75" y="403" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="27" font-weight="700" fill="#fff">4</text>
-<text x="126" y="405" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="29" font-weight="700" fill="#1565c0">构造 xHCI 对象：分配命令环和事件环</text>
+<text x="126" y="405" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="29" font-weight="700" fill="#1565c0">创建 CrabUSB 的 xHCI 控制器对象</text>
 <text x="70" y="446" font-family="Menlo, Consolas, PingFang SC, Microsoft YaHei, monospace" font-size="26" font-weight="400" fill="#172126">USBHost::new_xhci(mmio, &amp;USB_KERNEL)</text>
-<text x="70" y="488" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="22" font-weight="400" fill="#172126">CrabUSB 读取控制器能力，创建 Command Ring 与 Event Ring。</text>
-<text x="70" y="529" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="21" font-weight="400" fill="#172126">命令环：CPU 写命令 TRB → 控制器读；事件环：控制器写完成 TRB → CPU 读。</text>
-<text x="70" y="571" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="21" font-weight="400" fill="#52636b">create_event_handler() 创建后续处理事件环的用户态处理器。</text>
+<text x="70" y="492" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="23" font-weight="400" fill="#172126">1. new_xhci() 创建 CrabUSB 实现的 xHCI 控制器对象。</text>
+<text x="70" y="535" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="23" font-weight="400" fill="#172126">2. &amp;USB_KERNEL 是本系统在 EL0 实现的静态对象引用，</text>
+<text x="97" y="572" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="22" font-weight="400" fill="#52636b">提供 DMA 分配等方法；CrabUSB 需要内存时调用。</text>
 <rect x="1140" y="350" width="620" height="260" rx="10" fill="#fff8ee" stroke="#edcba7" stroke-width="1.5"/>
 <text x="1164" y="391" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="27" font-weight="700" fill="#a84b00">④ 分配 DMA 内存</text>
 <text x="1164" y="430" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="22" font-weight="400" fill="#172126">CrabUSB → USB_KERNEL / DmaOp</text>
