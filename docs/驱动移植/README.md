@@ -8,6 +8,13 @@
 2. [接口导读](target-interfaces.md)：用 UART 理解 MMIO/IRQ，再用 xHCI 看驱动库接入和请求完成；DMA 细节按需查阅。
 3. [会议提纲](meeting.md)：现场讨论 IR 范围、样例、验收与会后分工。
 
+## UserBootInfo 讲解配图
+
+- [主结构与传递方式](UserBootInfo主结构.svg)：全部主结构字段、只读映射、EL0 入口和 xHCI 资源选择。
+- [附属结构与字段含义](UserBootInfo附属结构.svg)：DeviceResource、PciHostInfo、PciRange 和 PciIntxRoute。
+
+两图依据 `abi/src/lib.rs` 的 ABI v12，使用透明画布和显式实色填充，可作为 PPT 插图。
+
 ## 第一阶段分别交付什么
 
 | 维护者提供 | IR 工具开发者提供 | 双方一起确定 |

@@ -1,0 +1,108 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1000" viewBox="0 0 1800 1000" role="img" aria-labelledby="title desc">
+<title id="title">UserBootInfo 附属结构：设备、PCI 窗口与中断路由</title><desc id="desc">展开 DeviceResource、PciHostInfo、PciRange、PciIntxRoute 的全部字段、数组关系以及 BAR 地址翻译和 INTx 路由用途。</desc>
+<!-- 透明画布；全部使用显式属性与普通实色形状，不依赖 CSS、阴影滤镜或外部字体。 -->
+<rect x="40" y="30" width="66" height="52" rx="8" fill="#1565c0" stroke="none" stroke-width="1.5"/>
+<text x="57" y="66" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="26" font-weight="700" fill="#fff">02</text>
+<text x="124" y="70" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="36" font-weight="700" fill="#172126">UserBootInfo：附属结构与字段含义</text>
+<text x="42" y="112" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="23" font-weight="400" fill="#52636b">DeviceResource 描述直接 MMIO 资源；PciHostInfo 组织 PCI 配置空间、地址窗口与中断路由。</text>
+<rect x="40" y="145" width="815" height="258" rx="12" fill="#fff" stroke="#dce4ec" stroke-width="1.5"/>
+<rect x="40" y="145" width="815" height="60" rx="10" fill="#1565c0" stroke="none" stroke-width="1.5"/>
+<rect x="40" y="185" width="815" height="20" rx="0" fill="#1565c0" stroke="none" stroke-width="1.5"/>
+<text x="62" y="185" font-family="Menlo, Consolas, PingFang SC, Microsoft YaHei, monospace" font-size="27" font-weight="700" fill="#fff">DeviceResource</text>
+<text x="62" y="237" font-family="Menlo, Consolas, PingFang SC, Microsoft YaHei, monospace" font-size="23" font-weight="700" fill="#172126">base</text>
+<text x="225" y="237" font-family="Menlo, Consolas, PingFang SC, Microsoft YaHei, monospace" font-size="21" font-weight="400" fill="#52636b">u64</text>
+<text x="323" y="237" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="22" font-weight="400" fill="#172126">MMIO 起始物理地址（CPU PA）</text>
+<text x="62" y="277" font-family="Menlo, Consolas, PingFang SC, Microsoft YaHei, monospace" font-size="23" font-weight="700" fill="#172126">size</text>
+<text x="225" y="277" font-family="Menlo, Consolas, PingFang SC, Microsoft YaHei, monospace" font-size="21" font-weight="400" fill="#52636b">u64</text>
+<text x="323" y="277" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="22" font-weight="400" fill="#172126">MMIO 区域长度，单位：字节</text>
+<text x="62" y="317" font-family="Menlo, Consolas, PingFang SC, Microsoft YaHei, monospace" font-size="23" font-weight="700" fill="#172126">intid</text>
+<text x="225" y="317" font-family="Menlo, Consolas, PingFang SC, Microsoft YaHei, monospace" font-size="21" font-weight="400" fill="#52636b">u32</text>
+<text x="323" y="317" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="22" font-weight="400" fill="#172126">GIC 中断号；不是 EL0 指针</text>
+<line x1="60" y1="337" x2="835" y2="337" stroke="#dce4ec" stroke-width="1.5"/>
+<text x="62" y="365" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="22" font-weight="700" fill="#1565c0">uart、xhci、virtio_mmio 各内嵌一份。</text>
+<text x="62" y="391" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="20" font-weight="400" fill="#52636b">当前 virtio_mmio.intid = 0，仅描述 MMIO 窗口。</text>
+<rect x="40" y="425" width="815" height="508" rx="12" fill="#fff" stroke="#dce4ec" stroke-width="1.5"/>
+<rect x="40" y="425" width="815" height="60" rx="10" fill="#087f75" stroke="none" stroke-width="1.5"/>
+<rect x="40" y="465" width="815" height="20" rx="0" fill="#087f75" stroke="none" stroke-width="1.5"/>
+<text x="62" y="465" font-family="Menlo, Consolas, PingFang SC, Microsoft YaHei, monospace" font-size="27" font-weight="700" fill="#fff">PciHostInfo</text>
+<text x="62" y="515" font-family="Menlo, Consolas, PingFang SC, Microsoft YaHei, monospace" font-size="21" font-weight="700" fill="#172126">present</text>
+<text x="356" y="515" font-family="Menlo, Consolas, PingFang SC, Microsoft YaHei, monospace" font-size="19" font-weight="400" fill="#087f75">u32</text>
+<text x="580" y="515" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="19" font-weight="400" fill="#172126">0 表示没有 PCI host</text>
+<text x="62" y="551" font-family="Menlo, Consolas, PingFang SC, Microsoft YaHei, monospace" font-size="21" font-weight="700" fill="#172126">ecam_pa</text>
+<text x="356" y="551" font-family="Menlo, Consolas, PingFang SC, Microsoft YaHei, monospace" font-size="19" font-weight="400" fill="#087f75">u64</text>
+<text x="580" y="551" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="19" font-weight="400" fill="#172126">PCI 配置空间起始 PA</text>
+<text x="62" y="587" font-family="Menlo, Consolas, PingFang SC, Microsoft YaHei, monospace" font-size="21" font-weight="700" fill="#172126">ecam_size</text>
+<text x="356" y="587" font-family="Menlo, Consolas, PingFang SC, Microsoft YaHei, monospace" font-size="19" font-weight="400" fill="#087f75">u64</text>
+<text x="580" y="587" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="19" font-weight="400" fill="#172126">配置空间范围（字节）</text>
+<text x="62" y="623" font-family="Menlo, Consolas, PingFang SC, Microsoft YaHei, monospace" font-size="21" font-weight="700" fill="#172126">bus_start</text>
+<text x="356" y="623" font-family="Menlo, Consolas, PingFang SC, Microsoft YaHei, monospace" font-size="19" font-weight="400" fill="#087f75">u8</text>
+<text x="580" y="623" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="19" font-weight="400" fill="#172126">起始总线号</text>
+<text x="62" y="659" font-family="Menlo, Consolas, PingFang SC, Microsoft YaHei, monospace" font-size="21" font-weight="700" fill="#172126">range_count</text>
+<text x="356" y="659" font-family="Menlo, Consolas, PingFang SC, Microsoft YaHei, monospace" font-size="19" font-weight="400" fill="#087f75">u8</text>
+<text x="580" y="659" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="19" font-weight="400" fill="#172126">有效地址窗口数，最多 3</text>
+<text x="62" y="695" font-family="Menlo, Consolas, PingFang SC, Microsoft YaHei, monospace" font-size="21" font-weight="700" fill="#172126">intx_route_count</text>
+<text x="356" y="695" font-family="Menlo, Consolas, PingFang SC, Microsoft YaHei, monospace" font-size="19" font-weight="400" fill="#087f75">u8</text>
+<text x="580" y="695" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="19" font-weight="400" fill="#172126">有效中断路由数，最多 16</text>
+<text x="62" y="731" font-family="Menlo, Consolas, PingFang SC, Microsoft YaHei, monospace" font-size="21" font-weight="700" fill="#172126">interrupt_map_mask_hi</text>
+<text x="356" y="731" font-family="Menlo, Consolas, PingFang SC, Microsoft YaHei, monospace" font-size="19" font-weight="400" fill="#087f75">u32</text>
+<text x="580" y="731" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="19" font-weight="400" fill="#172126">PCI 地址匹配掩码</text>
+<text x="62" y="767" font-family="Menlo, Consolas, PingFang SC, Microsoft YaHei, monospace" font-size="21" font-weight="700" fill="#172126">interrupt_map_mask_pin</text>
+<text x="356" y="767" font-family="Menlo, Consolas, PingFang SC, Microsoft YaHei, monospace" font-size="19" font-weight="400" fill="#087f75">u32</text>
+<text x="580" y="767" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="19" font-weight="400" fill="#172126">中断引脚匹配掩码</text>
+<rect x="41" y="776" width="813" height="36" rx="0" fill="#edf8f5" stroke="none" stroke-width="1.5"/>
+<text x="62" y="803" font-family="Menlo, Consolas, PingFang SC, Microsoft YaHei, monospace" font-size="21" font-weight="700" fill="#172126">ranges</text>
+<text x="356" y="803" font-family="Menlo, Consolas, PingFang SC, Microsoft YaHei, monospace" font-size="19" font-weight="400" fill="#087f75">[PciRange; 3]</text>
+<text x="580" y="803" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="19" font-weight="400" fill="#172126">按值内嵌的地址窗口数组</text>
+<rect x="41" y="812" width="813" height="36" rx="0" fill="#edf8f5" stroke="none" stroke-width="1.5"/>
+<text x="62" y="839" font-family="Menlo, Consolas, PingFang SC, Microsoft YaHei, monospace" font-size="21" font-weight="700" fill="#172126">intx_routes</text>
+<text x="356" y="839" font-family="Menlo, Consolas, PingFang SC, Microsoft YaHei, monospace" font-size="19" font-weight="400" fill="#087f75">[PciIntxRoute; 16]</text>
+<text x="580" y="839" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="19" font-weight="400" fill="#172126">按值内嵌的中断路由数组</text>
+<text x="62" y="895" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="20" font-weight="400" fill="#52636b">*_count 指示数组有效项数；数组容量不等于有效条目数。</text>
+<text x="62" y="923" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="20" font-weight="400" fill="#52636b">当前 EL0 枚举器要求 bus_start = 0，扫描 bus 0。</text>
+<rect x="945" y="145" width="815" height="366" rx="12" fill="#fff" stroke="#dce4ec" stroke-width="1.5"/>
+<rect x="945" y="145" width="815" height="60" rx="10" fill="#087f75" stroke="none" stroke-width="1.5"/>
+<rect x="945" y="185" width="815" height="20" rx="0" fill="#087f75" stroke="none" stroke-width="1.5"/>
+<text x="967" y="185" font-family="Menlo, Consolas, PingFang SC, Microsoft YaHei, monospace" font-size="27" font-weight="700" fill="#fff">PciRange   × 3（容量上限）</text>
+<text x="967" y="240" font-family="Menlo, Consolas, PingFang SC, Microsoft YaHei, monospace" font-size="23" font-weight="700" fill="#172126">flags</text>
+<text x="1160" y="240" font-family="Menlo, Consolas, PingFang SC, Microsoft YaHei, monospace" font-size="21" font-weight="400" fill="#52636b">u32</text>
+<text x="1245" y="240" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="21" font-weight="400" fill="#172126">PCI 地址空间属性（如 32/64 位 MMIO）</text>
+<text x="967" y="283" font-family="Menlo, Consolas, PingFang SC, Microsoft YaHei, monospace" font-size="23" font-weight="700" fill="#172126">child_base</text>
+<text x="1160" y="283" font-family="Menlo, Consolas, PingFang SC, Microsoft YaHei, monospace" font-size="21" font-weight="400" fill="#52636b">u64</text>
+<text x="1245" y="283" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="21" font-weight="400" fill="#172126">PCI 总线侧窗口起点</text>
+<text x="967" y="326" font-family="Menlo, Consolas, PingFang SC, Microsoft YaHei, monospace" font-size="23" font-weight="700" fill="#172126">parent_base</text>
+<text x="1160" y="326" font-family="Menlo, Consolas, PingFang SC, Microsoft YaHei, monospace" font-size="21" font-weight="400" fill="#52636b">u64</text>
+<text x="1245" y="326" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="21" font-weight="400" fill="#172126">对应的 CPU 物理地址窗口起点</text>
+<text x="967" y="369" font-family="Menlo, Consolas, PingFang SC, Microsoft YaHei, monospace" font-size="23" font-weight="700" fill="#172126">size</text>
+<text x="1160" y="369" font-family="Menlo, Consolas, PingFang SC, Microsoft YaHei, monospace" font-size="21" font-weight="400" fill="#52636b">u64</text>
+<text x="1245" y="369" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="21" font-weight="400" fill="#172126">窗口长度，单位：字节</text>
+<rect x="965" y="389" width="775" height="87" rx="8" fill="#edf8f5" stroke="none" stroke-width="1.5"/>
+<text x="984" y="420" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="23" font-weight="700" fill="#087f75">BAR 总线地址 → CPU 物理地址</text>
+<text x="984" y="455" font-family="Menlo, Consolas, PingFang SC, Microsoft YaHei, monospace" font-size="24" font-weight="400" fill="#087f75">PA = parent_base + (BAR - child_base)</text>
+<text x="967" y="499" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="19" font-weight="400" fill="#52636b">转换前须检查 BAR 的完整范围落在该窗口内。</text>
+<rect x="945" y="525" width="815" height="408" rx="12" fill="#fff" stroke="#dce4ec" stroke-width="1.5"/>
+<rect x="945" y="525" width="815" height="60" rx="10" fill="#a84b00" stroke="none" stroke-width="1.5"/>
+<rect x="945" y="565" width="815" height="20" rx="0" fill="#a84b00" stroke="none" stroke-width="1.5"/>
+<text x="967" y="565" font-family="Menlo, Consolas, PingFang SC, Microsoft YaHei, monospace" font-size="27" font-weight="700" fill="#fff">PciIntxRoute   × 16（容量上限）</text>
+<text x="967" y="620" font-family="Menlo, Consolas, PingFang SC, Microsoft YaHei, monospace" font-size="22" font-weight="700" fill="#172126">child_address_hi</text>
+<text x="1200" y="620" font-family="Menlo, Consolas, PingFang SC, Microsoft YaHei, monospace" font-size="21" font-weight="400" fill="#52636b">u32</text>
+<text x="1272" y="620" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="20" font-weight="400" fill="#172126">PCI 子地址高位，含 BDF 匹配信息</text>
+<text x="967" y="663" font-family="Menlo, Consolas, PingFang SC, Microsoft YaHei, monospace" font-size="22" font-weight="700" fill="#172126">pin</text>
+<text x="1200" y="663" font-family="Menlo, Consolas, PingFang SC, Microsoft YaHei, monospace" font-size="21" font-weight="400" fill="#52636b">u32</text>
+<text x="1272" y="663" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="20" font-weight="400" fill="#172126">PCI 中断引脚：1–4 对应 INTA–INTD</text>
+<text x="967" y="706" font-family="Menlo, Consolas, PingFang SC, Microsoft YaHei, monospace" font-size="22" font-weight="700" fill="#172126">intid</text>
+<text x="1200" y="706" font-family="Menlo, Consolas, PingFang SC, Microsoft YaHei, monospace" font-size="21" font-weight="400" fill="#52636b">u32</text>
+<text x="1272" y="706" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="20" font-weight="400" fill="#172126">该路由对应的 GIC 中断号</text>
+<text x="967" y="749" font-family="Menlo, Consolas, PingFang SC, Microsoft YaHei, monospace" font-size="22" font-weight="700" fill="#172126">flags</text>
+<text x="1200" y="749" font-family="Menlo, Consolas, PingFang SC, Microsoft YaHei, monospace" font-size="21" font-weight="400" fill="#52636b">u32</text>
+<text x="1272" y="749" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="20" font-weight="400" fill="#172126">中断触发标志，供内核配置 GIC</text>
+<rect x="965" y="771" width="775" height="104" rx="8" fill="#fff4e6" stroke="none" stroke-width="1.5"/>
+<text x="984" y="805" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="22" font-weight="700" fill="#a84b00">PCI BDF + pin → 按主桥 mask 匹配 → GIC INTID</text>
+<text x="984" y="840" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="21" font-weight="400" fill="#172126">找到设备中断号后，仍需调用 IRQ_BIND 绑定通知。</text>
+<text x="967" y="912" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="19" font-weight="400" fill="#52636b">两种 flags 含义不同：上表为地址空间属性，此表为 IRQ 属性。</text>
+<polyline points="856,803 893,803 893,322 942,322" fill="none" stroke="#087f75" stroke-width="2.5"/>
+<polygon points="942,322 932,316 932,328" fill="#087f75"/>
+<polyline points="856,839 913,839 913,705 942,705" fill="none" stroke="#a84b00" stroke-width="2.5"/>
+<polygon points="942,705 932,699 932,711" fill="#a84b00"/>
+<text x="42" y="967" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="21" font-weight="400" fill="#52636b">所有结构均为 #[repr(C)]；仅展示实际字段，省略编译器对齐填充。字段按 ABI v12，不含旧版 irq_flags / bus_end。</text>
+<text x="42" y="993" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="18" font-weight="400" fill="#52636b">定义：abi/src/lib.rs · PCI 使用方式：libos/src/drivers/pci.rs · 所有嵌套关系均为按值内嵌，不是指针。</text>
+</svg>
