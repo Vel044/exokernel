@@ -8,7 +8,7 @@ const UART_IRQ_BADGE: u64 = 1;
 /// 这里不能进入永久 IRQ echo 循环，否则后续 xHCI 永远没有机会运行。
 /// 测试覆盖 EL0 UART MMIO 直写和 IRQ 授权绑定/解绑。映射会保留，供后续
 /// `runtime::puts()` 直接使用；任务退出时由 EL1 统一撤销。
-pub fn smoke_test(info: &exo_abi::UserBootInfo) -> Result<(), u64> {
+pub fn smoke_test(info: &crate::drivers::platform::DeviceInfo) -> Result<(), u64> {
     let resource = info.uart;
     crate::runtime::puts(b"[libos] 1. UART smoke test\r\n");
     crate::runtime::map_mmio(resource.base, resource.size, exo_abi::UART_VA)?;
@@ -46,7 +46,7 @@ pub fn smoke_test(info: &exo_abi::UserBootInfo) -> Result<(), u64> {
     Ok(())
 }
 
-pub fn run(info: &exo_abi::UserBootInfo) -> ! {
+pub fn run(info: &crate::drivers::platform::DeviceInfo) -> ! {
     let uart = info.uart;
     let uart_intid = uart.intid;
     crate::runtime::puts(b"[libos] UART pa=");

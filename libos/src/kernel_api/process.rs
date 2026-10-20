@@ -57,8 +57,7 @@ impl<'a> ProcessBuilder<'a> {
                 let object = frame::Frame::allocate(pages, 1)?;
                 // 临时 RW 映射只存在于当前 VSpace，便于把 ELF 文件内容复制到
                 // Frame。复制结束后先撤销 RW，再以最终 RX/RO/RW 权限映射给目标。
-                let temp_va = exo_abi::FRAME_ARENA_BASE
-                    + (index as u64 + 1) * 0x0200_0000;
+                let temp_va = exo_abi::FRAME_ARENA_BASE + (index as u64 + 1) * 0x0200_0000;
                 let temp = object.map(0, pages, temp_va, frame::Rights::READ_WRITE)?;
                 unsafe {
                     let dst = temp.as_ptr().add((segment.va & 0xfff) as usize);
@@ -96,22 +95,12 @@ impl<'a> ProcessBuilder<'a> {
             let stack_pages = exo_abi::USER_STACK_PAGES;
             let stack = frame::Frame::allocate(stack_pages, 1)?;
             let stack_temp_va = exo_abi::FRAME_ARENA_BASE + 0x0f00_0000;
-            let stack_temp = stack.map(
-                0,
-                stack_pages,
-                stack_temp_va,
-                frame::Rights::READ_WRITE,
-            )?;
+            let stack_temp = stack.map(0, stack_pages, stack_temp_va, frame::Rights::READ_WRITE)?;
             unsafe { core::ptr::write_bytes(stack_temp.as_ptr(), 0, stack_temp.len()) };
             stack_temp.unmap()?;
             let stack_va = exo_abi::USER_STACK_TOP - stack_pages * exo_abi::PAGE_SIZE;
-            let stack_mapping = stack.map_to(
-                &target,
-                0,
-                stack_pages,
-                stack_va,
-                frame::Rights::READ_WRITE,
-            )?;
+            let stack_mapping =
+                stack.map_to(&target, 0, stack_pages, stack_va, frame::Rights::READ_WRITE)?;
             frames.push(stack);
             mappings.push(stack_mapping);
 
@@ -210,10 +199,8 @@ fn parse_load_segments(image: &[u8]) -> Result<(u64, Vec<LoadSegment>), u64> {
         let memsz = read_u64_at(image, base + 40)?;
         if memsz == 0
             || filesz > memsz
-            || offset.checked_add(filesz).ok_or(exo_abi::SYS_ERR_INVALID)?
-                > image.len() as u64
-            || va.checked_add(memsz).ok_or(exo_abi::SYS_ERR_INVALID)?
-                > exo_abi::USER_BOOT_INFO_VA
+            || offset.checked_add(filesz).ok_or(exo_abi::SYS_ERR_INVALID)? > image.len() as u64
+            || va.checked_add(memsz).ok_or(exo_abi::SYS_ERR_INVALID)? > exo_abi::USER_BOOT_INFO_VA
             || va < exo_abi::USER_BASE
             || (flags & PF_W != 0 && flags & PF_X != 0)
         {

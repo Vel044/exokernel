@@ -53,7 +53,7 @@ pub struct BlockDevices {
 }
 
 impl BlockDevices {
-    pub fn discover(info: &exo_abi::UserBootInfo) -> Result<Self, u64> {
+    pub fn discover(info: &crate::drivers::platform::DeviceInfo) -> Result<Self, u64> {
         // 读取EL1传给EL0的virtio-mmio资源描述。
         let resource = info.virtio_mmio;
         // 检查MMIO地址、大小和页对齐是否有效。

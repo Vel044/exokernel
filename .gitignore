@@ -20,3 +20,16 @@ libos/libos.elf
 qemu/*.ext4
 qemu/*.log
 /robot-*.log
+__pycache__/
+*.py[cod]
+
+# 库的宿主测试生成物、镜像/对象文件与研究编译日志不进入源码仓库。
+/vendor/**/Cargo.lock
+*.o
+*.a
+*.efi
+*.bc
+*.img
+*.safetensors
+/docs/兼容性研究/PL011/compiled/*.log
+/docs/兼容性研究/PL011/compiled/*.o.cmd

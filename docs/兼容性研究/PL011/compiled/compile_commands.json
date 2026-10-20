@@ -1,0 +1,227 @@
+[
+  {
+    "command": "clang -Wp,-MMD,scripts/dtc/.dtc-lexer.lex.o.d -Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu11   -I /work/linux-6.12/scripts/include -I /work/linux-6.12/scripts/dtc/libfdt -DNO_YAML -I /work/linux-6.12/scripts/dtc -I ./scripts/dtc -c -o scripts/dtc/dtc-lexer.lex.o scripts/dtc/dtc-lexer.lex.c",
+    "directory": "/work/build-pl011-pio",
+    "file": "/work/build-pl011-pio/scripts/dtc/dtc-lexer.lex.c"
+  },
+  {
+    "command": "clang -Wp,-MMD,scripts/dtc/.dtc-parser.tab.o.d -Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu11   -I /work/linux-6.12/scripts/include -I /work/linux-6.12/scripts/dtc/libfdt -DNO_YAML -I /work/linux-6.12/scripts/dtc -I ./scripts/dtc -c -o scripts/dtc/dtc-parser.tab.o scripts/dtc/dtc-parser.tab.c",
+    "directory": "/work/build-pl011-pio",
+    "file": "/work/build-pl011-pio/scripts/dtc/dtc-parser.tab.c"
+  },
+  {
+    "command": "clang -Wp,-MMD,scripts/kconfig/.lexer.lex.o.d -Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu11   -I /work/linux-6.12/scripts/include  -I /work/linux-6.12/scripts/kconfig -I ./scripts/kconfig -c -o scripts/kconfig/lexer.lex.o scripts/kconfig/lexer.lex.c",
+    "directory": "/work/build-pl011-pio",
+    "file": "/work/build-pl011-pio/scripts/kconfig/lexer.lex.c"
+  },
+  {
+    "command": "clang -Wp,-MMD,scripts/kconfig/.parser.tab.o.d -Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu11   -I /work/linux-6.12/scripts/include  -I /work/linux-6.12/scripts/kconfig -I ./scripts/kconfig -c -o scripts/kconfig/parser.tab.o scripts/kconfig/parser.tab.c",
+    "directory": "/work/build-pl011-pio",
+    "file": "/work/build-pl011-pio/scripts/kconfig/parser.tab.c"
+  },
+  {
+    "command": "clang -Wp,-MMD,arch/arm64/kernel/vdso/.note.o.d -nostdinc -I/work/linux-6.12/arch/arm64/include -I./arch/arm64/include/generated -I/work/linux-6.12/include -I./include -I/work/linux-6.12/arch/arm64/include/uapi -I./arch/arm64/include/generated/uapi -I/work/linux-6.12/include/uapi -I./include/generated/uapi -include /work/linux-6.12/include/linux/compiler-version.h -include /work/linux-6.12/include/linux/kconfig.h -D__KERNEL__ --target=aarch64-linux-gnu -fintegrated-as -Werror=unknown-warning-option -Werror=ignored-optimization-argument -Werror=option-ignored -Werror=unused-command-line-argument -mlittle-endian -DKASAN_SHADOW_SCALE_SHIFT= -fmacro-prefix-map=/work/linux-6.12/= -D__ASSEMBLY__ -fno-PIE -fno-asynchronous-unwind-tables -fno-unwind-tables -DKASAN_SHADOW_SCALE_SHIFT= -I/work/linux-6.12/arch/arm64/kernel/vdso -Iarch/arm64/kernel/vdso    -DKBUILD_MODFILE='\"arch/arm64/kernel/vdso/note\"' -DKBUILD_MODNAME='\"note\"' -D__KBUILD_MODNAME=kmod_note -c -o arch/arm64/kernel/vdso/note.o /work/linux-6.12/arch/arm64/kernel/vdso/note.S",
+    "directory": "/work/build-pl011-pio",
+    "file": "/work/linux-6.12/arch/arm64/kernel/vdso/note.S"
+  },
+  {
+    "command": "clang -Wp,-MMD,arch/arm64/kernel/vdso/.sigreturn.o.d -nostdinc -I/work/linux-6.12/arch/arm64/include -I./arch/arm64/include/generated -I/work/linux-6.12/include -I./include -I/work/linux-6.12/arch/arm64/include/uapi -I./arch/arm64/include/generated/uapi -I/work/linux-6.12/include/uapi -I./include/generated/uapi -include /work/linux-6.12/include/linux/compiler-version.h -include /work/linux-6.12/include/linux/kconfig.h -D__KERNEL__ --target=aarch64-linux-gnu -fintegrated-as -Werror=unknown-warning-option -Werror=ignored-optimization-argument -Werror=option-ignored -Werror=unused-command-line-argument -mlittle-endian -DKASAN_SHADOW_SCALE_SHIFT= -fmacro-prefix-map=/work/linux-6.12/= -D__ASSEMBLY__ -fno-PIE -fno-asynchronous-unwind-tables -fno-unwind-tables -DKASAN_SHADOW_SCALE_SHIFT= -I/work/linux-6.12/arch/arm64/kernel/vdso -Iarch/arm64/kernel/vdso    -DKBUILD_MODFILE='\"arch/arm64/kernel/vdso/sigreturn\"' -DKBUILD_MODNAME='\"sigreturn\"' -D__KBUILD_MODNAME=kmod_sigreturn -c -o arch/arm64/kernel/vdso/sigreturn.o /work/linux-6.12/arch/arm64/kernel/vdso/sigreturn.S",
+    "directory": "/work/build-pl011-pio",
+    "file": "/work/linux-6.12/arch/arm64/kernel/vdso/sigreturn.S"
+  },
+  {
+    "command": "clang -Wp,-MMD,arch/arm64/kernel/vdso/.vgetrandom-chacha.o.d -nostdinc -I/work/linux-6.12/arch/arm64/include -I./arch/arm64/include/generated -I/work/linux-6.12/include -I./include -I/work/linux-6.12/arch/arm64/include/uapi -I./arch/arm64/include/generated/uapi -I/work/linux-6.12/include/uapi -I./include/generated/uapi -include /work/linux-6.12/include/linux/compiler-version.h -include /work/linux-6.12/include/linux/kconfig.h -D__KERNEL__ --target=aarch64-linux-gnu -fintegrated-as -Werror=unknown-warning-option -Werror=ignored-optimization-argument -Werror=option-ignored -Werror=unused-command-line-argument -mlittle-endian -DKASAN_SHADOW_SCALE_SHIFT= -fmacro-prefix-map=/work/linux-6.12/= -D__ASSEMBLY__ -fno-PIE -fno-asynchronous-unwind-tables -fno-unwind-tables -DKASAN_SHADOW_SCALE_SHIFT= -I/work/linux-6.12/arch/arm64/kernel/vdso -Iarch/arm64/kernel/vdso    -DKBUILD_MODFILE='\"arch/arm64/kernel/vdso/vgetrandom-chacha\"' -DKBUILD_MODNAME='\"vgetrandom_chacha\"' -D__KBUILD_MODNAME=kmod_vgetrandom_chacha -c -o arch/arm64/kernel/vdso/vgetrandom-chacha.o /work/linux-6.12/arch/arm64/kernel/vdso/vgetrandom-chacha.S",
+    "directory": "/work/build-pl011-pio",
+    "file": "/work/linux-6.12/arch/arm64/kernel/vdso/vgetrandom-chacha.S"
+  },
+  {
+    "command": "clang -Wp,-MMD,arch/arm64/kernel/vdso/.vgetrandom.o.d -nostdinc -I/work/linux-6.12/arch/arm64/include -I./arch/arm64/include/generated -I/work/linux-6.12/include -I./include -I/work/linux-6.12/arch/arm64/include/uapi -I./arch/arm64/include/generated/uapi -I/work/linux-6.12/include/uapi -I./include/generated/uapi -include /work/linux-6.12/include/linux/compiler-version.h -include /work/linux-6.12/include/linux/kconfig.h -include /work/linux-6.12/include/linux/compiler_types.h -D__KERNEL__ --target=aarch64-linux-gnu -fintegrated-as -Werror=unknown-warning-option -Werror=ignored-optimization-argument -Werror=option-ignored -Werror=unused-command-line-argument -mlittle-endian -DKASAN_SHADOW_SCALE_SHIFT= -fmacro-prefix-map=/work/linux-6.12/= -std=gnu11 -fshort-wchar -funsigned-char -fno-common -fno-PIE -fno-strict-aliasing -mgeneral-regs-only -DCONFIG_CC_HAS_K_CONSTRAINT=1 -Wno-psabi -fno-asynchronous-unwind-tables -fno-unwind-tables -mbranch-protection=none -Wa,-march=armv8.5-a -DARM64_ASM_ARCH='\"armv8.5-a\"' -DKASAN_SHADOW_SCALE_SHIFT= -fno-delete-null-pointer-checks -O2 -fno-stack-protector -fno-omit-frame-pointer -fno-optimize-sibling-calls -ftrivial-auto-var-init=zero -fno-stack-clash-protection -falign-functions=4 -fstrict-flex-arrays=3 -fno-strict-overflow -fno-stack-check -Wall -Wundef -Werror=implicit-function-declaration -Werror=implicit-int -Werror=return-type -Werror=strict-prototypes -Wno-format-security -Wno-trigraphs -Wno-frame-address -Wno-address-of-packed-member -Wframe-larger-than=2048 -Wno-gnu -Wvla -Wno-pointer-sign -Wcast-function-type -Wimplicit-fallthrough -Werror=date-time -Werror=incompatible-pointer-types -Wenum-conversion -Wextra -Wunused -Wno-unused-but-set-variable -Wno-unused-const-variable -Wno-format-overflow -Wno-format-overflow-non-kprintf -Wno-format-truncation-non-kprintf -Wno-override-init -Wno-pointer-to-enum-cast -Wno-tautological-constant-out-of-range-compare -Wno-unaligned-access -Wno-enum-compare-conditional -Wno-enum-enum-conversion -Wno-missing-field-initializers -Wno-type-limits -Wno-shift-negative-value -Wno-sign-compare -Wno-unused-parameter -g -fno-common -fno-builtin -fno-stack-protector -ffixed-x18 -DDISABLE_BRANCH_PROFILING -DBUILD_VDSO -O2 -mcmodel=tiny -fasynchronous-unwind-tables -include /work/linux-6.12/lib/vdso/getrandom.c -I/work/linux-6.12/arch/arm64/kernel/vdso -Iarch/arm64/kernel/vdso    -DKBUILD_MODFILE='\"arch/arm64/kernel/vdso/vgetrandom\"' -DKBUILD_BASENAME='\"vgetrandom\"' -DKBUILD_MODNAME='\"vgetrandom\"' -D__KBUILD_MODNAME=kmod_vgetrandom -c -o arch/arm64/kernel/vdso/vgetrandom.o /work/linux-6.12/arch/arm64/kernel/vdso/vgetrandom.c",
+    "directory": "/work/build-pl011-pio",
+    "file": "/work/linux-6.12/arch/arm64/kernel/vdso/vgetrandom.c"
+  },
+  {
+    "command": "clang -Wp,-MMD,arch/arm64/kernel/vdso/.vgettimeofday.o.d -nostdinc -I/work/linux-6.12/arch/arm64/include -I./arch/arm64/include/generated -I/work/linux-6.12/include -I./include -I/work/linux-6.12/arch/arm64/include/uapi -I./arch/arm64/include/generated/uapi -I/work/linux-6.12/include/uapi -I./include/generated/uapi -include /work/linux-6.12/include/linux/compiler-version.h -include /work/linux-6.12/include/linux/kconfig.h -include /work/linux-6.12/include/linux/compiler_types.h -D__KERNEL__ --target=aarch64-linux-gnu -fintegrated-as -Werror=unknown-warning-option -Werror=ignored-optimization-argument -Werror=option-ignored -Werror=unused-command-line-argument -mlittle-endian -DKASAN_SHADOW_SCALE_SHIFT= -fmacro-prefix-map=/work/linux-6.12/= -std=gnu11 -fshort-wchar -funsigned-char -fno-common -fno-PIE -fno-strict-aliasing -mgeneral-regs-only -DCONFIG_CC_HAS_K_CONSTRAINT=1 -Wno-psabi -fno-asynchronous-unwind-tables -fno-unwind-tables -mbranch-protection=none -Wa,-march=armv8.5-a -DARM64_ASM_ARCH='\"armv8.5-a\"' -DKASAN_SHADOW_SCALE_SHIFT= -fno-delete-null-pointer-checks -O2 -fno-stack-protector -fno-omit-frame-pointer -fno-optimize-sibling-calls -ftrivial-auto-var-init=zero -fno-stack-clash-protection -falign-functions=4 -fstrict-flex-arrays=3 -fno-strict-overflow -fno-stack-check -Wall -Wundef -Werror=implicit-function-declaration -Werror=implicit-int -Werror=return-type -Werror=strict-prototypes -Wno-format-security -Wno-trigraphs -Wno-frame-address -Wno-address-of-packed-member -Wframe-larger-than=2048 -Wno-gnu -Wvla -Wno-pointer-sign -Wcast-function-type -Wimplicit-fallthrough -Werror=date-time -Werror=incompatible-pointer-types -Wenum-conversion -Wextra -Wunused -Wno-unused-but-set-variable -Wno-unused-const-variable -Wno-format-overflow -Wno-format-overflow-non-kprintf -Wno-format-truncation-non-kprintf -Wno-override-init -Wno-pointer-to-enum-cast -Wno-tautological-constant-out-of-range-compare -Wno-unaligned-access -Wno-enum-compare-conditional -Wno-enum-enum-conversion -Wno-missing-field-initializers -Wno-type-limits -Wno-shift-negative-value -Wno-sign-compare -Wno-unused-parameter -g -fno-common -fno-builtin -fno-stack-protector -ffixed-x18 -DDISABLE_BRANCH_PROFILING -DBUILD_VDSO -O2 -mcmodel=tiny -fasynchronous-unwind-tables -include /work/linux-6.12/lib/vdso/gettimeofday.c -I/work/linux-6.12/arch/arm64/kernel/vdso -Iarch/arm64/kernel/vdso    -DKBUILD_MODFILE='\"arch/arm64/kernel/vdso/vgettimeofday\"' -DKBUILD_BASENAME='\"vgettimeofday\"' -DKBUILD_MODNAME='\"vgettimeofday\"' -D__KBUILD_MODNAME=kmod_vgettimeofday -c -o arch/arm64/kernel/vdso/vgettimeofday.o /work/linux-6.12/arch/arm64/kernel/vdso/vgettimeofday.c",
+    "directory": "/work/build-pl011-pio",
+    "file": "/work/linux-6.12/arch/arm64/kernel/vdso/vgettimeofday.c"
+  },
+  {
+    "command": "clang -Wp,-MMD,drivers/tty/serial/.amba-pl011.o.d -nostdinc -I/work/linux-6.12/arch/arm64/include -I./arch/arm64/include/generated -I/work/linux-6.12/include -I./include -I/work/linux-6.12/arch/arm64/include/uapi -I./arch/arm64/include/generated/uapi -I/work/linux-6.12/include/uapi -I./include/generated/uapi -include /work/linux-6.12/include/linux/compiler-version.h -include /work/linux-6.12/include/linux/kconfig.h -include /work/linux-6.12/include/linux/compiler_types.h -D__KERNEL__ --target=aarch64-linux-gnu -fintegrated-as -Werror=unknown-warning-option -Werror=ignored-optimization-argument -Werror=option-ignored -Werror=unused-command-line-argument -mlittle-endian -DKASAN_SHADOW_SCALE_SHIFT= -fmacro-prefix-map=/work/linux-6.12/= -std=gnu11 -fshort-wchar -funsigned-char -fno-common -fno-PIE -fno-strict-aliasing -mgeneral-regs-only -DCONFIG_CC_HAS_K_CONSTRAINT=1 -Wno-psabi -fno-asynchronous-unwind-tables -fno-unwind-tables -mbranch-protection=none -Wa,-march=armv8.5-a -DARM64_ASM_ARCH='\"armv8.5-a\"' -DKASAN_SHADOW_SCALE_SHIFT= -fno-delete-null-pointer-checks -O2 -fno-stack-protector -fno-omit-frame-pointer -fno-optimize-sibling-calls -ftrivial-auto-var-init=zero -fno-stack-clash-protection -falign-functions=4 -fstrict-flex-arrays=3 -fno-strict-overflow -fno-stack-check -Wall -Wundef -Werror=implicit-function-declaration -Werror=implicit-int -Werror=return-type -Werror=strict-prototypes -Wno-format-security -Wno-trigraphs -Wno-frame-address -Wno-address-of-packed-member -Wmissing-declarations -Wmissing-prototypes -Wframe-larger-than=2048 -Wno-gnu -Wvla -Wno-pointer-sign -Wcast-function-type -Wimplicit-fallthrough -Werror=date-time -Werror=incompatible-pointer-types -Wenum-conversion -Wextra -Wunused -Wno-unused-but-set-variable -Wno-unused-const-variable -Wno-format-overflow -Wno-format-overflow-non-kprintf -Wno-format-truncation-non-kprintf -Wno-override-init -Wno-pointer-to-enum-cast -Wno-tautological-constant-out-of-range-compare -Wno-unaligned-access -Wno-enum-compare-conditional -Wno-enum-enum-conversion -Wno-missing-field-initializers -Wno-type-limits -Wno-shift-negative-value -Wno-sign-compare -Wno-unused-parameter -g -I/work/linux-6.12/drivers/tty/serial -Idrivers/tty/serial    -DKBUILD_MODFILE='\"drivers/tty/serial/amba-pl011\"' -DKBUILD_BASENAME='\"amba_pl011\"' -DKBUILD_MODNAME='\"amba_pl011\"' -D__KBUILD_MODNAME=kmod_amba_pl011 -c -o drivers/tty/serial/amba-pl011.o /work/linux-6.12/drivers/tty/serial/amba-pl011.c",
+    "directory": "/work/build-pl011-pio",
+    "file": "/work/linux-6.12/drivers/tty/serial/amba-pl011.c"
+  },
+  {
+    "command": "clang -Wp,-MMD,drivers/tty/serial/.serial_base_bus.o.d -nostdinc -I/work/linux-6.12/arch/arm64/include -I./arch/arm64/include/generated -I/work/linux-6.12/include -I./include -I/work/linux-6.12/arch/arm64/include/uapi -I./arch/arm64/include/generated/uapi -I/work/linux-6.12/include/uapi -I./include/generated/uapi -include /work/linux-6.12/include/linux/compiler-version.h -include /work/linux-6.12/include/linux/kconfig.h -include /work/linux-6.12/include/linux/compiler_types.h -D__KERNEL__ --target=aarch64-linux-gnu -fintegrated-as -Werror=unknown-warning-option -Werror=ignored-optimization-argument -Werror=option-ignored -Werror=unused-command-line-argument -mlittle-endian -DKASAN_SHADOW_SCALE_SHIFT= -fmacro-prefix-map=/work/linux-6.12/= -std=gnu11 -fshort-wchar -funsigned-char -fno-common -fno-PIE -fno-strict-aliasing -mgeneral-regs-only -DCONFIG_CC_HAS_K_CONSTRAINT=1 -Wno-psabi -fno-asynchronous-unwind-tables -fno-unwind-tables -mbranch-protection=none -Wa,-march=armv8.5-a -DARM64_ASM_ARCH='\"armv8.5-a\"' -DKASAN_SHADOW_SCALE_SHIFT= -fno-delete-null-pointer-checks -O2 -fno-stack-protector -fno-omit-frame-pointer -fno-optimize-sibling-calls -ftrivial-auto-var-init=zero -fno-stack-clash-protection -falign-functions=4 -fstrict-flex-arrays=3 -fno-strict-overflow -fno-stack-check -Wall -Wundef -Werror=implicit-function-declaration -Werror=implicit-int -Werror=return-type -Werror=strict-prototypes -Wno-format-security -Wno-trigraphs -Wno-frame-address -Wno-address-of-packed-member -Wmissing-declarations -Wmissing-prototypes -Wframe-larger-than=2048 -Wno-gnu -Wvla -Wno-pointer-sign -Wcast-function-type -Wimplicit-fallthrough -Werror=date-time -Werror=incompatible-pointer-types -Wenum-conversion -Wextra -Wunused -Wno-unused-but-set-variable -Wno-unused-const-variable -Wno-format-overflow -Wno-format-overflow-non-kprintf -Wno-format-truncation-non-kprintf -Wno-override-init -Wno-pointer-to-enum-cast -Wno-tautological-constant-out-of-range-compare -Wno-unaligned-access -Wno-enum-compare-conditional -Wno-enum-enum-conversion -Wno-missing-field-initializers -Wno-type-limits -Wno-shift-negative-value -Wno-sign-compare -Wno-unused-parameter -g -I/work/linux-6.12/drivers/tty/serial -Idrivers/tty/serial    -DKBUILD_MODFILE='\"drivers/tty/serial/serial_base\"' -DKBUILD_BASENAME='\"serial_base_bus\"' -DKBUILD_MODNAME='\"serial_base\"' -D__KBUILD_MODNAME=kmod_serial_base -c -o drivers/tty/serial/serial_base_bus.o /work/linux-6.12/drivers/tty/serial/serial_base_bus.c",
+    "directory": "/work/build-pl011-pio",
+    "file": "/work/linux-6.12/drivers/tty/serial/serial_base_bus.c"
+  },
+  {
+    "command": "clang -Wp,-MMD,drivers/tty/serial/.serial_core.o.d -nostdinc -I/work/linux-6.12/arch/arm64/include -I./arch/arm64/include/generated -I/work/linux-6.12/include -I./include -I/work/linux-6.12/arch/arm64/include/uapi -I./arch/arm64/include/generated/uapi -I/work/linux-6.12/include/uapi -I./include/generated/uapi -include /work/linux-6.12/include/linux/compiler-version.h -include /work/linux-6.12/include/linux/kconfig.h -include /work/linux-6.12/include/linux/compiler_types.h -D__KERNEL__ --target=aarch64-linux-gnu -fintegrated-as -Werror=unknown-warning-option -Werror=ignored-optimization-argument -Werror=option-ignored -Werror=unused-command-line-argument -mlittle-endian -DKASAN_SHADOW_SCALE_SHIFT= -fmacro-prefix-map=/work/linux-6.12/= -std=gnu11 -fshort-wchar -funsigned-char -fno-common -fno-PIE -fno-strict-aliasing -mgeneral-regs-only -DCONFIG_CC_HAS_K_CONSTRAINT=1 -Wno-psabi -fno-asynchronous-unwind-tables -fno-unwind-tables -mbranch-protection=none -Wa,-march=armv8.5-a -DARM64_ASM_ARCH='\"armv8.5-a\"' -DKASAN_SHADOW_SCALE_SHIFT= -fno-delete-null-pointer-checks -O2 -fno-stack-protector -fno-omit-frame-pointer -fno-optimize-sibling-calls -ftrivial-auto-var-init=zero -fno-stack-clash-protection -falign-functions=4 -fstrict-flex-arrays=3 -fno-strict-overflow -fno-stack-check -Wall -Wundef -Werror=implicit-function-declaration -Werror=implicit-int -Werror=return-type -Werror=strict-prototypes -Wno-format-security -Wno-trigraphs -Wno-frame-address -Wno-address-of-packed-member -Wmissing-declarations -Wmissing-prototypes -Wframe-larger-than=2048 -Wno-gnu -Wvla -Wno-pointer-sign -Wcast-function-type -Wimplicit-fallthrough -Werror=date-time -Werror=incompatible-pointer-types -Wenum-conversion -Wextra -Wunused -Wno-unused-but-set-variable -Wno-unused-const-variable -Wno-format-overflow -Wno-format-overflow-non-kprintf -Wno-format-truncation-non-kprintf -Wno-override-init -Wno-pointer-to-enum-cast -Wno-tautological-constant-out-of-range-compare -Wno-unaligned-access -Wno-enum-compare-conditional -Wno-enum-enum-conversion -Wno-missing-field-initializers -Wno-type-limits -Wno-shift-negative-value -Wno-sign-compare -Wno-unused-parameter -g -I/work/linux-6.12/drivers/tty/serial -Idrivers/tty/serial    -DKBUILD_MODFILE='\"drivers/tty/serial/serial_base\"' -DKBUILD_BASENAME='\"serial_core\"' -DKBUILD_MODNAME='\"serial_base\"' -D__KBUILD_MODNAME=kmod_serial_base -c -o drivers/tty/serial/serial_core.o /work/linux-6.12/drivers/tty/serial/serial_core.c",
+    "directory": "/work/build-pl011-pio",
+    "file": "/work/linux-6.12/drivers/tty/serial/serial_core.c"
+  },
+  {
+    "command": "clang -Wp,-MMD,drivers/tty/serial/.serial_ctrl.o.d -nostdinc -I/work/linux-6.12/arch/arm64/include -I./arch/arm64/include/generated -I/work/linux-6.12/include -I./include -I/work/linux-6.12/arch/arm64/include/uapi -I./arch/arm64/include/generated/uapi -I/work/linux-6.12/include/uapi -I./include/generated/uapi -include /work/linux-6.12/include/linux/compiler-version.h -include /work/linux-6.12/include/linux/kconfig.h -include /work/linux-6.12/include/linux/compiler_types.h -D__KERNEL__ --target=aarch64-linux-gnu -fintegrated-as -Werror=unknown-warning-option -Werror=ignored-optimization-argument -Werror=option-ignored -Werror=unused-command-line-argument -mlittle-endian -DKASAN_SHADOW_SCALE_SHIFT= -fmacro-prefix-map=/work/linux-6.12/= -std=gnu11 -fshort-wchar -funsigned-char -fno-common -fno-PIE -fno-strict-aliasing -mgeneral-regs-only -DCONFIG_CC_HAS_K_CONSTRAINT=1 -Wno-psabi -fno-asynchronous-unwind-tables -fno-unwind-tables -mbranch-protection=none -Wa,-march=armv8.5-a -DARM64_ASM_ARCH='\"armv8.5-a\"' -DKASAN_SHADOW_SCALE_SHIFT= -fno-delete-null-pointer-checks -O2 -fno-stack-protector -fno-omit-frame-pointer -fno-optimize-sibling-calls -ftrivial-auto-var-init=zero -fno-stack-clash-protection -falign-functions=4 -fstrict-flex-arrays=3 -fno-strict-overflow -fno-stack-check -Wall -Wundef -Werror=implicit-function-declaration -Werror=implicit-int -Werror=return-type -Werror=strict-prototypes -Wno-format-security -Wno-trigraphs -Wno-frame-address -Wno-address-of-packed-member -Wmissing-declarations -Wmissing-prototypes -Wframe-larger-than=2048 -Wno-gnu -Wvla -Wno-pointer-sign -Wcast-function-type -Wimplicit-fallthrough -Werror=date-time -Werror=incompatible-pointer-types -Wenum-conversion -Wextra -Wunused -Wno-unused-but-set-variable -Wno-unused-const-variable -Wno-format-overflow -Wno-format-overflow-non-kprintf -Wno-format-truncation-non-kprintf -Wno-override-init -Wno-pointer-to-enum-cast -Wno-tautological-constant-out-of-range-compare -Wno-unaligned-access -Wno-enum-compare-conditional -Wno-enum-enum-conversion -Wno-missing-field-initializers -Wno-type-limits -Wno-shift-negative-value -Wno-sign-compare -Wno-unused-parameter -g -I/work/linux-6.12/drivers/tty/serial -Idrivers/tty/serial    -DKBUILD_MODFILE='\"drivers/tty/serial/serial_base\"' -DKBUILD_BASENAME='\"serial_ctrl\"' -DKBUILD_MODNAME='\"serial_base\"' -D__KBUILD_MODNAME=kmod_serial_base -c -o drivers/tty/serial/serial_ctrl.o /work/linux-6.12/drivers/tty/serial/serial_ctrl.c",
+    "directory": "/work/build-pl011-pio",
+    "file": "/work/linux-6.12/drivers/tty/serial/serial_ctrl.c"
+  },
+  {
+    "command": "clang -Wp,-MMD,drivers/tty/serial/.serial_port.o.d -nostdinc -I/work/linux-6.12/arch/arm64/include -I./arch/arm64/include/generated -I/work/linux-6.12/include -I./include -I/work/linux-6.12/arch/arm64/include/uapi -I./arch/arm64/include/generated/uapi -I/work/linux-6.12/include/uapi -I./include/generated/uapi -include /work/linux-6.12/include/linux/compiler-version.h -include /work/linux-6.12/include/linux/kconfig.h -include /work/linux-6.12/include/linux/compiler_types.h -D__KERNEL__ --target=aarch64-linux-gnu -fintegrated-as -Werror=unknown-warning-option -Werror=ignored-optimization-argument -Werror=option-ignored -Werror=unused-command-line-argument -mlittle-endian -DKASAN_SHADOW_SCALE_SHIFT= -fmacro-prefix-map=/work/linux-6.12/= -std=gnu11 -fshort-wchar -funsigned-char -fno-common -fno-PIE -fno-strict-aliasing -mgeneral-regs-only -DCONFIG_CC_HAS_K_CONSTRAINT=1 -Wno-psabi -fno-asynchronous-unwind-tables -fno-unwind-tables -mbranch-protection=none -Wa,-march=armv8.5-a -DARM64_ASM_ARCH='\"armv8.5-a\"' -DKASAN_SHADOW_SCALE_SHIFT= -fno-delete-null-pointer-checks -O2 -fno-stack-protector -fno-omit-frame-pointer -fno-optimize-sibling-calls -ftrivial-auto-var-init=zero -fno-stack-clash-protection -falign-functions=4 -fstrict-flex-arrays=3 -fno-strict-overflow -fno-stack-check -Wall -Wundef -Werror=implicit-function-declaration -Werror=implicit-int -Werror=return-type -Werror=strict-prototypes -Wno-format-security -Wno-trigraphs -Wno-frame-address -Wno-address-of-packed-member -Wmissing-declarations -Wmissing-prototypes -Wframe-larger-than=2048 -Wno-gnu -Wvla -Wno-pointer-sign -Wcast-function-type -Wimplicit-fallthrough -Werror=date-time -Werror=incompatible-pointer-types -Wenum-conversion -Wextra -Wunused -Wno-unused-but-set-variable -Wno-unused-const-variable -Wno-format-overflow -Wno-format-overflow-non-kprintf -Wno-format-truncation-non-kprintf -Wno-override-init -Wno-pointer-to-enum-cast -Wno-tautological-constant-out-of-range-compare -Wno-unaligned-access -Wno-enum-compare-conditional -Wno-enum-enum-conversion -Wno-missing-field-initializers -Wno-type-limits -Wno-shift-negative-value -Wno-sign-compare -Wno-unused-parameter -g -I/work/linux-6.12/drivers/tty/serial -Idrivers/tty/serial    -DKBUILD_MODFILE='\"drivers/tty/serial/serial_base\"' -DKBUILD_BASENAME='\"serial_port\"' -DKBUILD_MODNAME='\"serial_base\"' -D__KBUILD_MODNAME=kmod_serial_base -c -o drivers/tty/serial/serial_port.o /work/linux-6.12/drivers/tty/serial/serial_port.c",
+    "directory": "/work/build-pl011-pio",
+    "file": "/work/linux-6.12/drivers/tty/serial/serial_port.c"
+  },
+  {
+    "command": "clang -Wp,-MMD,scripts/dtc/.checks.o.d -Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu11   -I /work/linux-6.12/scripts/include -I /work/linux-6.12/scripts/dtc/libfdt -DNO_YAML  -I ./scripts/dtc -c -o scripts/dtc/checks.o /work/linux-6.12/scripts/dtc/checks.c",
+    "directory": "/work/build-pl011-pio",
+    "file": "/work/linux-6.12/scripts/dtc/checks.c"
+  },
+  {
+    "command": "clang -Wp,-MMD,scripts/dtc/.data.o.d -Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu11   -I /work/linux-6.12/scripts/include -I /work/linux-6.12/scripts/dtc/libfdt -DNO_YAML  -I ./scripts/dtc -c -o scripts/dtc/data.o /work/linux-6.12/scripts/dtc/data.c",
+    "directory": "/work/build-pl011-pio",
+    "file": "/work/linux-6.12/scripts/dtc/data.c"
+  },
+  {
+    "command": "clang -Wp,-MMD,scripts/dtc/.dtc.o.d -Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu11   -I /work/linux-6.12/scripts/include -I /work/linux-6.12/scripts/dtc/libfdt -DNO_YAML  -I ./scripts/dtc -c -o scripts/dtc/dtc.o /work/linux-6.12/scripts/dtc/dtc.c",
+    "directory": "/work/build-pl011-pio",
+    "file": "/work/linux-6.12/scripts/dtc/dtc.c"
+  },
+  {
+    "command": "clang -Wp,-MMD,scripts/dtc/.fdtoverlay.o.d -Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu11   -I /work/linux-6.12/scripts/include -I /work/linux-6.12/scripts/dtc/libfdt -DNO_YAML  -I ./scripts/dtc -c -o scripts/dtc/fdtoverlay.o /work/linux-6.12/scripts/dtc/fdtoverlay.c",
+    "directory": "/work/build-pl011-pio",
+    "file": "/work/linux-6.12/scripts/dtc/fdtoverlay.c"
+  },
+  {
+    "command": "clang -Wp,-MMD,scripts/dtc/.flattree.o.d -Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu11   -I /work/linux-6.12/scripts/include -I /work/linux-6.12/scripts/dtc/libfdt -DNO_YAML  -I ./scripts/dtc -c -o scripts/dtc/flattree.o /work/linux-6.12/scripts/dtc/flattree.c",
+    "directory": "/work/build-pl011-pio",
+    "file": "/work/linux-6.12/scripts/dtc/flattree.c"
+  },
+  {
+    "command": "clang -Wp,-MMD,scripts/dtc/.fstree.o.d -Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu11   -I /work/linux-6.12/scripts/include -I /work/linux-6.12/scripts/dtc/libfdt -DNO_YAML  -I ./scripts/dtc -c -o scripts/dtc/fstree.o /work/linux-6.12/scripts/dtc/fstree.c",
+    "directory": "/work/build-pl011-pio",
+    "file": "/work/linux-6.12/scripts/dtc/fstree.c"
+  },
+  {
+    "command": "clang -Wp,-MMD,scripts/dtc/libfdt/.fdt.o.d -Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu11   -I /work/linux-6.12/scripts/include -I /work/linux-6.12/scripts/dtc/libfdt -DNO_YAML  -I ./scripts/dtc -c -o scripts/dtc/libfdt/fdt.o /work/linux-6.12/scripts/dtc/libfdt/fdt.c",
+    "directory": "/work/build-pl011-pio",
+    "file": "/work/linux-6.12/scripts/dtc/libfdt/fdt.c"
+  },
+  {
+    "command": "clang -Wp,-MMD,scripts/dtc/libfdt/.fdt_addresses.o.d -Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu11   -I /work/linux-6.12/scripts/include -I /work/linux-6.12/scripts/dtc/libfdt -DNO_YAML  -I ./scripts/dtc -c -o scripts/dtc/libfdt/fdt_addresses.o /work/linux-6.12/scripts/dtc/libfdt/fdt_addresses.c",
+    "directory": "/work/build-pl011-pio",
+    "file": "/work/linux-6.12/scripts/dtc/libfdt/fdt_addresses.c"
+  },
+  {
+    "command": "clang -Wp,-MMD,scripts/dtc/libfdt/.fdt_empty_tree.o.d -Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu11   -I /work/linux-6.12/scripts/include -I /work/linux-6.12/scripts/dtc/libfdt -DNO_YAML  -I ./scripts/dtc -c -o scripts/dtc/libfdt/fdt_empty_tree.o /work/linux-6.12/scripts/dtc/libfdt/fdt_empty_tree.c",
+    "directory": "/work/build-pl011-pio",
+    "file": "/work/linux-6.12/scripts/dtc/libfdt/fdt_empty_tree.c"
+  },
+  {
+    "command": "clang -Wp,-MMD,scripts/dtc/libfdt/.fdt_overlay.o.d -Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu11   -I /work/linux-6.12/scripts/include -I /work/linux-6.12/scripts/dtc/libfdt -DNO_YAML  -I ./scripts/dtc -c -o scripts/dtc/libfdt/fdt_overlay.o /work/linux-6.12/scripts/dtc/libfdt/fdt_overlay.c",
+    "directory": "/work/build-pl011-pio",
+    "file": "/work/linux-6.12/scripts/dtc/libfdt/fdt_overlay.c"
+  },
+  {
+    "command": "clang -Wp,-MMD,scripts/dtc/libfdt/.fdt_ro.o.d -Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu11   -I /work/linux-6.12/scripts/include -I /work/linux-6.12/scripts/dtc/libfdt -DNO_YAML  -I ./scripts/dtc -c -o scripts/dtc/libfdt/fdt_ro.o /work/linux-6.12/scripts/dtc/libfdt/fdt_ro.c",
+    "directory": "/work/build-pl011-pio",
+    "file": "/work/linux-6.12/scripts/dtc/libfdt/fdt_ro.c"
+  },
+  {
+    "command": "clang -Wp,-MMD,scripts/dtc/libfdt/.fdt_rw.o.d -Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu11   -I /work/linux-6.12/scripts/include -I /work/linux-6.12/scripts/dtc/libfdt -DNO_YAML  -I ./scripts/dtc -c -o scripts/dtc/libfdt/fdt_rw.o /work/linux-6.12/scripts/dtc/libfdt/fdt_rw.c",
+    "directory": "/work/build-pl011-pio",
+    "file": "/work/linux-6.12/scripts/dtc/libfdt/fdt_rw.c"
+  },
+  {
+    "command": "clang -Wp,-MMD,scripts/dtc/libfdt/.fdt_strerror.o.d -Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu11   -I /work/linux-6.12/scripts/include -I /work/linux-6.12/scripts/dtc/libfdt -DNO_YAML  -I ./scripts/dtc -c -o scripts/dtc/libfdt/fdt_strerror.o /work/linux-6.12/scripts/dtc/libfdt/fdt_strerror.c",
+    "directory": "/work/build-pl011-pio",
+    "file": "/work/linux-6.12/scripts/dtc/libfdt/fdt_strerror.c"
+  },
+  {
+    "command": "clang -Wp,-MMD,scripts/dtc/libfdt/.fdt_sw.o.d -Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu11   -I /work/linux-6.12/scripts/include -I /work/linux-6.12/scripts/dtc/libfdt -DNO_YAML  -I ./scripts/dtc -c -o scripts/dtc/libfdt/fdt_sw.o /work/linux-6.12/scripts/dtc/libfdt/fdt_sw.c",
+    "directory": "/work/build-pl011-pio",
+    "file": "/work/linux-6.12/scripts/dtc/libfdt/fdt_sw.c"
+  },
+  {
+    "command": "clang -Wp,-MMD,scripts/dtc/libfdt/.fdt_wip.o.d -Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu11   -I /work/linux-6.12/scripts/include -I /work/linux-6.12/scripts/dtc/libfdt -DNO_YAML  -I ./scripts/dtc -c -o scripts/dtc/libfdt/fdt_wip.o /work/linux-6.12/scripts/dtc/libfdt/fdt_wip.c",
+    "directory": "/work/build-pl011-pio",
+    "file": "/work/linux-6.12/scripts/dtc/libfdt/fdt_wip.c"
+  },
+  {
+    "command": "clang -Wp,-MMD,scripts/dtc/.livetree.o.d -Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu11   -I /work/linux-6.12/scripts/include -I /work/linux-6.12/scripts/dtc/libfdt -DNO_YAML  -I ./scripts/dtc -c -o scripts/dtc/livetree.o /work/linux-6.12/scripts/dtc/livetree.c",
+    "directory": "/work/build-pl011-pio",
+    "file": "/work/linux-6.12/scripts/dtc/livetree.c"
+  },
+  {
+    "command": "clang -Wp,-MMD,scripts/dtc/.srcpos.o.d -Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu11   -I /work/linux-6.12/scripts/include -I /work/linux-6.12/scripts/dtc/libfdt -DNO_YAML  -I ./scripts/dtc -c -o scripts/dtc/srcpos.o /work/linux-6.12/scripts/dtc/srcpos.c",
+    "directory": "/work/build-pl011-pio",
+    "file": "/work/linux-6.12/scripts/dtc/srcpos.c"
+  },
+  {
+    "command": "clang -Wp,-MMD,scripts/dtc/.treesource.o.d -Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu11   -I /work/linux-6.12/scripts/include -I /work/linux-6.12/scripts/dtc/libfdt -DNO_YAML  -I ./scripts/dtc -c -o scripts/dtc/treesource.o /work/linux-6.12/scripts/dtc/treesource.c",
+    "directory": "/work/build-pl011-pio",
+    "file": "/work/linux-6.12/scripts/dtc/treesource.c"
+  },
+  {
+    "command": "clang -Wp,-MMD,scripts/dtc/.util.o.d -Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu11   -I /work/linux-6.12/scripts/include -I /work/linux-6.12/scripts/dtc/libfdt -DNO_YAML  -I ./scripts/dtc -c -o scripts/dtc/util.o /work/linux-6.12/scripts/dtc/util.c",
+    "directory": "/work/build-pl011-pio",
+    "file": "/work/linux-6.12/scripts/dtc/util.c"
+  },
+  {
+    "command": "clang -Wp,-MMD,scripts/kconfig/.conf.o.d -Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu11   -I /work/linux-6.12/scripts/include   -I ./scripts/kconfig -c -o scripts/kconfig/conf.o /work/linux-6.12/scripts/kconfig/conf.c",
+    "directory": "/work/build-pl011-pio",
+    "file": "/work/linux-6.12/scripts/kconfig/conf.c"
+  },
+  {
+    "command": "clang -Wp,-MMD,scripts/kconfig/.confdata.o.d -Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu11   -I /work/linux-6.12/scripts/include   -I ./scripts/kconfig -c -o scripts/kconfig/confdata.o /work/linux-6.12/scripts/kconfig/confdata.c",
+    "directory": "/work/build-pl011-pio",
+    "file": "/work/linux-6.12/scripts/kconfig/confdata.c"
+  },
+  {
+    "command": "clang -Wp,-MMD,scripts/kconfig/.expr.o.d -Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu11   -I /work/linux-6.12/scripts/include   -I ./scripts/kconfig -c -o scripts/kconfig/expr.o /work/linux-6.12/scripts/kconfig/expr.c",
+    "directory": "/work/build-pl011-pio",
+    "file": "/work/linux-6.12/scripts/kconfig/expr.c"
+  },
+  {
+    "command": "clang -Wp,-MMD,scripts/kconfig/.menu.o.d -Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu11   -I /work/linux-6.12/scripts/include   -I ./scripts/kconfig -c -o scripts/kconfig/menu.o /work/linux-6.12/scripts/kconfig/menu.c",
+    "directory": "/work/build-pl011-pio",
+    "file": "/work/linux-6.12/scripts/kconfig/menu.c"
+  },
+  {
+    "command": "clang -Wp,-MMD,scripts/kconfig/.preprocess.o.d -Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu11   -I /work/linux-6.12/scripts/include   -I ./scripts/kconfig -c -o scripts/kconfig/preprocess.o /work/linux-6.12/scripts/kconfig/preprocess.c",
+    "directory": "/work/build-pl011-pio",
+    "file": "/work/linux-6.12/scripts/kconfig/preprocess.c"
+  },
+  {
+    "command": "clang -Wp,-MMD,scripts/kconfig/.symbol.o.d -Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu11   -I /work/linux-6.12/scripts/include   -I ./scripts/kconfig -c -o scripts/kconfig/symbol.o /work/linux-6.12/scripts/kconfig/symbol.c",
+    "directory": "/work/build-pl011-pio",
+    "file": "/work/linux-6.12/scripts/kconfig/symbol.c"
+  },
+  {
+    "command": "clang -Wp,-MMD,scripts/kconfig/.util.o.d -Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu11   -I /work/linux-6.12/scripts/include   -I ./scripts/kconfig -c -o scripts/kconfig/util.o /work/linux-6.12/scripts/kconfig/util.c",
+    "directory": "/work/build-pl011-pio",
+    "file": "/work/linux-6.12/scripts/kconfig/util.c"
+  },
+  {
+    "command": "clang -Wp,-MMD,scripts/mod/.empty.o.d -nostdinc -I/work/linux-6.12/arch/arm64/include -I./arch/arm64/include/generated -I/work/linux-6.12/include -I./include -I/work/linux-6.12/arch/arm64/include/uapi -I./arch/arm64/include/generated/uapi -I/work/linux-6.12/include/uapi -I./include/generated/uapi -include /work/linux-6.12/include/linux/compiler-version.h -include /work/linux-6.12/include/linux/kconfig.h -include /work/linux-6.12/include/linux/compiler_types.h -D__KERNEL__ --target=aarch64-linux-gnu -fintegrated-as -Werror=unknown-warning-option -Werror=ignored-optimization-argument -Werror=option-ignored -Werror=unused-command-line-argument -mlittle-endian -DKASAN_SHADOW_SCALE_SHIFT= -fmacro-prefix-map=/work/linux-6.12/= -std=gnu11 -fshort-wchar -funsigned-char -fno-common -fno-PIE -fno-strict-aliasing -mgeneral-regs-only -DCONFIG_CC_HAS_K_CONSTRAINT=1 -Wno-psabi -fno-asynchronous-unwind-tables -fno-unwind-tables -mbranch-protection=none -Wa,-march=armv8.5-a -DARM64_ASM_ARCH='\"armv8.5-a\"' -DKASAN_SHADOW_SCALE_SHIFT= -fno-delete-null-pointer-checks -O2 -fno-stack-protector -fno-omit-frame-pointer -fno-optimize-sibling-calls -ftrivial-auto-var-init=zero -fno-stack-clash-protection -falign-functions=4 -fstrict-flex-arrays=3 -fno-strict-overflow -fno-stack-check -Wall -Wundef -Werror=implicit-function-declaration -Werror=implicit-int -Werror=return-type -Werror=strict-prototypes -Wno-format-security -Wno-trigraphs -Wno-frame-address -Wno-address-of-packed-member -Wmissing-declarations -Wmissing-prototypes -Wframe-larger-than=2048 -Wno-gnu -Wvla -Wno-pointer-sign -Wcast-function-type -Wimplicit-fallthrough -Werror=date-time -Werror=incompatible-pointer-types -Wenum-conversion -Wextra -Wunused -Wno-unused-but-set-variable -Wno-unused-const-variable -Wno-format-overflow -Wno-format-overflow-non-kprintf -Wno-format-truncation-non-kprintf -Wno-override-init -Wno-pointer-to-enum-cast -Wno-tautological-constant-out-of-range-compare -Wno-unaligned-access -Wno-enum-compare-conditional -Wno-enum-enum-conversion -Wno-missing-field-initializers -Wno-type-limits -Wno-shift-negative-value -Wno-sign-compare -Wno-unused-parameter -g -I/work/linux-6.12/scripts/mod -Iscripts/mod    -DKBUILD_MODFILE='\"scripts/mod/empty\"' -DKBUILD_BASENAME='\"empty\"' -DKBUILD_MODNAME='\"empty\"' -D__KBUILD_MODNAME=kmod_empty -c -o scripts/mod/empty.o /work/linux-6.12/scripts/mod/empty.c",
+    "directory": "/work/build-pl011-pio",
+    "file": "/work/linux-6.12/scripts/mod/empty.c"
+  },
+  {
+    "command": "clang -Wp,-MMD,scripts/mod/.file2alias.o.d -Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu11   -I /work/linux-6.12/scripts/include   -I ./scripts/mod -c -o scripts/mod/file2alias.o /work/linux-6.12/scripts/mod/file2alias.c",
+    "directory": "/work/build-pl011-pio",
+    "file": "/work/linux-6.12/scripts/mod/file2alias.c"
+  },
+  {
+    "command": "clang -Wp,-MMD,scripts/mod/.modpost.o.d -Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu11   -I /work/linux-6.12/scripts/include   -I ./scripts/mod -c -o scripts/mod/modpost.o /work/linux-6.12/scripts/mod/modpost.c",
+    "directory": "/work/build-pl011-pio",
+    "file": "/work/linux-6.12/scripts/mod/modpost.c"
+  },
+  {
+    "command": "clang -Wp,-MMD,scripts/mod/.sumversion.o.d -Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu11   -I /work/linux-6.12/scripts/include   -I ./scripts/mod -c -o scripts/mod/sumversion.o /work/linux-6.12/scripts/mod/sumversion.c",
+    "directory": "/work/build-pl011-pio",
+    "file": "/work/linux-6.12/scripts/mod/sumversion.c"
+  },
+  {
+    "command": "clang -Wp,-MMD,scripts/mod/.symsearch.o.d -Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu11   -I /work/linux-6.12/scripts/include   -I ./scripts/mod -c -o scripts/mod/symsearch.o /work/linux-6.12/scripts/mod/symsearch.c",
+    "directory": "/work/build-pl011-pio",
+    "file": "/work/linux-6.12/scripts/mod/symsearch.c"
+  }
+]

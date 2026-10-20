@@ -1,2 +1,6 @@
 [target.aarch64-unknown-none]
 rustflags = ["-C", "link-arg=-Tlibos/link.ld"]
+
+# UEFI/EBS后到EL1页表开启前按Device属性访问内存；禁止生成未对齐宽访问。
+[target.aarch64-unknown-uefi]
+rustflags = ["-C", "target-feature=+strict-align"]

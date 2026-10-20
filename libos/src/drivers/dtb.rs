@@ -1,261 +1,340 @@
-//! EL0 设备树查询。
+//! EL0 完整设备树解析与设备目录生成。
 //!
-//! `fdt` crate 负责校验 FDT、遍历节点、解析属性和 alias。这里仅保留
-//! 两类与当前外核 ABI 相关的逻辑：
-//! 1. 沿父总线 `ranges` 把设备地址翻译成 CPU 物理地址；
-//! 2. 把 GIC 的 `<type, hwirq, flags>` 转换为 INTID。
+//! 输入是 EL1 只读映射的有界 DTB 字节；先校验容器和节点边界，再由 fdt
+//! 遍历属性。地址翻译、设备选择和 PCI 路由都在 EL0，不据此授予访问权限。
 
+use super::platform::*;
+use alloc::{format, string::String, vec::Vec};
 use fdt::{node::FdtNode, Fdt};
 
-#[derive(Clone, Copy)]
-pub struct RegRange {
-    pub base: u64,
-    pub size: u64,
-}
-
-#[derive(Clone, Copy)]
-pub struct UartInfo {
-    pub reg: RegRange,
-    pub intid: u32,
-}
-
-#[derive(Clone, Copy)]
-#[repr(u64)]
+/// 不支持的设备布局明确失败，不猜测寄存器地址或中断号。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Error {
-    NullDtb = 1,
-    InvalidFdt = 2,
-    MissingChosen = 3,
-    MissingStdout = 4,
-    InvalidStdout = 5,
-    MissingAlias = 6,
-    MissingUartNode = 7,
-    DisabledUart = 8,
-    UnsupportedUart = 9,
-    MissingParent = 10,
-    MissingReg = 11,
-    InvalidReg = 12,
-    AddressTranslation = 13,
-    MissingInterrupt = 14,
-    InvalidInterrupt = 15,
+    InvalidFdt,
+    MissingUart,
+    InvalidResource,
+    UnsupportedInterrupt,
+    InvalidPci,
 }
 
-impl Error {
-    pub const fn code(self) -> u64 {
-        self as u64
-    }
-}
-
-pub fn find_stdout_uart(dtb_va: u64) -> Result<UartInfo, Error> {
-    if dtb_va == 0 {
-        return Err(Error::NullDtb);
-    }
-
-    // SAFETY: EL1 已把完整 DTB 只读映射到 dtb_va。
-    let tree = unsafe { Fdt::from_ptr(dtb_va as *const u8) }.map_err(|_| Error::InvalidFdt)?;
-
-    // tree.chosen().stdout() 能解析 stdout-path 但不会去掉 "serial0:115200n8"
-    // 里的波特率后缀。这里手动读 /chosen 的 stdout-path 属性值，用冒号分割得到
-    // 选择器，再通过 aliases 或直接路径找到 UART 节点。
-    let full_path = stdout_path(&tree)?;
-    let node = tree.find_node(full_path).ok_or(Error::MissingUartNode)?;
-
-    if node_is_disabled(node) {
-        return Err(Error::DisabledUart);
-    }
-    if !node_is_pl011(node) {
-        return Err(Error::UnsupportedUart);
-    }
-
-    let parent_path = parent_path(full_path);
-    let parent = tree.find_node(parent_path).ok_or(Error::MissingParent)?;
-    let parent_cells = parent.cell_sizes();
-    let reg = node.property("reg").ok_or(Error::MissingReg)?.value;
-    let (raw_base, size) = read_reg(reg, parent_cells.address_cells, parent_cells.size_cells)
-        .ok_or(Error::InvalidReg)?;
-    let base = translate_to_cpu(&tree, full_path, raw_base).ok_or(Error::AddressTranslation)?;
-    let interrupts = node
-        .property("interrupts")
-        .ok_or(Error::MissingInterrupt)?
-        .value;
-    let intid = parse_gic_interrupt(interrupts).ok_or(Error::InvalidInterrupt)?;
-
-    Ok(UartInfo {
-        reg: RegRange { base, size },
-        intid,
-    })
-}
-
-/// 返回 `/chosen/stdout-path` 最终指向的完整节点路径。
-///
-/// Pi5 的值是 `serial10:115200n8`。冒号后是串口参数，不是 alias 名的一部分。
-fn stdout_path<'a>(tree: &Fdt<'a>) -> Result<&'a str, Error> {
-    let chosen = tree.find_node("/chosen").ok_or(Error::MissingChosen)?;
-
-    // 固件通常通过标准属性指定控制台。Pi5 EDK2 生成的运行时 DTB
-    // 可能删除该属性，因此下面还会按常用 alias 名回退。
-    let property = chosen
-        .property("stdout-path")
-        .or_else(|| chosen.property("linux,stdout-path"));
-
-    if let Some(property) = property {
-        let value = core::str::from_utf8(property.value)
-            .map_err(|_| Error::InvalidStdout)?
-            .trim_end_matches('\0');
-        let selector = value.split(':').next().ok_or(Error::InvalidStdout)?;
-        if selector.is_empty() {
-            return Err(Error::InvalidStdout);
-        }
-
-        if selector.starts_with('/') {
-            return Ok(selector);
-        }
-        return tree
-            .aliases()
-            .and_then(|aliases| aliases.resolve(selector))
-            .ok_or(Error::MissingAlias);
-    }
-
-    let aliases = tree.aliases().ok_or(Error::MissingAlias)?;
-    for name in ["console", "serial10", "uart10", "serial0", "uart0"] {
-        if let Some(path) = aliases.resolve(name) {
-            return Ok(path);
-        }
-    }
-
-    Err(Error::MissingStdout)
-}
-
-fn node_is_pl011(node: FdtNode<'_, '_>) -> bool {
-    node.compatible()
-        .map(|compatible| {
-            compatible.all().any(|name| {
-                name == "arm,pl011" || name == "arm,pl011-axi" || name == "arm,sbsa-uart"
-            })
+/// CPU 数来自内核启动交接，设备树中的 CPU 节点不代表实际上线状态。
+pub fn discover(bytes: &[u8], cpu_count: u32) -> Result<DeviceInfo, Error> {
+    validate(bytes)?;
+    let tree = Fdt::new(bytes).map_err(|_| Error::InvalidFdt)?;
+    let mut paths = Vec::new();
+    collect_paths(
+        tree.find_node("/").ok_or(Error::InvalidFdt)?,
+        "",
+        &mut paths,
+    );
+    let uart_path = stdout_path(&tree)
+        .or_else(|| {
+            paths
+                .iter()
+                .find(|path| tree.find_node(path).is_some_and(is_pl011))
+                .map(String::as_str)
         })
-        .unwrap_or(false)
-}
-
-fn node_is_disabled(node: FdtNode<'_, '_>) -> bool {
-    node.property("status")
-        .and_then(|property| core::str::from_utf8(property.value).ok())
-        .map(|status| status.trim_end_matches('\0') == "disabled")
-        .unwrap_or(false)
-}
-
-fn read_reg(data: &[u8], address_cells: usize, size_cells: usize) -> Option<(u64, u64)> {
-    let address_bytes = address_cells.checked_mul(4)?;
-    let size_bytes = size_cells.checked_mul(4)?;
-    if data.len() < address_bytes.checked_add(size_bytes)? {
-        return None;
+        .ok_or(Error::MissingUart)?;
+    let uart = tree.find_node(uart_path).ok_or(Error::MissingUart)?;
+    if !is_pl011(uart) || !paths.iter().any(|path| path == uart_path) {
+        return Err(Error::MissingUart);
     }
-
-    let address = read_cells(&data[..address_bytes], address_cells)?;
-    let size = read_cells(&data[address_bytes..address_bytes + size_bytes], size_cells)?;
-    if size == 0 {
-        return None;
-    }
-    Some((address, size))
-}
-
-/// 沿 UART 所在节点的父总线逐级应用 `ranges`。
-fn translate_to_cpu(tree: &Fdt<'_>, device_path: &str, mut address: u64) -> Option<u64> {
-    let mut bus_path = parent_path(device_path);
-
-    while bus_path != "/" {
-        let bus = tree.find_node(bus_path)?;
-        let next_path = parent_path(bus_path);
-        let parent = tree.find_node(next_path)?;
-        address = translate_one_bus(bus, parent, address)?;
-        bus_path = next_path;
-    }
-
-    Some(address)
-}
-
-fn translate_one_bus(bus: FdtNode<'_, '_>, parent: FdtNode<'_, '_>, address: u64) -> Option<u64> {
-    let Some(ranges) = bus.property("ranges") else {
-        // 与现有 bring-up 语义一致：未声明 ranges 的简单总线按 1:1 处理。
-        return Some(address);
+    let mut info = DeviceInfo {
+        cpu_count,
+        uart: resource(&tree, uart_path, false)?,
+        ..Default::default()
     };
-    if ranges.value.is_empty() {
-        return Some(address);
+    // 找到通用 ECAM 节点但解析失败时显式报错，不把它当作无 PCI。
+    if paths.iter().any(|path| {
+        tree.find_node(path)
+            .is_some_and(|node| compatible(node, "pci-host-ecam-generic"))
+    }) {
+        info.pci = super::pci_host::from_tree(&tree).ok_or(Error::InvalidPci)?;
     }
-
-    let child_cells = bus.cell_sizes();
-    let parent_cells = parent.cell_sizes();
-    let entry_cells =
-        child_cells.address_cells + parent_cells.address_cells + child_cells.size_cells;
-    let entry_bytes = entry_cells.checked_mul(4)?;
-    if entry_bytes == 0 || ranges.value.len() % entry_bytes != 0 {
-        return None;
-    }
-
-    for entry in ranges.value.chunks_exact(entry_bytes) {
-        let child_bytes = child_cells.address_cells * 4;
-        let parent_bytes = parent_cells.address_cells * 4;
-        let child = read_cells(&entry[..child_bytes], child_cells.address_cells)?;
-        let parent_address = read_cells(
-            &entry[child_bytes..child_bytes + parent_bytes],
-            parent_cells.address_cells,
-        )?;
-        let size = read_cells(&entry[child_bytes + parent_bytes..], child_cells.size_cells)?;
-
-        if size != 0 && address >= child && address - child < size {
-            return parent_address.checked_add(address - child);
+    let mut virtio = Vec::new();
+    for path in &paths {
+        let node = tree.find_node(path).ok_or(Error::InvalidFdt)?;
+        if compatible(node, "snps,dwc3") && path.contains("/rp1/") && info.xhci.size == 0 {
+            info.xhci = resource(&tree, path, true)?;
+        }
+        if compatible(node, "virtio,mmio") {
+            virtio.push(reg(&tree, path)?);
         }
     }
-
-    None
+    if !virtio.is_empty() {
+        virtio.sort_unstable_by_key(|region| region.0);
+        let first = virtio[0].0;
+        let mut end = first;
+        for (base, size) in virtio {
+            if base != end {
+                return Err(Error::InvalidResource);
+            }
+            end = base.checked_add(size).ok_or(Error::InvalidResource)?;
+        }
+        let base = first & !4095;
+        let end = end.checked_add(4095).ok_or(Error::InvalidResource)? & !4095;
+        info.virtio_mmio = DeviceResource {
+            base,
+            size: end - base,
+            intid: 0,
+        };
+    }
+    info.xhci_transport = if info.xhci.size != 0 {
+        XHCI_TRANSPORT_DIRECT
+    } else if info.pci.present != 0 {
+        XHCI_TRANSPORT_PCI
+    } else {
+        XHCI_TRANSPORT_NONE
+    };
+    Ok(info)
 }
-
-/// 设备树 cell 是大端 u32。PCI 地址常用 3 cells，其中第一个 cell 是
-/// space/type flags；当前物理地址计算取后两个 cells 组成 64 位地址。
-fn read_cells(bytes: &[u8], cells: usize) -> Option<u64> {
-    if cells == 0 {
-        return Some(0);
-    }
-    if bytes.len() != cells.checked_mul(4)? || cells > 3 {
-        return None;
-    }
-
-    let first = if cells == 3 { 1 } else { 0 };
-    let mut value = 0u64;
-    let mut index = first;
-    while index < cells {
-        let offset = index * 4;
-        let cell = u32::from_be_bytes([
-            bytes[offset],
-            bytes[offset + 1],
-            bytes[offset + 2],
-            bytes[offset + 3],
-        ]);
-        value = (value << 32) | cell as u64;
-        index += 1;
-    }
-    Some(value)
+fn compatible(node: FdtNode<'_, '_>, name: &str) -> bool {
+    node.compatible()
+        .is_some_and(|list| list.all().any(|item| item == name))
 }
-
-fn parse_gic_interrupt(data: &[u8]) -> Option<u32> {
-    if data.len() < 12 {
-        return None;
+fn is_pl011(node: FdtNode<'_, '_>) -> bool {
+    ["arm,pl011", "arm,pl011-axi", "arm,sbsa-uart"]
+        .iter()
+        .any(|name| compatible(node, name))
+}
+fn collect_paths(node: FdtNode<'_, '_>, parent: &str, paths: &mut Vec<String>) {
+    if node
+        .property("status")
+        .is_some_and(|p| !matches!(p.as_str(), Some("okay" | "ok")))
+    {
+        return;
     }
-    let interrupt_type = read_be_u32(&data[0..4])?;
-    let hardware_irq = read_be_u32(&data[4..8])?;
-
-    match interrupt_type {
-        0 => hardware_irq.checked_add(32), // SPI
-        1 => hardware_irq.checked_add(16), // PPI
-        _ => None,
+    let path = if node.name.is_empty() {
+        String::from("/")
+    } else {
+        format!("{}/{}", parent.trim_end_matches('/'), node.name)
+    };
+    paths.push(path.clone());
+    for child in node.children() {
+        collect_paths(child, &path, paths);
     }
 }
-
-fn read_be_u32(bytes: &[u8]) -> Option<u32> {
-    Some(u32::from_be_bytes(bytes.try_into().ok()?))
+fn stdout_path<'a>(tree: &Fdt<'a>) -> Option<&'a str> {
+    if let Some(chosen) = tree.find_node("/chosen") {
+        if let Some(p) = chosen
+            .property("stdout-path")
+            .or_else(|| chosen.property("linux,stdout-path"))
+        {
+            let selector = p.as_str()?.split(':').next()?;
+            return if selector.starts_with('/') {
+                Some(selector)
+            } else {
+                tree.aliases()?.resolve(selector)
+            };
+        }
+    }
+    let aliases = tree.aliases()?;
+    ["console", "serial10", "uart10", "serial0", "uart0"]
+        .iter()
+        .find_map(|name| aliases.resolve(name))
 }
-
 fn parent_path(path: &str) -> &str {
     match path.rfind('/') {
         Some(0) | None => "/",
         Some(index) => &path[..index],
     }
+}
+fn u32be(bytes: &[u8]) -> Option<u32> {
+    Some(u32::from_be_bytes(bytes.get(..4)?.try_into().ok()?))
+}
+fn cells(bytes: &[u8], count: usize) -> Option<u64> {
+    if count > 3 || bytes.len() != count.checked_mul(4)? {
+        return None;
+    }
+    // PCI 三 cell 地址的第一个 cell 是空间属性，后两个组成总线地址。
+    let skip = if count == 3 { 4 } else { 0 };
+    Some(
+        bytes[skip..]
+            .chunks_exact(4)
+            .fold(0, |value, cell| (value << 32) | u32be(cell).unwrap() as u64),
+    )
+}
+/// 逐级应用父总线 ranges；完整寄存器范围都必须落在选中的窗口内。
+fn reg(tree: &Fdt<'_>, path: &str) -> Result<(u64, u64), Error> {
+    let parse = || {
+        let node = tree.find_node(path)?;
+        let mut bus_path = parent_path(path);
+        let parent = tree.find_node(bus_path)?;
+        let sizes = parent.cell_sizes();
+        let raw = node.property("reg")?.value;
+        let split = sizes.address_cells.checked_mul(4)?;
+        let length = sizes.size_cells.checked_mul(4)?;
+        let mut address = cells(raw.get(..split)?, sizes.address_cells)?;
+        let size = cells(
+            raw.get(split..split.checked_add(length)?)?,
+            sizes.size_cells,
+        )?;
+        if size == 0 {
+            return None;
+        }
+        address.checked_add(size)?;
+        while bus_path != "/" {
+            let bus = tree.find_node(bus_path)?;
+            let next_path = parent_path(bus_path);
+            let parent = tree.find_node(next_path)?;
+            // 当前平台简单总线允许缺省 1:1；有 ranges 则必须匹配。
+            if let Some(ranges) = bus.property("ranges").filter(|p| !p.value.is_empty()) {
+                let child = bus.cell_sizes();
+                let parent = parent.cell_sizes();
+                let ca = child.address_cells.checked_mul(4)?;
+                let pa = parent.address_cells.checked_mul(4)?;
+                let sz = child.size_cells.checked_mul(4)?;
+                let stride = ca.checked_add(pa)?.checked_add(sz)?;
+                if stride == 0 || ranges.value.len() % stride != 0 {
+                    return None;
+                }
+                let mut translated = None;
+                for entry in ranges.value.chunks_exact(stride) {
+                    let start = cells(&entry[..ca], child.address_cells)?;
+                    let target = cells(&entry[ca..ca + pa], parent.address_cells)?;
+                    let span = cells(&entry[ca + pa..], child.size_cells)?;
+                    if address >= start && address.checked_sub(start)?.checked_add(size)? <= span {
+                        translated = Some(target.checked_add(address - start)?);
+                        break;
+                    }
+                }
+                address = translated?;
+            }
+            bus_path = next_path;
+        }
+        address.checked_add(size)?;
+        Some((address, size))
+    };
+    parse().ok_or(Error::InvalidResource)
+}
+fn resource(tree: &Fdt<'_>, path: &str, rp1: bool) -> Result<DeviceResource, Error> {
+    let (base, size) = reg(tree, path)?;
+    let node = tree.find_node(path).ok_or(Error::InvalidFdt)?;
+    let interrupts = node
+        .property("interrupts")
+        .ok_or(Error::UnsupportedInterrupt)?
+        .value;
+    let intid = if rp1 && interrupts.len() == 8 {
+        // 当前 Pi5 固件沿用 RP1 local IRQ + 0x7f 的 GIC 路由；不能泛化到任意板卡。
+        // 此处只是描述转换；触发方式与 INTID 归属仍由 EL1 平台授权表控制。
+        u32be(interrupts).and_then(|irq| irq.checked_add(0x7f))
+    } else if interrupts.len() >= 12 {
+        let irq = u32be(&interrupts[4..]).ok_or(Error::UnsupportedInterrupt)?;
+        match u32be(interrupts) {
+            Some(0) => irq.checked_add(32),
+            Some(1) => irq.checked_add(16),
+            _ => None,
+        }
+    } else {
+        None
+    }
+    .ok_or(Error::UnsupportedInterrupt)?;
+    if intid < 32 {
+        return Err(Error::UnsupportedInterrupt);
+    }
+    Ok(DeviceResource { base, size, intid })
+}
+/// 在 fdt 遍历前验证切片边界、字符串、嵌套和属性布局。
+/// 损坏的固件 blob 应返回错误，不能通过裸指针越过只读映射。
+fn validate(bytes: &[u8]) -> Result<(), Error> {
+    let check = || {
+        if bytes.len() < 40 || u32be(bytes)? != 0xd00d_feed {
+            return None;
+        }
+        let total = u32be(&bytes[4..])? as usize;
+        if total != bytes.len() {
+            return None;
+        }
+        let range = |off, len| {
+            let start = u32be(&bytes[off..])? as usize;
+            let size = u32be(&bytes[len..])? as usize;
+            if start < 40 {
+                return None;
+            }
+            Some(start..start.checked_add(size).filter(|end| *end <= total)?)
+        };
+        let structure = range(8, 36)?;
+        let strings = range(12, 32)?;
+        if structure.start % 4 != 0
+            || structure.start < strings.end && strings.start < structure.end
+        {
+            return None;
+        }
+        let names = bytes.get(strings)?;
+        let data = bytes.get(structure)?;
+        let mut offset = 0usize;
+        let mut depth = 0usize;
+        let mut seen_root = false;
+        // 每层在第一个子节点之后不得再出现父节点属性。
+        let mut children = [false; 64];
+        while offset < data.len() {
+            let token = u32be(data.get(offset..)?)?;
+            offset = offset.checked_add(4)?;
+            match token {
+                1 => {
+                    if depth == 0 && seen_root || depth == children.len() {
+                        return None;
+                    }
+                    if depth > 0 {
+                        children[depth - 1] = true;
+                    }
+                    let name_len = data.get(offset..)?.iter().position(|byte| *byte == 0)?;
+                    core::str::from_utf8(data.get(offset..offset.checked_add(name_len)?)?).ok()?;
+                    if depth == 0 && name_len != 0 {
+                        return None;
+                    }
+                    seen_root = true;
+                    children[depth] = false;
+                    depth += 1;
+                    offset = offset.checked_add(name_len)?.checked_add(4)? & !3;
+                }
+                2 => {
+                    depth = depth.checked_sub(1)?;
+                }
+                3 => {
+                    if depth == 0 || children[depth - 1] {
+                        return None;
+                    }
+                    let length = u32be(data.get(offset..)?)? as usize;
+                    let name = u32be(data.get(offset.checked_add(4)?..)?)? as usize;
+                    let name = names.get(name..)?;
+                    let end = name.iter().position(|byte| *byte == 0)?;
+                    let property_name = core::str::from_utf8(&name[..end]).ok()?;
+                    let value_start = offset.checked_add(8)?;
+                    let value_end = value_start.checked_add(length)?;
+                    let value = data.get(value_start..value_end)?;
+                    // fdt 的 cell_sizes() 对过短属性会 panic，提前拒绝损坏的计数。
+                    if matches!(
+                        property_name,
+                        "#address-cells" | "#size-cells" | "#interrupt-cells"
+                    ) {
+                        if value.len() != 4 || u32be(value)? > 3 {
+                            return None;
+                        }
+                    }
+                    if property_name == "compatible" {
+                        if value.last() != Some(&0) {
+                            return None;
+                        }
+                        core::str::from_utf8(value).ok()?;
+                    }
+                    offset = value_end.checked_add(3)? & !3;
+                }
+                4 => {}
+                9 => {
+                    return if seen_root && depth == 0 {
+                        Some(())
+                    } else {
+                        None
+                    }
+                }
+                _ => return None,
+            }
+            if offset > data.len() {
+                return None;
+            }
+        }
+        None
+    };
+    check().ok_or(Error::InvalidFdt)
 }

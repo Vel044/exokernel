@@ -161,9 +161,13 @@ fn next_runnable(cpu: usize) -> Option<usize> {
 fn charge_current() {
     let cpu = cpu();
     let slot = thread::current_slot();
-    if slot < thread::MAX_THREADS && thread::is_running(slot) {
-        let now = super::timer::counter();
-        let start = CPUS[cpu].active_start.load(Ordering::Acquire);
+    // Notification/IPC 已先把当前线程标记为 Blocked，再进入 schedule_after_block。
+    // 因此不能只给 Running 状态计费，否则频繁等待 IRQ 的 USB 线程会始终报告 0。
+    // 当前 CPU 在屏蔽 IRQ 的调度路径中独占结算；swap 清空区间，避免重复计费，
+    // 下一次 activate 或重新启动同级时间片时会发布新的 active_start。
+    let now = super::timer::counter();
+    let start = CPUS[cpu].active_start.swap(0, Ordering::AcqRel);
+    if slot < thread::MAX_THREADS && start != 0 {
         thread::charge(slot, now.wrapping_sub(start));
     }
 }

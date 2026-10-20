@@ -10,9 +10,9 @@ const ABSOLUTE_TOLERANCE: f32 = 1e-8;
 const RELATIVE_TOLERANCE: f32 = 1e-5;
 
 fn main() {
-    let directory = std::env::args().nth(1).unwrap_or_else(|| {
-        concat!(env!("CARGO_MANIFEST_DIR"), "/../../data/act/model").into()
-    });
+    let directory = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| concat!(env!("CARGO_MANIFEST_DIR"), "/../../data/act/model").into());
     let cases = std::env::args().nth(2);
     let model_bytes = std::fs::read(format!("{directory}/model.safetensors")).unwrap();
     let stats_bytes = std::fs::read(format!(
@@ -76,10 +76,16 @@ fn run_cases(model: &ActModel<'_>, root: &Path) {
         let reference_bytes = fs::read(directory.join("pytorch-action.f32le")).unwrap();
         assert_eq!(reference_bytes.len(), ACTION_STEPS * ACTION_DIM * 4);
 
-        let observation = Observation { handeye_rgb: &handeye, fixed_rgb: &fixed, state };
+        let observation = Observation {
+            handeye_rgb: &handeye,
+            fixed_rgb: &fixed,
+            state,
+        };
         let mut actions = [[0.0f32; ACTION_DIM]; ACTION_STEPS];
         let started = Instant::now();
-        model.predict(&observation, &mut workspace, &mut actions).unwrap();
+        model
+            .predict(&observation, &mut workspace, &mut actions)
+            .unwrap();
         // 保存被测Rust后端的全部600个float，供后续CSV逐元素审计。
         let mut action_bytes = Vec::with_capacity(ACTION_STEPS * ACTION_DIM * 4);
         for value in actions.iter().flatten() {
@@ -91,12 +97,15 @@ fn run_cases(model: &ActModel<'_>, root: &Path) {
         let mut failed = 0usize;
         for (index, actual) in actions.iter().flatten().enumerate() {
             let offset = index * 4;
-            let expected = f32::from_le_bytes(reference_bytes[offset..offset + 4].try_into().unwrap());
+            let expected =
+                f32::from_le_bytes(reference_bytes[offset..offset + 4].try_into().unwrap());
             let error = (*actual - expected).abs();
             maximum = maximum.max(error);
             total += error as f64;
             let tolerance = ABSOLUTE_TOLERANCE + RELATIVE_TOLERANCE * expected.abs();
-            if error > tolerance { failed += 1; }
+            if error > tolerance {
+                failed += 1;
+            }
         }
         println!(
             "case-{case_index:03} elapsed_ms={:.3} mean_abs_error={:.9} max_abs_error={maximum:.9} failed={failed}",

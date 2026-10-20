@@ -6,7 +6,7 @@
 use crab_usb::{EventHandler, USBHost};
 
 pub(crate) fn run(
-    info: &exo_abi::UserBootInfo,
+    info: &crate::drivers::platform::DeviceInfo,
     host: &mut USBHost,
     handler: &EventHandler,
     intid: u32,

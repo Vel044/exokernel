@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = ["abi", "kernel", "libos", "act-runtime", "act-kernels-acl"]
+exclude = ["vendor/rutorch/crates/rutorch-runtime", "vendor/rutorch/crates/rutorch-kernels-acl-shared", "vendor/rutorch/crates/rutorch-kernels-acl"]
 
 [workspace.package]
 edition = "2021"

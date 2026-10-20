@@ -1,4 +1,8 @@
-//! 用户态设备驱动和协议栈。
+//! 用户态设备发现、设备驱动和协议栈。
+
+pub(crate) mod dtb;
+pub(crate) mod pci_host;
+pub(crate) mod platform;
 
 #[cfg(any(
     feature = "ide",

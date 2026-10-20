@@ -38,7 +38,7 @@ const OBSERVATION_FIXED_OFFSET: usize = OBSERVATION_HEADER_SIZE + OBSERVATION_IM
 
 impl CaptureVolume {
     /// 扫描Kernel授权的virtio-mmio窗口，找到带有EXOUVC01元数据的ext4盘。
-    pub(crate) fn discover(info: &exo_abi::UserBootInfo) -> Result<Self, u64> {
+    pub(crate) fn discover(info: &crate::drivers::platform::DeviceInfo) -> Result<Self, u64> {
         let mut devices = BlockDevices::discover(info).map_err(|_| 0x570u64)?;
         while let Some(mut device) = devices.next() {
             let mut sector = [0u8; SECTOR_SIZE];
@@ -98,7 +98,7 @@ impl CaptureVolume {
 }
 
 impl ObservationVolume {
-    pub(crate) fn discover(info: &exo_abi::UserBootInfo) -> Result<Self, u64> {
+    pub(crate) fn discover(info: &crate::drivers::platform::DeviceInfo) -> Result<Self, u64> {
         let mut devices = BlockDevices::discover(info).map_err(|_| 0x580u64)?;
         while let Some(mut device) = devices.next() {
             let mut sector = [0u8; SECTOR_SIZE];

@@ -22,9 +22,22 @@
 
 当前 UART 使用 PL011 库；xHCI 使用 CrabUSB；virtio-blk 使用 virtio-drivers；ext4 读取使用 ext4-view。USB 串口和 UVC 位于 xHCI 之上，ext4 位于块设备之上，不能把这些层当成同一种驱动迁移对象。
 
+## DTB 与设备发现（ABI v13）
+
+完整 DTB 只读交给 libOS，EL0 在 `libos/src/drivers/dtb.rs` 解析设备，生成
+`drivers/platform.rs::DeviceInfo`。`UserBootInfo` 只传 DTB VA、有效长度和 CPU 数。
+内核不解析设备树节点；启动所需 GIC/Timer/CPU、诊断 UART 及初始设备授权由
+`kernel/src/resource/resources.rs` 的 QEMU/Pi5 配置提供。设备树可见性不代表
+访问授权，`MAP_MMIO` 和 `IRQ_BIND` 仍检查权限。新板卡/拓扑变化要更新平台配置。
+详情见 [启动交接与内存说明](docs/Stack和Heap和Userbootinfo.md#2当前的userbootinfo)。
+已有 UserBootInfo SVG/PPT 为 v12 讲解材料，设备字段图与当前 ABI 不同。
+
 ## 最小构建与运行
 
-**当前独立构建缺口：** `act-runtime/Cargo.toml` 与 `act-kernels-acl/Cargo.toml` 通过 `../../rutorch/crates/...` 引用本仓库之外的包。Cargo 在构建 `system-smoke` 等场景前也会解析这些依赖。仅 clone/fork 本仓库会因缺少 `rutorch-runtime` 等 manifest 而失败；需要维护者另行提供匹配的 `rutorch` 源码并放在 exokernel 同级，或者后续拆分这项构建依赖。以下命令是在该前提满足后使用的步骤，**本次未验证独立 fork 后完整构建或 QEMU 启动成功**。源码阅读和 Linux → IR 研究不依赖启动 exokernel。
+ACT 运行时及所需 ACL 微内核源码已包含在 `vendor/rutorch/`，构建不再依赖相邻
+`rutorch` 仓库。快照来源和摘要记录在 `vendor/rutorch/manifest.json`，可用
+`python3 scripts/sync_rutorch_runtime.py --verify` 检查。模型、数据盘、EFI/ELF、
+编译日志和测试生成物不纳入 Git；实际 ACT 测试仍需另行准备模型与观测数据。
 
 以下启动步骤面向 **macOS + Homebrew**。Linux/Windows 开发者可安装 AArch64 QEMU、Rust 目标和 UEFI 固件，按相同 QEMU virt 平台理解代码；宿主启动脚本、启动盘处理和固件路径需自行调整。`qemu/run.sh` 使用 macOS 的 `hdiutil`，不能保证跨宿主原样运行，本次交接不做适配。Pi5 路径见 `build_pi5.sh`，本导读不宣称完成了真机验收。
 
@@ -65,6 +78,30 @@ LIBOS_APP=uart-echo QEMU_USB_MODE=none QEMU_SUDO=0 bash qemu/run.sh
 ```
 
 看到 `[libos] UART echo ready` 后输入字符，观察回显。这个例子覆盖 MMIO 和 IRQ，**不覆盖 DMA**。USB 模拟串口可另选 `LIBOS_APP=usb-echo QEMU_USB_MODE=ftdi`；UVC 和机器人应用另需真实设备/数据准备。完整场景映射以 `scripts/libos_features.sh` 为准。
+
+
+## 回归验证
+
+2026-10-20 验证：19 个受支持场景编译、IDE 检查、12 个宿主单元测试、9 组 QEMU
+运行测试，以及 portable/ACL 各 5 组 ACT 正确性测试通过（共比较 6000 个动作值）。
+暂存源码导出到独立目录后，离线构建及 TCG/HVF 的 system/process 测试也通过。
+Pi5 仅完成编译和设备树解析检查；真实 UVC/舵机、机器人运动及 ACT 长稳/性能基准未运行。
+详细结果见 [验证记录](docs/validation/2026-10-20.json)。
+
+```bash
+cargo test --manifest-path tools/dtb-check/Cargo.toml
+python3 scripts/sync_rutorch_runtime.py --verify
+python3 scripts/test_dtb_handoff.py --hvf
+```
+
+QEMU 测试使用独立临时启动盘和虚拟外设，结果保存在 `target/dtb-regression/`，
+不会使用真实机器人。`--hvf` 仅适用于 Apple Silicon；其他宿主省略该选项，并用
+`--code`、`--vars` 指定本机 AArch64 EDK2 固件。覆盖固件 DTB/内嵌 DTB、映射
+保护、独立 VSpace、UART、USB 串口、USB Hub 和 USB/调度并发。
+
+ACT 正确性另用 `scripts/run_act_release.py --provider portable --case 000 --phase correctness`；
+需要另行准备模型、五组冻结观测及 PyTorch golden，并为 ELF 审计配置 `READELF` 和 `NM`。
+`--provider acl` 还需要 AArch64 C++ 交叉编译器。该入口只运行推理，不访问真实机械臂。
 
 ## 阅读与协作
 

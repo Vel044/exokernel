@@ -21,6 +21,15 @@ use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use linked_list_allocator::LockedHeap;
 
 #[cfg(any(
+    feature = "ide",
+    feature = "app-act-benchmark",
+    feature = "app-act-inference",
+    feature = "app-robot-act-once"
+))]
+pub(crate) mod act_stack;
+
+#[cfg(any(
+    feature = "ide",
     feature = "app-act-benchmark",
     feature = "app-act-inference",
     feature = "app-robot-act-once"
@@ -67,25 +76,25 @@ pub(crate) fn allocation_count() -> usize {
     HEAP_ALLOCATIONS.load(Ordering::Acquire)
 }
 
-/// 为当前CPU上的ACT数值内核启用浮点非正规数flush-to-zero。
-///
-/// `FPCR.FZ`控制FP32/FP64，`FZ16`控制FP16。ACT当前只计算FP32，但同时设置
-/// 两位可避免后续半精度内核落入不同模式。普通数、NaN和Inf语义不变；非常
-/// 接近零的subnormal按零处理，既符合常见推理后端行为，也避免QEMU TCG用
-/// 极慢的软件路径逐条模拟。FPCR是每个执行CPU的状态，所以每个worker都调用。
+/// 每个ACT计算CPU使用round-to-nearest，保留subnormal，与Linux对照一致。
+/// FPCR是每CPU状态：主线程和worker入口均调用，不依赖其他CPU的设置。
 #[cfg(any(
+    feature = "ide",
     feature = "app-act-benchmark",
     feature = "app-act-inference",
     feature = "app-robot-act-once"
 ))]
 pub(crate) fn configure_act_fpcr() {
     let mut fpcr: u64;
+    // SAFETY: EL0允许访问本CPU的FPCR；清除FZ/FZ16、DN及舍入模式后ISB生效。
     unsafe {
         core::arch::asm!("mrs {value}, fpcr", value = out(reg) fpcr, options(nomem, nostack));
-        fpcr |= (1 << 24) | (1 << 19);
+        fpcr &= !((1 << 24) | (1 << 19) | (1 << 25) | (3 << 22));
         core::arch::asm!("msr fpcr, {value}", value = in(reg) fpcr, options(nomem, nostack));
         core::arch::asm!("isb", options(nomem, nostack));
+        core::arch::asm!("mrs {value}, fpcr", value = out(reg) fpcr, options(nomem, nostack));
     }
+    assert_eq!(fpcr & ((1 << 24) | (1 << 19) | (1 << 25) | (3 << 22)), 0);
 }
 
 pub fn svc(sysno: u64, arg0: u64, arg1: u64, arg2: u64) -> u64 {

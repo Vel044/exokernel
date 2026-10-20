@@ -139,10 +139,10 @@ pub(crate) mod act_inference;
 pub(crate) mod process_smoke;
 #[cfg(any(feature = "ide", feature = "app-robot-act-once"))]
 pub(crate) mod robot_act_once;
-#[cfg(any(feature = "ide", feature = "app-robot-observation"))]
-pub(crate) mod robot_observation;
 #[cfg(any(feature = "ide", feature = "app-robot-action-replay"))]
 pub(crate) mod robot_action_replay;
+#[cfg(any(feature = "ide", feature = "app-robot-observation"))]
+pub(crate) mod robot_observation;
 #[cfg(any(feature = "ide", feature = "app-scservo"))]
 pub(crate) mod scservo_app;
 #[cfg(any(feature = "ide", feature = "app-system-smoke"))]
@@ -198,7 +198,7 @@ enum Application {
 }
 
 /// 从公共EL0启动流程进入唯一选定的应用场景。
-pub(crate) fn run(info: &exo_abi::UserBootInfo) -> ! {
+pub(crate) fn run(info: &crate::drivers::platform::DeviceInfo) -> ! {
     dispatch(selected_application(), info)
 }
 
@@ -251,7 +251,7 @@ fn selected_application() -> Application {
 ///
 /// IDE模式下每个match分支都参与分析，因此调用目标不会变灰，Cmd+点击可以
 /// 直接进入具体应用；正式构建时条件编译只留下一个有效分支。
-fn dispatch(application: Application, info: &exo_abi::UserBootInfo) -> ! {
+fn dispatch(application: Application, info: &crate::drivers::platform::DeviceInfo) -> ! {
     match application {
         // 纯ACT性能基准：从只读ext4加载模型和一组冻结的真实观测，使用
         // CPU0..3执行一次100步ACT前向传播并记录各阶段耗时。它不初始化
@@ -351,7 +351,7 @@ fn dispatch(application: Application, info: &exo_abi::UserBootInfo) -> ! {
 
 /// xHCI应用共用的EL0 UART接管步骤。
 #[cfg(any(feature = "qemu-xhci", feature = "pi5-xhci"))]
-fn prepare_xhci_logging(info: &exo_abi::UserBootInfo) {
+fn prepare_xhci_logging(info: &crate::drivers::platform::DeviceInfo) {
     if let Err(error) = uart_echo::smoke_test(info) {
         crate::runtime::puts(b"[libos] UART smoke failed=");
         crate::runtime::hex(error);

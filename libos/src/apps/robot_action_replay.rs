@@ -11,18 +11,26 @@ const ACTION_DIM: usize = 6;
 const ACTION_STEPS: usize = 100;
 
 pub(crate) async fn run(
-    info: &exo_abi::UserBootInfo,
+    info: &crate::drivers::platform::DeviceInfo,
     transport: &mut UsbSerialTransport,
 ) -> Result<(), u64> {
     let filesystem = crate::fs::FileSystem::mount(info).map_err(|_| 0x780u64)?;
     let file = filesystem
-        .read_mapped("/actions.f32le", ACTION_VA, (ACTION_STEPS * ACTION_DIM * 4) as u64)
+        .read_mapped(
+            "/actions.f32le",
+            ACTION_VA,
+            (ACTION_STEPS * ACTION_DIM * 4) as u64,
+        )
         .map_err(|_| 0x781u64)?;
     if file.as_slice().len() != ACTION_STEPS * ACTION_DIM * 4 {
         return Err(0x782);
     }
     let mut actions = [[0.0f32; ACTION_DIM]; ACTION_STEPS];
-    for (slot, bytes) in actions.iter_mut().flatten().zip(file.as_slice().chunks_exact(4)) {
+    for (slot, bytes) in actions
+        .iter_mut()
+        .flatten()
+        .zip(file.as_slice().chunks_exact(4))
+    {
         *slot = f32::from_le_bytes(bytes.try_into().unwrap());
         if !slot.is_finite() {
             return Err(0x783);

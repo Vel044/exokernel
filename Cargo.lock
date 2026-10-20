@@ -319,7 +319,6 @@ name = "exokernel"
 version = "0.1.0"
 dependencies = [
  "exo-abi",
- "fdt",
  "uefi",
 ]
 
@@ -455,6 +454,7 @@ dependencies = [
  "dma-api",
  "exo-abi",
  "ext4-view",
+ "fdt",
  "linked_list_allocator",
  "log",
  "spin",

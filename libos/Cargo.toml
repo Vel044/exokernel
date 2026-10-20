@@ -7,6 +7,7 @@ edition = "2021"
 # 用 release 避免 debug 版 UB checks 导致 panic
 
 [dependencies]
+fdt = { path = "vendor/fdt", version = "=0.1.5" }
 arm-pl011-uart = { path = "vendor/arm-pl011-uart", version = "=0.5.0", default-features = false }
 exo-abi = { path = "../abi" }
 linked_list_allocator = "=0.10.5"
@@ -26,7 +27,7 @@ virtio-drivers = { version = "=0.13.0", default-features = false, features = ["a
 default = ["app-system-smoke"]
 # 仅供rust-analyzer加载所有第一方模块和可选依赖。正式构建脚本永远不会
 # 选择这个feature，因此它不会扩大实际可执行场景矩阵。
-ide = ["qemu-xhci", "user-fs", "dep:act-runtime"]
+ide = ["qemu-xhci", "user-fs", "dep:act-runtime", "dep:zune-jpeg"]
 qemu-xhci = ["dep:crab-usb", "dep:dma-api", "dep:spin", "dep:log"]
 pi5-xhci = ["dep:crab-usb", "dep:dma-api", "dep:spin", "dep:log"]
 app-system-smoke = []

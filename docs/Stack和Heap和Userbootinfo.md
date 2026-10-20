@@ -26,27 +26,38 @@ seL4 Kernel 本身没有通用 Heap。
 
 # 2.当前的UserBootInfo
 
-定义位置：[`exokernel/abi/src/lib.rs`](../abi/src/lib.rs)，约在第 238 行。
+定义位置：[`abi/src/lib.rs`](../abi/src/lib.rs)，当前 ABI v13。
 
 ```rust
-#[derive(Clone, Copy, Default)]
 #[repr(C)]
 pub struct UserBootInfo {
     pub magic: u32,
     pub version: u16,
     pub size: u16,
-    
-    pub uart: DeviceResource,
-    pub xhci: DeviceResource,
-    pub virtio_mmio: DeviceResource,
-    pub xhci_transport: u32,
+    pub dtb_va: u64,
+    pub dtb_size: u64,
     pub cpu_count: u32,
-    pub pci: PciHostInfo,
-}6
+}
 ```
 
-`UserBootInfo` 是 EL1 传给 EL0 的启动信息表。EL1 填写设备和 CPU 资源，EL0 只读取它来决定可以使用哪些资源；`#[repr(C)]` 保证两边按照相同的内存布局解释这块数据。
+UEFI 入口在 EBS 前将完整 DTB 复制到独占的 LoaderData 页，EL1 将其映射到
+`0x4100_0000`，属性为 Normal、EL0 只读且不可执行。有效长度由 `dtb_size`
+给出，尾页清零；最多 2 MiB，整个窗口禁止 MMIO/DMA 覆盖。任务退出时撤销
+用户映射，交接页不属于用户 Frame，仍由启动层保留。
 
+EL0 初始化 heap 后，在 [`drivers/dtb.rs`](../libos/src/drivers/dtb.rs) 校验并
+解析 UART、PCI、RP1 xHCI、virtio；结果保存为
+[`DeviceInfo`](../libos/src/drivers/platform.rs)，供各应用共享。设备描述不再
+进入内核 ABI，`DeviceInfo` 也不授予设备权限。
+
+EL1 不再解析设备树节点。启动所需 UART/GIC/CPU/Timer 和设备授权来自
+[`resources.rs`](../kernel/src/resource/resources.rs) 的 QEMU/Pi5 平台配置。
+`MAP_MMIO`、`IRQ_BIND` 继续检查可信授权；完整 DTB 中可见的设备不一定可访问。
+新板卡或改变地址/中断拓扑时需要更新平台配置，不能只改 DTB 就扩张授权。
+QEMU 在固件未提供 DTB 时继续交接仓库中的快照，Pi5 要求固件提供实际 DTB。
+
+宿主验证：`cargo test --manifest-path tools/dtb-check/Cargo.toml`。
+原有 UserBootInfo SVG 与 PPT 中的设备字段图基于 v12，阅读时以本节及源码为准。
 
 # 3.Frame 物理内存页框
 

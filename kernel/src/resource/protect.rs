@@ -8,7 +8,7 @@
 //!      - 归你 → 允许映射, 填充页表, eret 回去
 //!      - 不归你 / 无主 → 拒绝, 杀进程
 //!
-//! DTB解析完成后，每个设备的reg范围由register()登记；当前任务的具体
+//! 平台配置的设备窗口由register()登记；当前任务的具体
 //! 所有权由task中的MMIO grant另行记录，两层校验不能合并。
 
 const MAX_REGIONS: usize = 128; // 最多登记 128 个 MMIO 区域
@@ -29,7 +29,7 @@ static mut DENIED_TABLE: [MmioRegion; MAX_DENIED_REGIONS] =
     [MmioRegion { base: 0, size: 0 }; MAX_DENIED_REGIONS];
 static mut DENIED_COUNT: usize = 0;
 
-/// 登记一片 MMIO 区域 (来自 DTB 扫描)
+/// 登记一片来自可信平台配置的 MMIO 区域
 /// 先把所有设备的地址范围登记进去, 后续再 assign 给具体进程
 pub fn register(base: u64, size: u64) {
     if size == 0 {
@@ -49,7 +49,7 @@ pub fn register(base: u64, size: u64) {
     }
 }
 
-/// 登记 EL1 专用 MMIO。即使通用 DTB 扫描随后把它登记为设备窗口，
+/// 登记 EL1 专用 MMIO。即使平台配置误把它登记为设备窗口，
 /// `lookup()` 也会优先拒绝，防止 EL0 映射 GIC 等保护硬件。
 pub fn deny(base: u64, size: u64) {
     unsafe {

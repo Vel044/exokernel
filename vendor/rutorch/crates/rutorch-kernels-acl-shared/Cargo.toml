@@ -1,0 +1,19 @@
+[package]
+name = "rutorch-kernels-acl-shared"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.96"
+build = "build.rs"
+description = "Linux 与 LibOS 共用的 freestanding ACL Cortex-A76 内核边界"
+
+[features]
+default = []
+acl-freestanding = []
+
+[lints.rust]
+unsafe_code = "allow"
+missing_docs = "allow"
+unsafe_op_in_unsafe_fn = "allow"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }

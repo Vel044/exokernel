@@ -1,7 +1,7 @@
-//! uart.rs —— DTB 发现后的 PL011 调试串口驱动
+//! uart.rs —— 平台配置指定的 EL1 PL011 调试串口驱动
 //!
-//! EBS 前不要用这个模块打印, 因为那时应该走 UEFI console。
-//! EBS 后 EL1 先从 DTB 找到 compatible="arm,pl011" 的 reg 基址,
+//! EBS 前通常使用 UEFI console；交接阶段可使用平台指定的诊断串口。
+//! EBS 后 EL1 从可信平台配置取得 PL011 的 CPU PA,
 //! 调 uart::init(base) 后, 这里才真正写 MMIO UART。
 
 use core::ptr::{read_volatile, write_volatile};
@@ -14,7 +14,7 @@ static mut UART_BASE: u64 = 0;
 
 /// 初始化运行时 UART MMIO 基址。
 ///
-/// base 来自 DTB 的 reg 物理地址。当前 EL1 打开 MMU 前是物理地址直接访问;
+/// base 来自可信平台配置的物理地址。当前 EL1 打开 MMU 前是物理地址直接访问;
 /// 打开 MMU 后 kmain 会给同一物理地址做 identity Device 映射, 所以这里仍可用。
 pub fn init(base: u64) {
     unsafe {

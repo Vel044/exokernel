@@ -1,0 +1,166 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080" role="img" aria-labelledby="title desc">
+<title id="title">Exokernel 系统调用：六类、37 项</title>
+<desc id="desc">当前源码系统调用分类及用途。画布透明，卡片实色；所有接口名称省略 SYS_ 前缀。</desc>
+<text x="40" y="61" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="44" font-weight="700" fill="#243441">Exokernel 系统调用接口</text>
+<text x="40" y="99" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="24" font-weight="400" fill="#526572">6 类 · 37 项  |  EL1 提供资源保护与调度机制，EL0 组合成驱动和系统服务</text>
+<rect x="40" y="122" width="1840" height="58" rx="14" fill="#EFF5FA" stroke="#D7E3ED" stroke-width="1.5"/>
+<text x="62" y="159" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="25" font-weight="600" fill="#243441">EL0：runtime / kernel_api</text>
+<text x="480" y="159" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="24" font-weight="400" fill="#1562B5">→   SVC #0：x8 编号 · x0…x5 参数   →</text>
+<text x="1080" y="159" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="25" font-weight="600" fill="#243441">EL1：校验、处理并返回</text>
+<text x="1540" y="159" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="22" font-weight="400" fill="#526572">接口名省略 SYS_</text>
+<rect x="40" y="202" width="600" height="365" rx="14" fill="#FFFFFF" stroke="#CDD8E0" stroke-width="1.5"/>
+<rect x="40" y="202" width="600" height="55" rx="0" fill="#B65B08" stroke="none" stroke-width="1.5"/>
+<text x="60" y="239" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="28" font-weight="700" fill="#FFFFFF">设备访问与 DMA</text>
+<text x="555" y="238" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="23" font-weight="600" fill="#FFFFFF">4 项</text>
+<text x="60" y="284" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="19" font-weight="400" fill="#60717D">映射设备寄存器；申请设备可见内存</text>
+<text x="58" y="318" font-family="Menlo,Consolas,monospace" font-size="17" font-weight="400" fill="#778995">6</text>
+<text x="93" y="318" font-family="Menlo,Consolas,monospace" font-size="20" font-weight="600" fill="#B65B08">MAP_MMIO</text>
+<text x="362" y="318" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="19" font-weight="400" fill="#243441">建立寄存器映射</text>
+<text x="58" y="346" font-family="Menlo,Consolas,monospace" font-size="17" font-weight="400" fill="#778995">11</text>
+<text x="93" y="346" font-family="Menlo,Consolas,monospace" font-size="20" font-weight="600" fill="#B65B08">UNMAP_MMIO</text>
+<text x="362" y="346" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="19" font-weight="400" fill="#243441">撤销寄存器映射</text>
+<text x="58" y="374" font-family="Menlo,Consolas,monospace" font-size="17" font-weight="400" fill="#778995">12</text>
+<text x="93" y="374" font-family="Menlo,Consolas,monospace" font-size="20" font-weight="600" fill="#B65B08">DMA_ALLOC</text>
+<text x="362" y="374" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="19" font-weight="400" fill="#243441">分配 DMA 内存</text>
+<text x="58" y="402" font-family="Menlo,Consolas,monospace" font-size="17" font-weight="400" fill="#778995">13</text>
+<text x="93" y="402" font-family="Menlo,Consolas,monospace" font-size="20" font-weight="600" fill="#B65B08">DMA_FREE</text>
+<text x="362" y="402" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="19" font-weight="400" fill="#243441">解除映射并回收 DMA</text>
+<rect x="60" y="446" width="560" height="98" rx="8" fill="#FFF5E9" stroke="none" stroke-width="1.5"/>
+<text x="76" y="475" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="21" font-weight="600" fill="#B65B08">MMIO：映射后直接访问设备寄存器</text>
+<text x="76" y="505" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="21" font-weight="400" fill="#B65B08">DMA：CPU 用 VA；设备用 DMA address</text>
+<text x="76" y="531" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="18" font-weight="400" fill="#60717D">分配、映射、回收均受内核记录约束</text>
+<rect x="660" y="202" width="600" height="365" rx="14" fill="#FFFFFF" stroke="#CDD8E0" stroke-width="1.5"/>
+<rect x="660" y="202" width="600" height="55" rx="0" fill="#1562B5" stroke="none" stroke-width="1.5"/>
+<text x="680" y="239" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="28" font-weight="700" fill="#FFFFFF">IRQ 与异步通知</text>
+<text x="1175" y="238" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="23" font-weight="600" fill="#FFFFFF">8 项</text>
+<text x="680" y="284" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="19" font-weight="400" fill="#60717D">将硬件事件送达 EL0 等待线程</text>
+<text x="678" y="318" font-family="Menlo,Consolas,monospace" font-size="17" font-weight="400" fill="#778995">7</text>
+<text x="713" y="318" font-family="Menlo,Consolas,monospace" font-size="20" font-weight="600" fill="#1562B5">IRQ_BIND</text>
+<text x="982" y="318" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="19" font-weight="400" fill="#243441">绑定中断与通知</text>
+<text x="678" y="346" font-family="Menlo,Consolas,monospace" font-size="17" font-weight="400" fill="#778995">9</text>
+<text x="713" y="346" font-family="Menlo,Consolas,monospace" font-size="20" font-weight="600" fill="#1562B5">IRQ_ACK</text>
+<text x="982" y="346" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="19" font-weight="400" fill="#243441">处理后重新开放 IRQ</text>
+<text x="678" y="374" font-family="Menlo,Consolas,monospace" font-size="17" font-weight="400" fill="#778995">10</text>
+<text x="713" y="374" font-family="Menlo,Consolas,monospace" font-size="20" font-weight="600" fill="#1562B5">IRQ_UNBIND</text>
+<text x="982" y="374" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="19" font-weight="400" fill="#243441">屏蔽并解除 IRQ 绑定</text>
+<text x="678" y="402" font-family="Menlo,Consolas,monospace" font-size="17" font-weight="400" fill="#778995">28</text>
+<text x="713" y="402" font-family="Menlo,Consolas,monospace" font-size="20" font-weight="600" fill="#1562B5">NOTIFICATION_CREATE</text>
+<text x="982" y="402" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="19" font-weight="400" fill="#243441">创建通知对象</text>
+<text x="678" y="430" font-family="Menlo,Consolas,monospace" font-size="17" font-weight="400" fill="#778995">29</text>
+<text x="713" y="430" font-family="Menlo,Consolas,monospace" font-size="20" font-weight="600" fill="#1562B5">NOTIFICATION_SIGNAL</text>
+<text x="982" y="430" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="19" font-weight="400" fill="#243441">合并事件并唤醒等待者</text>
+<text x="678" y="458" font-family="Menlo,Consolas,monospace" font-size="17" font-weight="400" fill="#778995">30</text>
+<text x="713" y="458" font-family="Menlo,Consolas,monospace" font-size="20" font-weight="600" fill="#1562B5">NOTIFICATION_WAIT</text>
+<text x="982" y="458" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="19" font-weight="400" fill="#243441">有事件返回，否则阻塞</text>
+<text x="678" y="486" font-family="Menlo,Consolas,monospace" font-size="17" font-weight="400" fill="#778995">31</text>
+<text x="713" y="486" font-family="Menlo,Consolas,monospace" font-size="20" font-weight="600" fill="#1562B5">NOTIFICATION_POLL</text>
+<text x="982" y="486" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="19" font-weight="400" fill="#243441">非阻塞取走事件</text>
+<text x="678" y="514" font-family="Menlo,Consolas,monospace" font-size="17" font-weight="400" fill="#778995">32</text>
+<text x="713" y="514" font-family="Menlo,Consolas,monospace" font-size="20" font-weight="600" fill="#1562B5">NOTIFICATION_DESTROY</text>
+<text x="982" y="514" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="19" font-weight="400" fill="#243441">销毁空闲通知对象</text>
+<rect x="1280" y="202" width="600" height="365" rx="14" fill="#FFFFFF" stroke="#CDD8E0" stroke-width="1.5"/>
+<rect x="1280" y="202" width="600" height="55" rx="0" fill="#007F76" stroke="none" stroke-width="1.5"/>
+<text x="1300" y="239" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="28" font-weight="700" fill="#FFFFFF">内存与地址空间</text>
+<text x="1795" y="238" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="23" font-weight="600" fill="#FFFFFF">7 项</text>
+<text x="1300" y="284" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="19" font-weight="400" fill="#60717D">分开管理物理内存对象、映射与页表</text>
+<text x="1298" y="318" font-family="Menlo,Consolas,monospace" font-size="17" font-weight="400" fill="#778995">14</text>
+<text x="1333" y="318" font-family="Menlo,Consolas,monospace" font-size="20" font-weight="600" fill="#007F76">FRAME_ALLOC</text>
+<text x="1602" y="318" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="19" font-weight="400" fill="#243441">分配普通内存对象</text>
+<text x="1298" y="346" font-family="Menlo,Consolas,monospace" font-size="17" font-weight="400" fill="#778995">15</text>
+<text x="1333" y="346" font-family="Menlo,Consolas,monospace" font-size="20" font-weight="600" fill="#007F76">FRAME_FREE</text>
+<text x="1602" y="346" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="19" font-weight="400" fill="#243441">释放未映射的 Frame</text>
+<text x="1298" y="374" font-family="Menlo,Consolas,monospace" font-size="17" font-weight="400" fill="#778995">16</text>
+<text x="1333" y="374" font-family="Menlo,Consolas,monospace" font-size="20" font-weight="600" fill="#007F76">FRAME_MAP</text>
+<text x="1602" y="374" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="19" font-weight="400" fill="#243441">映射到当前地址空间</text>
+<text x="1298" y="402" font-family="Menlo,Consolas,monospace" font-size="17" font-weight="400" fill="#778995">17</text>
+<text x="1333" y="402" font-family="Menlo,Consolas,monospace" font-size="20" font-weight="600" fill="#007F76">FRAME_UNMAP</text>
+<text x="1602" y="402" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="19" font-weight="400" fill="#243441">撤销一个映射对象</text>
+<text x="1298" y="430" font-family="Menlo,Consolas,monospace" font-size="17" font-weight="400" fill="#778995">35</text>
+<text x="1333" y="430" font-family="Menlo,Consolas,monospace" font-size="20" font-weight="600" fill="#007F76">VSPACE_CREATE</text>
+<text x="1602" y="430" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="19" font-weight="400" fill="#243441">创建新的地址空间</text>
+<text x="1298" y="458" font-family="Menlo,Consolas,monospace" font-size="17" font-weight="400" fill="#778995">36</text>
+<text x="1333" y="458" font-family="Menlo,Consolas,monospace" font-size="20" font-weight="600" fill="#007F76">VSPACE_DESTROY</text>
+<text x="1602" y="458" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="19" font-weight="400" fill="#243441">销毁空闲地址空间</text>
+<text x="1298" y="486" font-family="Menlo,Consolas,monospace" font-size="17" font-weight="400" fill="#778995">37</text>
+<text x="1333" y="486" font-family="Menlo,Consolas,monospace" font-size="20" font-weight="600" fill="#007F76">FRAME_MAP_TO</text>
+<text x="1602" y="486" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="19" font-weight="400" fill="#243441">映射到指定地址空间</text>
+<text x="1302" y="542" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="20" font-weight="600" fill="#007F76">Frame 是内存对象；Mapping 是映射记录</text>
+<rect x="40" y="587" width="600" height="365" rx="14" fill="#FFFFFF" stroke="#CDD8E0" stroke-width="1.5"/>
+<rect x="40" y="587" width="600" height="55" rx="0" fill="#7053A3" stroke="none" stroke-width="1.5"/>
+<text x="60" y="624" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="28" font-weight="700" fill="#FFFFFF">线程与调度</text>
+<text x="555" y="623" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="23" font-weight="600" fill="#FFFFFF">9 项</text>
+<text x="60" y="669" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="19" font-weight="400" fill="#60717D">创建执行上下文；控制运行状态与优先级</text>
+<text x="58" y="703" font-family="Menlo,Consolas,monospace" font-size="17" font-weight="400" fill="#778995">18</text>
+<text x="93" y="703" font-family="Menlo,Consolas,monospace" font-size="20" font-weight="600" fill="#7053A3">THREAD_CREATE</text>
+<text x="362" y="703" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="19" font-weight="400" fill="#243441">创建当前空间的线程</text>
+<text x="58" y="731" font-family="Menlo,Consolas,monospace" font-size="17" font-weight="400" fill="#778995">38</text>
+<text x="93" y="731" font-family="Menlo,Consolas,monospace" font-size="20" font-weight="600" fill="#7053A3">THREAD_CREATE_IN</text>
+<text x="362" y="731" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="19" font-weight="400" fill="#243441">在目标空间创建挂起线程</text>
+<text x="58" y="759" font-family="Menlo,Consolas,monospace" font-size="17" font-weight="400" fill="#778995">39</text>
+<text x="93" y="759" font-family="Menlo,Consolas,monospace" font-size="20" font-weight="600" fill="#7053A3">THREAD_START</text>
+<text x="362" y="759" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="19" font-weight="400" fill="#243441">将挂起线程置为就绪</text>
+<text x="58" y="787" font-family="Menlo,Consolas,monospace" font-size="17" font-weight="400" fill="#778995">40</text>
+<text x="93" y="787" font-family="Menlo,Consolas,monospace" font-size="20" font-weight="600" fill="#7053A3">THREAD_SUSPEND</text>
+<text x="362" y="787" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="19" font-weight="400" fill="#243441">暂停尚未运行的线程</text>
+<text x="58" y="815" font-family="Menlo,Consolas,monospace" font-size="17" font-weight="400" fill="#778995">41</text>
+<text x="93" y="815" font-family="Menlo,Consolas,monospace" font-size="20" font-weight="600" fill="#7053A3">THREAD_DESTROY</text>
+<text x="362" y="815" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="19" font-weight="400" fill="#243441">销毁可回收的线程对象</text>
+<text x="58" y="843" font-family="Menlo,Consolas,monospace" font-size="17" font-weight="400" fill="#778995">19</text>
+<text x="93" y="843" font-family="Menlo,Consolas,monospace" font-size="20" font-weight="600" fill="#7053A3">THREAD_EXIT</text>
+<text x="362" y="843" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="19" font-weight="400" fill="#243441">结束当前线程</text>
+<text x="58" y="871" font-family="Menlo,Consolas,monospace" font-size="17" font-weight="400" fill="#778995">20</text>
+<text x="93" y="871" font-family="Menlo,Consolas,monospace" font-size="20" font-weight="600" fill="#7053A3">THREAD_YIELD</text>
+<text x="362" y="871" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="19" font-weight="400" fill="#243441">主动让出执行机会</text>
+<text x="58" y="899" font-family="Menlo,Consolas,monospace" font-size="17" font-weight="400" fill="#778995">21</text>
+<text x="93" y="899" font-family="Menlo,Consolas,monospace" font-size="20" font-weight="600" fill="#7053A3">THREAD_SET_PRIORITY</text>
+<text x="362" y="899" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="19" font-weight="400" fill="#243441">调整线程基础优先级</text>
+<text x="58" y="927" font-family="Menlo,Consolas,monospace" font-size="17" font-weight="400" fill="#778995">33</text>
+<text x="93" y="927" font-family="Menlo,Consolas,monospace" font-size="20" font-weight="600" fill="#7053A3">THREAD_RUNTIME</text>
+<text x="362" y="927" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="19" font-weight="400" fill="#243441">查询累计运行 tick</text>
+<rect x="660" y="587" width="600" height="365" rx="14" fill="#FFFFFF" stroke="#CDD8E0" stroke-width="1.5"/>
+<rect x="660" y="587" width="600" height="55" rx="0" fill="#265077" stroke="none" stroke-width="1.5"/>
+<text x="680" y="624" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="28" font-weight="700" fill="#FFFFFF">Endpoint 同步 IPC</text>
+<text x="1175" y="623" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="23" font-weight="600" fill="#FFFFFF">7 项</text>
+<text x="680" y="669" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="19" font-weight="400" fill="#60717D">通过消息与 Reply 连接用户态服务</text>
+<text x="678" y="703" font-family="Menlo,Consolas,monospace" font-size="17" font-weight="400" fill="#778995">22</text>
+<text x="713" y="703" font-family="Menlo,Consolas,monospace" font-size="20" font-weight="600" fill="#265077">ENDPOINT_CREATE</text>
+<text x="982" y="703" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="19" font-weight="400" fill="#243441">创建同步通信端点</text>
+<text x="678" y="731" font-family="Menlo,Consolas,monospace" font-size="17" font-weight="400" fill="#778995">23</text>
+<text x="713" y="731" font-family="Menlo,Consolas,monospace" font-size="20" font-weight="600" fill="#265077">ENDPOINT_SEND</text>
+<text x="982" y="731" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="19" font-weight="400" fill="#243441">发送消息并等待接收</text>
+<text x="678" y="759" font-family="Menlo,Consolas,monospace" font-size="17" font-weight="400" fill="#778995">24</text>
+<text x="713" y="759" font-family="Menlo,Consolas,monospace" font-size="20" font-weight="600" fill="#265077">ENDPOINT_RECV</text>
+<text x="982" y="759" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="19" font-weight="400" fill="#243441">接收消息，无发送者则等</text>
+<text x="678" y="787" font-family="Menlo,Consolas,monospace" font-size="17" font-weight="400" fill="#778995">25</text>
+<text x="713" y="787" font-family="Menlo,Consolas,monospace" font-size="20" font-weight="600" fill="#265077">ENDPOINT_CALL</text>
+<text x="982" y="787" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="19" font-weight="400" fill="#243441">发送请求并等待回复</text>
+<text x="678" y="815" font-family="Menlo,Consolas,monospace" font-size="17" font-weight="400" fill="#778995">26</text>
+<text x="713" y="815" font-family="Menlo,Consolas,monospace" font-size="20" font-weight="600" fill="#265077">ENDPOINT_REPLY</text>
+<text x="982" y="815" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="19" font-weight="400" fill="#243441">用回复凭据完成请求</text>
+<text x="678" y="843" font-family="Menlo,Consolas,monospace" font-size="17" font-weight="400" fill="#778995">27</text>
+<text x="713" y="843" font-family="Menlo,Consolas,monospace" font-size="20" font-weight="600" fill="#265077">ENDPOINT_REPLY_RECV</text>
+<text x="982" y="843" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="19" font-weight="400" fill="#243441">回复后接收下一请求</text>
+<text x="678" y="871" font-family="Menlo,Consolas,monospace" font-size="17" font-weight="400" fill="#778995">34</text>
+<text x="713" y="871" font-family="Menlo,Consolas,monospace" font-size="20" font-weight="600" fill="#265077">ENDPOINT_DESTROY</text>
+<text x="982" y="871" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="19" font-weight="400" fill="#243441">销毁空闲通信端点</text>
+<text x="682" y="927" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="19" font-weight="400" fill="#265077">消息经线程 IPC Buffer 传递；此处非 USB 端点</text>
+<rect x="1280" y="587" width="600" height="365" rx="14" fill="#FFFFFF" stroke="#CDD8E0" stroke-width="1.5"/>
+<rect x="1280" y="587" width="600" height="55" rx="0" fill="#56636D" stroke="none" stroke-width="1.5"/>
+<text x="1300" y="624" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="28" font-weight="700" fill="#FFFFFF">输出与任务退出</text>
+<text x="1795" y="623" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="23" font-weight="600" fill="#FFFFFF">2 项</text>
+<text x="1300" y="669" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="19" font-weight="400" fill="#60717D">提供调试输出与整体任务生命周期接口</text>
+<text x="1298" y="703" font-family="Menlo,Consolas,monospace" font-size="17" font-weight="400" fill="#778995">2</text>
+<text x="1333" y="703" font-family="Menlo,Consolas,monospace" font-size="20" font-weight="600" fill="#56636D">PUTS</text>
+<text x="1602" y="703" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="19" font-weight="400" fill="#243441">经内核输出调试字符串</text>
+<text x="1298" y="731" font-family="Menlo,Consolas,monospace" font-size="17" font-weight="400" fill="#778995">5</text>
+<text x="1333" y="731" font-family="Menlo,Consolas,monospace" font-size="20" font-weight="600" fill="#56636D">EXIT</text>
+<text x="1602" y="731" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="19" font-weight="400" fill="#243441">结束当前 EL0 任务</text>
+<rect x="1300" y="777" width="560" height="152" rx="8" fill="#F0F4F7" stroke="none" stroke-width="1.5"/>
+<text x="1316" y="810" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="22" font-weight="700" fill="#56636D">系统调用边界</text>
+<text x="1316" y="841" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="21" font-weight="400" fill="#243441">UART 读写、USB 协议、Event Ring 解析</text>
+<text x="1316" y="871" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="21" font-weight="400" fill="#243441">以及文件系统逻辑由 EL0 实现。</text>
+<text x="1316" y="905" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="20" font-weight="400" fill="#60717D">这些操作并非每一步都要进入内核。</text>
+<text x="40" y="994" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="24" font-weight="600" fill="#243441">阅读重点：设备访问 4 项  +  IRQ 与通知 8 项，是用户态驱动接入内核的主要接口。</text>
+<text x="40" y="1033" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="19" font-weight="400" fill="#60717D">来源：abi/src/lib.rs · kernel/src/syscall/dispatch.rs  |  2026-10-19 源码核查  |  编号 8 为历史空洞</text>
+<text x="40" y="1061" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="18" font-weight="400" fill="#60717D">完整参数、返回值、状态限制和错误约定：Exokernel系统调用清单.md</text>
+</svg>

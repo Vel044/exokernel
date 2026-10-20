@@ -1,142 +1,125 @@
-//! 从完整 DTB 生成 EL1 内部唯一的平台资源快照。
+//! 已选择平台的启动与授权清单，不执行 DTB 解析或设备枚举。
 //!
-//! UserBootInfo、平台 MMIO 目录和当前任务 grant 都从这个结果派生；
-//! 完整 DTB 本身不映射给 EL0。
+//! GIC/Timer/CPU 必须在 EL0 启动前就绪；设备访问范围由平台配置授予，
+//! libOS 解析 DTB 只获得描述，不能扩张这些授权。新板卡须提供相应平台配置。
 
-use crate::dtb::{IrqSpec, RegRange};
-use exo_abi::PciHostInfo;
-use fdt::Fdt;
+use crate::task::{IrqGrant, MmioGrant};
 
-#[derive(Clone, Copy)]
+/// PSCI 启动使用的逻辑 CPU 到硬件 MPIDR 对照。
 pub struct CpuTopology {
+    /// 当前平台要求启动的 CPU 数。
     pub count: usize,
+    /// 固件 PSCI_CPU_ON 接口接受的硬件 CPU 标识。
     pub mpidrs: [u64; exo_abi::MAX_CPUS],
 }
 
-impl CpuTopology {
-    const EMPTY: Self = Self {
-        count: 0,
-        mpidrs: [0; exo_abi::MAX_CPUS],
-    };
-}
-
+/// 平台固定的最小启动信息及初始 libOS 可申请的设备范围。
 pub struct PlatformResources {
-    pub uart: RegRange,
-    pub uart_irq: IrqSpec,
+    /// 内核诊断 PL011 的 CPU PA，不用于决定用户态选择哪个 UART。
+    pub uart_pa: u64,
+    /// GICv2 Distributor / CPU Interface 的 CPU PA，只允许 EL1 访问。
     pub gicd_pa: u64,
     pub gicc_pa: u64,
-    pub pci: PciHostInfo,
-    pub xhci: Option<(RegRange, IrqSpec)>,
-    /// 连续的virtio-mmio transport窗口。Kernel只授权MMIO，不识别块设备类型。
-    pub virtio_mmio: Option<RegRange>,
-    pub timer_irq: IrqSpec,
+    /// CNTP / CNTV 的 GIC PPI，分别用于原生 EL2 启动和 HVF EL1 启动。
+    pub physical_timer_intid: u32,
+    pub virtual_timer_intid: u32,
+    /// PSCI CPU 拓扑，不从用户态提交的数据建立。
     pub cpus: CpuTopology,
+    /// 页对齐的 MMIO 授权范围，不能包括普通 RAM 或 GIC。
+    pub mmio: &'static [MmioGrant],
+    /// 设备 GIC SPI 及已审核的触发标志，IRQ_BIND 继续逐项校验。
+    pub irqs: &'static [IrqGrant],
 }
 
-pub fn discover(dtb_pa: u64) -> Option<PlatformResources> {
-    crate::dtb::total_size(dtb_pa)?;
-    let (gicd_pa, gicc_pa) = crate::dtb::find_gic_regs(dtb_pa)?;
-    Some(PlatformResources {
-        uart: crate::dtb::find_pl011_reg(dtb_pa)?,
-        uart_irq: crate::dtb::find_uart_irq(dtb_pa)?,
-        gicd_pa,
-        gicc_pa,
-        pci: crate::pci::from_dtb(dtb_pa).unwrap_or_default(),
-        xhci: crate::dtb::find_rp1_xhci(dtb_pa),
-        virtio_mmio: discover_virtio_mmio_window(dtb_pa),
-        timer_irq: crate::dtb::find_nonsecure_physical_timer_irq(dtb_pa)?,
-        cpus: discover_cpus(dtb_pa)?,
-    })
-}
+/// 与 platform/qemu/qemu-virt.dtb、qemu/config.sh 的四核 GICv2 配置一致。
+#[cfg(feature = "qemu")]
+pub static PLATFORM: PlatformResources = PlatformResources {
+    uart_pa: 0x0900_0000,
+    gicd_pa: 0x0800_0000,
+    gicc_pa: 0x0801_0000,
+    physical_timer_intid: 30,
+    virtual_timer_intid: 27,
+    cpus: CpuTopology {
+        count: 4,
+        mpidrs: [0, 1, 2, 3],
+    },
+    mmio: &[
+        MmioGrant {
+            base: 0x0900_0000,
+            size: 0x1000,
+        }, // PL011
+        MmioGrant {
+            base: 0x0a00_0000,
+            size: 0x4000,
+        }, // 32 个 virtio transport
+        MmioGrant {
+            base: 0x40_1000_0000,
+            size: 0x10_0000,
+        }, // PCI bus 0 ECAM
+        MmioGrant {
+            base: 0x1000_0000,
+            size: 0x2eff_0000,
+        }, // PCI 32 位 MMIO
+        MmioGrant {
+            base: 0x80_0000_0000,
+            size: 0x80_0000_0000,
+        }, // PCI 64 位 MMIO
+    ],
+    irqs: &[
+        IrqGrant {
+            intid: 33,
+            flags: 4,
+        }, // PL011，电平高
+        IrqGrant {
+            intid: 35,
+            flags: 4,
+        }, // PCI INTA..INTD
+        IrqGrant {
+            intid: 36,
+            flags: 4,
+        },
+        IrqGrant {
+            intid: 37,
+            flags: 4,
+        },
+        IrqGrant {
+            intid: 38,
+            flags: 4,
+        },
+    ],
+};
 
-/// 合并DTB中的连续`virtio,mmio`节点，供EL0自行读取device_id并选择驱动。
-///
-/// QEMU virt目前给出32个相邻的0x200字节transport。授权时按4KiB页向外
-/// 对齐，但仍从完整DTB计算窗口，避免把0x0a00_0000写死进Kernel策略。
-fn discover_virtio_mmio_window(dtb_pa: u64) -> Option<RegRange> {
-    let tree = unsafe { Fdt::from_ptr(dtb_pa as *const u8) }.ok()?;
-    let mut first = u64::MAX;
-    let mut last = 0u64;
-    let mut count = 0usize;
-    for node in tree.all_nodes() {
-        let compatible = node
-            .compatible()
-            .is_some_and(|list| list.all().any(|value| value == "virtio,mmio"));
-        if !compatible {
-            continue;
-        }
-        let region = node.reg()?.next()?;
-        let base = region.starting_address as u64;
-        let size = region.size? as u64;
-        let end = base.checked_add(size)?;
-        first = first.min(base);
-        last = last.max(end);
-        count += 1;
-    }
-    if count == 0 || first >= last {
-        return None;
-    }
-    let page_first = first & !(exo_abi::PAGE_SIZE - 1);
-    let page_last = last.checked_add(exo_abi::PAGE_SIZE - 1)? & !(exo_abi::PAGE_SIZE - 1);
-    Some(RegRange {
-        base: page_first,
-        size: page_last.checked_sub(page_first)?,
-    })
-}
-
-/// QEMU virt和Pi5都通过PSCI SMC启动辅助核。这里只解析CPU硬件ID，
-/// PSCI调用和辅助核入口属于AArch64架构层，不放进DTB解析器。
-fn discover_cpus(dtb_pa: u64) -> Option<CpuTopology> {
-    let tree = unsafe { Fdt::from_ptr(dtb_pa as *const u8) }.ok()?;
-    let psci = tree.find_node("/psci")?;
-    if psci.property("method")?.value != b"smc\0" {
-        return None;
-    }
-    let cpus = tree.find_node("/cpus")?;
-    let address_cells = cpus
-        .property("#address-cells")
-        .and_then(|property| read_be_u32(property.value))
-        .unwrap_or(1) as usize;
-    if address_cells == 0 || address_cells > 2 {
-        return None;
-    }
-
-    let mut topology = CpuTopology::EMPTY;
-    for node in cpus.children() {
-        if !node.name.starts_with("cpu@") {
-            continue;
-        }
-        if let Some(status) = node.property("status") {
-            if status.value != b"okay\0" && status.value != b"ok\0" {
-                continue;
-            }
-        }
-        if let Some(method) = node.property("enable-method") {
-            if method.value != b"psci\0" {
-                return None;
-            }
-        }
-        let reg = node.property("reg")?.value;
-        if reg.len() < address_cells * 4 || topology.count == exo_abi::MAX_CPUS {
-            return None;
-        }
-        let mut mpidr = 0u64;
-        let mut cell = 0usize;
-        while cell < address_cells {
-            let start = cell * 4;
-            mpidr = (mpidr << 32) | read_be_u32(&reg[start..start + 4])? as u64;
-            cell += 1;
-        }
-        topology.mpidrs[topology.count] = mpidr;
-        topology.count += 1;
-    }
-    if topology.count == exo_abi::MAX_CPUS {
-        Some(topology)
-    } else {
-        None
-    }
-}
-
-fn read_be_u32(bytes: &[u8]) -> Option<u32> {
-    Some(u32::from_be_bytes(bytes.get(..4)?.try_into().ok()?))
-}
+/// Pi5 固件采用 UART10 与已配置的 RP1 直通窗口；保留原先第一路 USB 授权。
+/// 配置依据 platform/pi5/bcm2712-rpi-5-b.dtb，运行时 DTB 不可扩大这个边界。
+#[cfg(feature = "pi5")]
+pub static PLATFORM: PlatformResources = PlatformResources {
+    uart_pa: 0x10_7d00_1000,
+    gicd_pa: 0x10_7fff_9000,
+    gicc_pa: 0x10_7fff_a000,
+    physical_timer_intid: 30,
+    virtual_timer_intid: 27,
+    cpus: CpuTopology {
+        count: 4,
+        mpidrs: [0, 0x100, 0x200, 0x300],
+    },
+    mmio: &[
+        MmioGrant {
+            base: 0x10_7d00_1000,
+            size: 0x1000,
+        },
+        MmioGrant {
+            base: 0x1f_0020_0000,
+            size: 0x10_0000,
+        },
+    ],
+    irqs: &[
+        IrqGrant {
+            intid: 153,
+            flags: 4,
+        }, // UART10
+        IrqGrant {
+            intid: 158,
+            flags: 1,
+        }, // 固件已配置的 RP1 USB0，中断上升沿
+    ],
+};

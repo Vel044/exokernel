@@ -1,0 +1,261 @@
+{
+  "pl011_undefined": 43,
+  "serial_base_undefined": 99,
+  "combined_undefined": 119,
+  "direct_resolved_by_core": [
+    "uart_add_one_port",
+    "uart_get_baud_rate",
+    "uart_get_rs485_mode",
+    "uart_handle_cts_change",
+    "uart_handle_dcd_change",
+    "uart_insert_char",
+    "uart_register_driver",
+    "uart_remove_one_port",
+    "uart_unregister_driver",
+    "uart_update_timeout",
+    "uart_write_wakeup"
+  ],
+  "combined_new_vs_pl011": [
+    "___ratelimit",
+    "__arch_copy_from_user",
+    "__arch_copy_to_user",
+    "__dev_fwnode",
+    "__dev_fwnode_const",
+    "__init_waitqueue_head",
+    "__kfifo_in",
+    "__kfifo_init",
+    "__kmalloc_cache_noprof",
+    "__kmalloc_noprof",
+    "__msecs_to_jiffies",
+    "__tty_alloc_driver",
+    "__tty_insert_flip_string_flags",
+    "__warn_printk",
+    "_dev_alert",
+    "_dev_notice",
+    "add_wait_queue",
+    "bus_register",
+    "bus_unregister",
+    "console_list_lock",
+    "console_list_unlock",
+    "default_wake_function",
+    "dev_set_name",
+    "device_add",
+    "device_del",
+    "device_find_child",
+    "device_initialize",
+    "device_property_present",
+    "down_write",
+    "driver_register",
+    "driver_unregister",
+    "finish_wait",
+    "free_pages",
+    "fwnode_irq_get",
+    "fwnode_property_present",
+    "get_zeroed_page_noprof",
+    "ida_alloc_range",
+    "ida_free",
+    "init_wait_entry",
+    "irq_get_irq_data",
+    "irq_set_irq_wake",
+    "jiffies",
+    "jiffies_to_msecs",
+    "kasprintf",
+    "kfree",
+    "kmalloc_caches",
+    "kstrtobool",
+    "msleep",
+    "msleep_interruptible",
+    "mutex_lock",
+    "mutex_lock_interruptible",
+    "mutex_unlock",
+    "nsecs_to_jiffies",
+    "of_console_check",
+    "platform_bus_type",
+    "prepare_to_wait_event",
+    "put_device",
+    "register_console",
+    "remove_wait_queue",
+    "schedule",
+    "sized_strscpy",
+    "sprintf",
+    "strncmp",
+    "synchronize_irq",
+    "tty_driver_kref_put",
+    "tty_hangup",
+    "tty_kref_put",
+    "tty_ldisc_deref",
+    "tty_ldisc_ref",
+    "tty_name",
+    "tty_port_close",
+    "tty_port_destroy",
+    "tty_port_init",
+    "tty_port_link_device",
+    "tty_port_open",
+    "tty_port_register_device_attr_serdev",
+    "tty_port_tty_get",
+    "tty_port_tty_set",
+    "tty_port_tty_wakeup",
+    "tty_port_unregister_device",
+    "tty_register_driver",
+    "tty_standard_install",
+    "tty_std_termios",
+    "tty_termios_baud_rate",
+    "tty_unregister_driver",
+    "tty_vhangup",
+    "up_write"
+  ],
+  "headers_or_sources": 704,
+  "direct_external_call_sites": 66,
+  "indirect_call_sites": 6,
+  "inline_assembly_sites": 249,
+  "compiled_driver_functions": 38,
+  "compiled_ops": [
+    {
+      "field": "tx_empty",
+      "source_symbol": "pl011_tx_empty",
+      "field_in_preprocessed": true,
+      "compiled_function": true
+    },
+    {
+      "field": "set_mctrl",
+      "source_symbol": "pl011_set_mctrl",
+      "field_in_preprocessed": true,
+      "compiled_function": true
+    },
+    {
+      "field": "get_mctrl",
+      "source_symbol": "pl011_get_mctrl",
+      "field_in_preprocessed": true,
+      "compiled_function": true
+    },
+    {
+      "field": "stop_tx",
+      "source_symbol": "pl011_stop_tx",
+      "field_in_preprocessed": true,
+      "compiled_function": true
+    },
+    {
+      "field": "start_tx",
+      "source_symbol": "pl011_start_tx",
+      "field_in_preprocessed": true,
+      "compiled_function": true
+    },
+    {
+      "field": "stop_rx",
+      "source_symbol": "pl011_stop_rx",
+      "field_in_preprocessed": true,
+      "compiled_function": true
+    },
+    {
+      "field": "throttle",
+      "source_symbol": "pl011_throttle_rx",
+      "field_in_preprocessed": true,
+      "compiled_function": true
+    },
+    {
+      "field": "unthrottle",
+      "source_symbol": "pl011_unthrottle_rx",
+      "field_in_preprocessed": true,
+      "compiled_function": true
+    },
+    {
+      "field": "enable_ms",
+      "source_symbol": "pl011_enable_ms",
+      "field_in_preprocessed": true,
+      "compiled_function": true
+    },
+    {
+      "field": "break_ctl",
+      "source_symbol": "pl011_break_ctl",
+      "field_in_preprocessed": true,
+      "compiled_function": true
+    },
+    {
+      "field": "startup",
+      "source_symbol": "pl011_startup",
+      "field_in_preprocessed": true,
+      "compiled_function": true
+    },
+    {
+      "field": "shutdown",
+      "source_symbol": "pl011_shutdown",
+      "field_in_preprocessed": true,
+      "compiled_function": true
+    },
+    {
+      "field": "set_termios",
+      "source_symbol": "pl011_set_termios",
+      "field_in_preprocessed": true,
+      "compiled_function": true
+    },
+    {
+      "field": "type",
+      "source_symbol": "pl011_type",
+      "field_in_preprocessed": true,
+      "compiled_function": true
+    },
+    {
+      "field": "config_port",
+      "source_symbol": "pl011_config_port",
+      "field_in_preprocessed": true,
+      "compiled_function": true
+    },
+    {
+      "field": "verify_port",
+      "source_symbol": "pl011_verify_port",
+      "field_in_preprocessed": true,
+      "compiled_function": true
+    }
+  ],
+  "asm_daif_sites": 26,
+  "asm_alternative_sites": 52,
+  "key_type_layouts": [
+    {
+      "name": "resource",
+      "size": "64",
+      "alignment": "8"
+    },
+    {
+      "name": "ktermios",
+      "size": "44",
+      "alignment": "4"
+    },
+    {
+      "name": "tty_port",
+      "size": "376",
+      "alignment": "8"
+    },
+    {
+      "name": "uart_ops",
+      "size": "192",
+      "alignment": "8"
+    },
+    {
+      "name": "uart_port",
+      "size": "528",
+      "alignment": "8"
+    },
+    {
+      "name": "uart_state",
+      "size": "416",
+      "alignment": "8"
+    },
+    {
+      "name": "amba_device",
+      "size": "672",
+      "alignment": "8"
+    },
+    {
+      "name": "vendor_data",
+      "size": "48",
+      "alignment": "8"
+    },
+    {
+      "name": "uart_amba_port",
+      "size": "592",
+      "alignment": "8"
+    }
+  ],
+  "source_sha256": "5aea658e8224ea09e39ccb245fc0bc0851a1e1e281e00831a60c256159a90b96",
+  "config_sha256": "822500631aa02b021d7dab6e755903bfef67ada826f3bbfbad79aa18a9f7ec49"
+}

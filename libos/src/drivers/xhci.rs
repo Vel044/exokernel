@@ -1,7 +1,7 @@
 //! xHCI资源映射与CrabUSB Host初始化。
 //!
-//! QEMU后端通过用户态PCI枚举得到BAR和INTx；Pi5后端直接使用EL1从DTB
-//! 裁剪出的RP1资源。两条路径汇合后，本模块只负责MMIO、IRQ和Host生命周期。
+//! QEMU后端通过用户态PCI枚举得到BAR和INTx；Pi5后端直接使用EL0从完整DTB
+//! 解析的RP1资源。两条路径汇合后，本模块只负责MMIO、IRQ和Host生命周期。
 
 use core::ptr::NonNull;
 
@@ -32,7 +32,7 @@ pub(crate) struct XhciContext {
 }
 
 /// 取得授权资源并初始化xHCI控制器。
-pub(crate) fn initialize(info: &exo_abi::UserBootInfo) -> Result<XhciContext, (&'static str, u64)> {
+pub(crate) fn initialize(info: &crate::drivers::platform::DeviceInfo) -> Result<XhciContext, (&'static str, u64)> {
     let resource = discover_resource(info)?;
 
     // Kernel只建立Device-nGnRE映射；之后CrabUSB直接访问XHCI_VA寄存器。
@@ -78,9 +78,9 @@ pub(crate) fn initialize(info: &exo_abi::UserBootInfo) -> Result<XhciContext, (&
     })
 }
 
-fn discover_resource(info: &exo_abi::UserBootInfo) -> Result<HostResource, (&'static str, u64)> {
-    // Pi5：EL1已经从RP1 snps,dwc3节点提取并授权标准xHCI寄存器窗口。
-    if info.xhci_transport == exo_abi::XHCI_TRANSPORT_DIRECT {
+fn discover_resource(info: &crate::drivers::platform::DeviceInfo) -> Result<HostResource, (&'static str, u64)> {
+    // Pi5：EL0从RP1 snps,dwc3节点提取标准xHCI寄存器窗口；映射时另查EL1授权。
+    if info.xhci_transport == super::platform::XHCI_TRANSPORT_DIRECT {
         // SPI INTID从32开始；零地址、零长度或PPI/SGI都不是合法设备资源。
         if info.xhci.base == 0 || info.xhci.size == 0 || info.xhci.intid < 32 {
             return Err(("invalid direct RP1 xHCI resource", 0x200));
@@ -93,8 +93,8 @@ fn discover_resource(info: &exo_abi::UserBootInfo) -> Result<HostResource, (&'st
         });
     }
 
-    // QEMU：Kernel只给PCI Host资源，具体function枚举和BAR解析由EL0完成。
-    if info.xhci_transport == exo_abi::XHCI_TRANSPORT_PCI {
+    // QEMU：PCI Host发现、function枚举和BAR解析均在EL0完成。
+    if info.xhci_transport == super::platform::XHCI_TRANSPORT_PCI {
         crate::runtime::puts(b"[libos] QEMU PCI xHCI backend\r\n");
         // find_xhci映射bus 0 ECAM，寻找class 0x0c0330并开启Bus Master。
         let xhci = crate::pci::find_xhci(&info.pci).map_err(|message| (message, 0x201))?;
@@ -116,5 +116,5 @@ fn discover_resource(info: &exo_abi::UserBootInfo) -> Result<HostResource, (&'st
         });
     }
 
-    Err(("no xHCI transport in UserBootInfo", 0x202))
+    Err(("no xHCI transport in EL0 DeviceInfo", 0x202))
 }

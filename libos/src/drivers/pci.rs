@@ -3,8 +3,8 @@
 //! 资源边界如下：
 //!
 //! ```text
-//! EL1解析DTB
-//!   → 把ECAM物理范围和PCI MMIO window写入UserBootInfo及任务授权表
+//! EL0解析完整DTB
+//!   → 得到ECAM、PCI MMIO window及INTx描述；EL1独立维护平台授权表
 //! EL0调用SYS_MAP_MMIO
 //!   → EL1校验授权并建立ECAM VA映射
 //! EL0通过volatile直接读取PCI配置空间
@@ -14,7 +14,7 @@
 //! 只有“建立映射”需要进入Kernel。映射成功后，每一次PCI配置寄存器访问
 //! 都是EL0对ECAM虚拟地址的普通volatile load/store，不再逐次调用系统调用。
 
-use exo_abi::PciHostInfo;
+use super::platform::PciHostInfo;
 
 /// PCI class/subclass/programming-interface = 0x0c/0x03/0x30，表示xHCI。
 const PCI_CLASS_XHCI: u32 = 0x0c03_30;
@@ -41,7 +41,7 @@ pub struct Bdf {
 }
 
 pub fn find_xhci(info: &PciHostInfo) -> Result<XhciFunction, &'static str> {
-    // UserBootInfo只描述EL1已经授权给当前libOS的PCI host。这里不能自行
+    // DeviceInfo来自EL0设备发现，不代表授权。这里不能自行
     // 猜测ECAM物理地址；present=0或bus 0不可访问就立即拒绝。
     if info.present == 0 || info.bus_start != 0 {
         return Err("PCI host unavailable or bus 0 not accessible");
@@ -90,7 +90,7 @@ pub fn find_xhci(info: &PciHostInfo) -> Result<XhciFunction, &'static str> {
                 if class == PCI_CLASS_XHCI {
                     // BAR中的地址是PCI bus address，还不能直接拿去建CPU页表。
                     let (bar_bus, bar_size) = probe_bar0(&ecam, bdf)?;
-                    // 使用EL1从DTB ranges裁剪后交来的窗口完成bus→CPU PA转换。
+                    // 使用EL0从DTB ranges解析的窗口完成bus→CPU PA转换。
                     let bar_pa = translate_bar(info, bar_bus, bar_size)?;
                     // Interrupt Pin寄存器给出INTA..INTD，再查DTB interrupt-map。
                     let pin = ecam.read8(bdf, 0x3d) as u32;

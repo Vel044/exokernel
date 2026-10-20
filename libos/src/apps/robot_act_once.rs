@@ -80,7 +80,7 @@ extern "C" fn inference_worker(job_ptr: u64, _thread: u64, _ipc: u64) -> ! {
 
 /// 真实USB资源入口由usb_task调用；普通run只保留给编译期场景分发。
 pub(crate) fn run_with_resources(
-    info: &exo_abi::UserBootInfo,
+    info: &crate::drivers::platform::DeviceInfo,
     host: &mut USBHost,
     handler: &EventHandler,
     intid: u32,

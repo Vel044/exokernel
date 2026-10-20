@@ -1,6 +1,7 @@
 //! EL2 启动阶段的平台差异。
 //!
-//! 正式 EL1/EL0 设备驱动不读取这里的 MMIO 地址，统一通过 DTB 发现设备。
+//! 这里只选择完整 DTB 的交接来源和早期诊断地址；EL1 的最小启动与授权
+//! 清单位于 resource/resources.rs，设备发现统一由 EL0 完成。
 
 #[cfg(all(feature = "qemu", feature = "pi5"))]
 compile_error!("features `qemu` and `pi5` are mutually exclusive");

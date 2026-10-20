@@ -13,27 +13,27 @@ pub(crate) struct ReadySignal {
 }
 
 /// 普通单任务启动入口，不需要向其他线程报告ready。
-pub(crate) fn run(info: &exo_abi::UserBootInfo) -> ! {
+pub(crate) fn run(info: &crate::drivers::platform::DeviceInfo) -> ! {
     // None表示USB应用就绪后直接继续运行，不执行NOTIFICATION_SIGNAL。
     run_with_ready_signal(info, None)
 }
 
 extern "C" fn dedicated_usb_entry(boot_info: u64, _thread: u64, _ipc: u64) -> ! {
-    let info = unsafe { &*(boot_info as *const exo_abi::UserBootInfo) };
+    let info = unsafe { &*(boot_info as *const crate::drivers::platform::DeviceInfo) };
     run(info)
 }
 
 /// 创建固定运行在 CPU2 的 USB 线程，并让当前启动线程停放等待。
-pub(crate) fn run_dedicated(info: &exo_abi::UserBootInfo) -> ! {
+pub(crate) fn run_dedicated(info: &crate::drivers::platform::DeviceInfo) -> ! {
     // 本应用要求 CPU2 在线，用它专门运行 USB 栈。
     if info.cpu_count < 3 {
         fail("SMP CPU2 is not online", 0x20e);
     }
 
-    // 把入口、UserBootInfo 地址和调度参数交给 Kernel，创建一个 CPU2 线程。
+    // 把入口、用户态 DeviceInfo 地址和调度参数交给 Kernel，创建一个 CPU2 线程。
     let _usb = crate::thread::Thread::spawn(
         dedicated_usb_entry,
-        info as *const exo_abi::UserBootInfo as u64,
+        info as *const crate::drivers::platform::DeviceInfo as u64,
         crate::thread::ThreadConfig::new(2, 48, 48),
     )
     .unwrap_or_else(|error| fail_with_code("failed to create USB thread", error));
@@ -52,7 +52,7 @@ pub(crate) fn run_dedicated(info: &exo_abi::UserBootInfo) -> ! {
 ///
 /// 返回类型为`!`：成功后上层应用永久运行；失败时调用SYS_EXIT终止任务。
 pub(crate) fn run_with_ready_signal(
-    info: &exo_abi::UserBootInfo,
+    info: &crate::drivers::platform::DeviceInfo,
     // uvc-smoke没有协调线程；下划线允许该独立feature不产生未使用参数告警。
     _ready_signal: Option<ReadySignal>,
 ) -> ! {

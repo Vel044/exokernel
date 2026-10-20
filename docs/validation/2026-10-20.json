@@ -1,0 +1,295 @@
+{
+  "date": "2026-10-20",
+  "tested_source_tree": "62a6e6ab8160022311978f6da5b61afe60d748b4",
+  "platform": "Apple Silicon macOS / AArch64 QEMU / EDK2",
+  "build_matrix": [
+    {
+      "platform": "qemu",
+      "app": "system-smoke",
+      "passed": true
+    },
+    {
+      "platform": "qemu",
+      "app": "process-smoke",
+      "passed": true
+    },
+    {
+      "platform": "qemu",
+      "app": "uart-echo",
+      "passed": true
+    },
+    {
+      "platform": "qemu",
+      "app": "usb-echo",
+      "passed": true
+    },
+    {
+      "platform": "qemu",
+      "app": "uvc-smoke",
+      "passed": true
+    },
+    {
+      "platform": "qemu",
+      "app": "scservo",
+      "passed": true
+    },
+    {
+      "platform": "qemu",
+      "app": "scservo-move",
+      "passed": true
+    },
+    {
+      "platform": "qemu",
+      "app": "act-inference",
+      "passed": true
+    },
+    {
+      "platform": "qemu",
+      "app": "act-benchmark",
+      "passed": true
+    },
+    {
+      "platform": "qemu",
+      "app": "robot-act-once",
+      "passed": true
+    },
+    {
+      "platform": "qemu",
+      "app": "robot-observation",
+      "passed": true
+    },
+    {
+      "platform": "qemu",
+      "app": "robot-action-replay",
+      "passed": true
+    },
+    {
+      "platform": "pi5",
+      "app": "system-smoke",
+      "passed": true
+    },
+    {
+      "platform": "pi5",
+      "app": "process-smoke",
+      "passed": true
+    },
+    {
+      "platform": "pi5",
+      "app": "uart-echo",
+      "passed": true
+    },
+    {
+      "platform": "pi5",
+      "app": "usb-echo",
+      "passed": true
+    },
+    {
+      "platform": "pi5",
+      "app": "uvc-smoke",
+      "passed": true
+    },
+    {
+      "platform": "pi5",
+      "app": "scservo",
+      "passed": true
+    },
+    {
+      "platform": "pi5",
+      "app": "scservo-move",
+      "passed": true
+    }
+  ],
+  "ide_check": true,
+  "pi5_kernel_build": true,
+  "unit_tests": {
+    "dtb": 4,
+    "rutorch_runtime": 6,
+    "acl_contracts": 2,
+    "failed": 0
+  },
+  "qemu_cases": [
+    {
+      "case": "system",
+      "app": "system-smoke",
+      "accel": "tcg",
+      "dtb_source": "embedded QEMU",
+      "passed": true,
+      "seconds": 5.88
+    },
+    {
+      "case": "firmware-dtb",
+      "app": "system-smoke",
+      "accel": "tcg",
+      "dtb_source": "firmware",
+      "passed": true,
+      "seconds": 5.93
+    },
+    {
+      "case": "process",
+      "app": "process-smoke",
+      "accel": "tcg",
+      "dtb_source": "embedded QEMU",
+      "passed": true,
+      "seconds": 5.65
+    },
+    {
+      "case": "uart",
+      "app": "uart-echo",
+      "accel": "tcg",
+      "dtb_source": "embedded QEMU",
+      "passed": true,
+      "seconds": 5.91
+    },
+    {
+      "case": "usb",
+      "app": "usb-echo",
+      "accel": "tcg",
+      "dtb_source": "embedded QEMU",
+      "passed": true,
+      "seconds": 6.23
+    },
+    {
+      "case": "usb-hub",
+      "app": "usb-echo",
+      "accel": "tcg",
+      "dtb_source": "embedded QEMU",
+      "passed": true,
+      "seconds": 6.46
+    },
+    {
+      "case": "system-usb",
+      "app": "system-smoke",
+      "accel": "tcg",
+      "dtb_source": "embedded QEMU",
+      "passed": true,
+      "seconds": 6.19
+    },
+    {
+      "case": "system-hvf",
+      "app": "system-smoke",
+      "accel": "hvf",
+      "dtb_source": "embedded QEMU",
+      "passed": true,
+      "seconds": 5.45
+    },
+    {
+      "case": "process-hvf",
+      "app": "process-smoke",
+      "accel": "hvf",
+      "dtb_source": "embedded QEMU",
+      "passed": true,
+      "seconds": 5.19
+    }
+  ],
+  "clean_export": {
+    "passed": true,
+    "scenarios": [
+      "system",
+      "process",
+      "system-hvf",
+      "process-hvf"
+    ],
+    "offline": true,
+    "requires_sibling_repository": false
+  },
+  "act_correctness": [
+    {
+      "provider": "acl",
+      "case": "000",
+      "values": 600,
+      "max_abs_error": 9.1552734375e-05,
+      "output_sha256": "4bfe923cef23198bf660b000e37a44d5b82a5c903a50c1683fb98b37623583f8",
+      "passed": true
+    },
+    {
+      "provider": "acl",
+      "case": "001",
+      "values": 600,
+      "max_abs_error": 0.000152587890625,
+      "output_sha256": "e2788aa07ea66672dcfc11267807cbbc0066ddb76de54b4c3bcdea47944077d6",
+      "passed": true
+    },
+    {
+      "provider": "acl",
+      "case": "002",
+      "values": 600,
+      "max_abs_error": 0.0001220703125,
+      "output_sha256": "4c8e5beef78e58de2d21464a280622353390c26bec9472594f906cfb926c114f",
+      "passed": true
+    },
+    {
+      "provider": "acl",
+      "case": "003",
+      "values": 600,
+      "max_abs_error": 0.0001239776611328125,
+      "output_sha256": "813e9f55738f6da234846d2e06ee3ff219562167de2396c4adc24de71d779388",
+      "passed": true
+    },
+    {
+      "provider": "acl",
+      "case": "004",
+      "values": 600,
+      "max_abs_error": 6.866455078125e-05,
+      "output_sha256": "e6c6a9f7e7612bdccfd9dfc9a2b8ba867a9f3a001828b3d90912507cfb091b7b",
+      "passed": true
+    },
+    {
+      "provider": "portable",
+      "case": "000",
+      "values": 600,
+      "max_abs_error": 8.392333984375e-05,
+      "output_sha256": "9ac243929f5503ed08fef5cf9bdc36512468d0e2f11f308bdd99a3fcc2c7d686",
+      "passed": true
+    },
+    {
+      "provider": "portable",
+      "case": "001",
+      "values": 600,
+      "max_abs_error": 0.0001373291015625,
+      "output_sha256": "f1425296957c1068300750361c29098336611e800d53edaa486bd8c4bba07a53",
+      "passed": true
+    },
+    {
+      "provider": "portable",
+      "case": "002",
+      "values": 600,
+      "max_abs_error": 0.00018310546875,
+      "output_sha256": "6928f7670830f0aabbc5e052e80045b5db10e17d8f48edd0e7fb2e6f5e8f7624",
+      "passed": true
+    },
+    {
+      "provider": "portable",
+      "case": "003",
+      "values": 600,
+      "max_abs_error": 0.0001678466796875,
+      "output_sha256": "68ac861f29a0d5e04c725c915c37a57ad19f92c3de9ab4c9cfc5fe658b3c24df",
+      "passed": true
+    },
+    {
+      "provider": "portable",
+      "case": "004",
+      "values": 600,
+      "max_abs_error": 7.62939453125e-05,
+      "output_sha256": "8ab506e23a7be975262eeafe6ab996fc69331e359b681b198f1e2919aa74634c",
+      "passed": true
+    }
+  ],
+  "other_checks": [
+    "vendored manifest SHA-256",
+    "ELF static link and undefined symbol audit for each ACT run",
+    "Python and Shell syntax",
+    "no pending source file over 10MiB",
+    "no model/disk/EFI/ELF/object files staged"
+  ],
+  "fixes_found_by_regression": [
+    "firmware DTB may exceed 1MiB: move to isolated 2MiB window",
+    "blocked USB/IPC threads must accrue completed CPU runtime",
+    "complete ide feature dependencies"
+  ],
+  "not_run": [
+    "Pi5 hardware boot",
+    "real UVC capture",
+    "SCServo and real robot motion",
+    "ACT 100-run stability/performance benchmark"
+  ]
+}

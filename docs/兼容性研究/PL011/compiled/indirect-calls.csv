@@ -1,0 +1,7 @@
+﻿caller,source,line,ir_line,instruction
+sbsa_uart_shutdown,drivers/tty/serial/amba-pl011.c,1985,1371,"call void %39(ptr noundef %0) #14, !dbg !6147"
+pl011_hwinit,drivers/tty/serial/amba-pl011.c,1741,2437,"call void %63() #14, !dbg !7248"
+pl011_int,include/linux/serial_core.h,1268,3116,"call void %152(ptr noundef %1) #14, !dbg !7695"
+pl011_probe,drivers/tty/serial/amba-pl011.c,2780,3903,"%64 = call i32 %63(ptr noundef %0) #14, !dbg !8026"
+pl011_shutdown,drivers/tty/serial/amba-pl011.c,1968,5654,"call void %152() #14, !dbg !9228"
+pl011_shutdown,drivers/tty/serial/amba-pl011.c,1972,5666,"call void %159(ptr noundef %0) #14, !dbg !9234"

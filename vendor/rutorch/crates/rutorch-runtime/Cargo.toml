@@ -1,0 +1,33 @@
+[package]
+name = "rutorch-runtime"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.96"
+description = "RuTorch Linux 与 LibOS 共用的 no_std ACT 规范运行时"
+
+[features]
+default = ["platform-linux", "kernel-portable-neon"]
+platform-linux = []
+platform-libos = []
+kernel-portable-neon = []
+kernel-acl-shared = [
+    "dep:act-kernels-acl",
+    "act-kernels-acl/acl-freestanding",
+]
+# Linux full ACL 仅作上限/诊断 provider；它依赖 glibc/C++，禁止进入 LibOS。
+kernel-acl-linux-full = ["dep:rutorch-kernels-acl"]
+# 兼容 Exokernel 旧构建参数；新入口统一使用 kernel-acl-shared。
+acl-neon = ["kernel-acl-shared"]
+profile = []
+
+[dependencies]
+act-kernels-acl = { package = "rutorch-kernels-acl-shared", path = "../rutorch-kernels-acl-shared", optional = true, default-features = false }
+rutorch-kernels-acl = { path = "../rutorch-kernels-acl", optional = true }
+
+[lints.rust]
+unsafe_code = "allow"
+missing_docs = "allow"
+unsafe_op_in_unsafe_fn = "allow"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }

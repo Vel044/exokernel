@@ -88,15 +88,30 @@ impl Thread {
 
     /// 将 Suspended 线程发布到调度器。
     pub fn start(&self) -> Result<(), u64> {
-        result(crate::runtime::svc(exo_abi::SYS_THREAD_START, self.handle.0, 0, 0))
+        result(crate::runtime::svc(
+            exo_abi::SYS_THREAD_START,
+            self.handle.0,
+            0,
+            0,
+        ))
     }
 
     pub fn suspend(&self) -> Result<(), u64> {
-        result(crate::runtime::svc(exo_abi::SYS_THREAD_SUSPEND, self.handle.0, 0, 0))
+        result(crate::runtime::svc(
+            exo_abi::SYS_THREAD_SUSPEND,
+            self.handle.0,
+            0,
+            0,
+        ))
     }
 
     pub fn destroy(self) -> Result<(), u64> {
-        result(crate::runtime::svc(exo_abi::SYS_THREAD_DESTROY, self.handle.0, 0, 0))
+        result(crate::runtime::svc(
+            exo_abi::SYS_THREAD_DESTROY,
+            self.handle.0,
+            0,
+            0,
+        ))
     }
 
     pub fn set_priority(&self, priority: u8) -> Result<(), u64> {

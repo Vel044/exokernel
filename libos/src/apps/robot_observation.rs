@@ -15,7 +15,7 @@ const HANDEYE_JPEG_VA: u64 = exo_abi::ACT_INPUT_ARENA_BASE;
 const FIXED_JPEG_VA: u64 = HANDEYE_JPEG_VA + 2 * 1024 * 1024;
 
 pub(crate) fn run_with_resources(
-    info: &exo_abi::UserBootInfo,
+    info: &crate::drivers::platform::DeviceInfo,
     host: &mut USBHost,
     handler: &EventHandler,
     intid: u32,
@@ -38,7 +38,7 @@ pub(crate) fn run_with_resources(
     }
 }
 
-async fn capture(info: &exo_abi::UserBootInfo, host: &mut USBHost) -> Result<(), u64> {
+async fn capture(info: &crate::drivers::platform::DeviceInfo, host: &mut USBHost) -> Result<(), u64> {
     let devices = loop {
         let devices = host.probe_devices().await.map_err(|_| 0x760u64)?;
         if !devices.is_empty() {

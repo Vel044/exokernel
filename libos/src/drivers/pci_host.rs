@@ -1,10 +1,9 @@
-//! 从完整 DTB 裁剪通用 PCI host 资源，不在 EL1 识别具体 PCI 设备。
+//! EL0 从完整 DTB 解析通用 PCI host；只生成描述，权限仍由 EL1 检查。
 
-use exo_abi::{PciHostInfo, PciIntxRoute, PciRange, MAX_PCI_INTX_ROUTES, MAX_PCI_RANGES};
+use super::platform::{PciHostInfo, PciIntxRoute, PciRange, MAX_PCI_INTX_ROUTES, MAX_PCI_RANGES};
 use fdt::Fdt;
 
-pub fn from_dtb(dtb_pa: u64) -> Option<PciHostInfo> {
-    let tree = unsafe { Fdt::from_ptr(dtb_pa as *const u8) }.ok()?;
+pub fn from_tree(tree: &Fdt<'_>) -> Option<PciHostInfo> {
     let node = tree.find_compatible(&["pci-host-ecam-generic"])?;
     let reg = node.property("reg")?.value;
     if reg.len() < 16 {
@@ -22,6 +21,9 @@ pub fn from_dtb(dtb_pa: u64) -> Option<PciHostInfo> {
     }
 
     if let Some(ranges) = node.property("ranges") {
+        if ranges.value.len() % 28 != 0 || ranges.value.len() / 28 > MAX_PCI_RANGES {
+            return None;
+        }
         for entry in ranges.value.chunks_exact(28).take(MAX_PCI_RANGES) {
             let index = info.range_count as usize;
             info.ranges[index] = PciRange {
@@ -77,6 +79,9 @@ pub fn from_dtb(dtb_pa: u64) -> Option<PciHostInfo> {
             };
             info.intx_route_count += 1;
             offset = offset.checked_add(entry_bytes)?;
+        }
+        if offset != map.value.len() {
+            return None;
         }
     }
     Some(info)

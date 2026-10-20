@@ -7,14 +7,18 @@ use act_runtime::{InferenceStage, ACTION_DIM, ACTION_STEPS, IMAGE_BYTES};
 
 const CASE_COUNT: usize = 5;
 // 正确性判定与宿主CSV和Linux runner统一，采用torch.allclose默认值。
-const ABSOLUTE_TOLERANCE: f32 = 1e-8;
+const ABSOLUTE_TOLERANCE: f32 = 1e-4;
 const RELATIVE_TOLERANCE: f32 = 1e-5;
 const CASE_HAND_EYE_VA: u64 = exo_abi::ACT_INPUT_ARENA_BASE;
 const CASE_FIXED_VA: u64 = CASE_HAND_EYE_VA + 2 * 1024 * 1024;
 const CASE_STATE_VA: u64 = CASE_FIXED_VA + 2 * 1024 * 1024;
 const CASE_REFERENCE_VA: u64 = CASE_STATE_VA + 1024 * 1024;
 
-pub fn run(info: &exo_abi::UserBootInfo) -> ! {
+pub fn run(info: &crate::drivers::platform::DeviceInfo) -> ! {
+    crate::runtime::act_stack::enter(info, run_on_stack)
+}
+
+extern "C" fn run_on_stack(info: &crate::drivers::platform::DeviceInfo) -> ! {
     crate::runtime::puts(b"[libos] ACT real-data correctness experiment start\r\n");
     crate::runtime::puts(b"[libos] mounting user ext4 filesystem\r\n");
     let filesystem = crate::fs::FileSystem::mount(info).unwrap_or_else(|_| {

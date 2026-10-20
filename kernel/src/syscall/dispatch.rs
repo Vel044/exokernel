@@ -499,7 +499,7 @@ fn sys_map_mmio(paddr: u64, size: u64, user_va: u64) -> u64 {
     }
 
     let pages = size_rounded / 4096;
-    // 防止覆盖ELF、heap、stack、BootInfo、DMA arena或已有设备映射。
+    // 防止覆盖ELF、heap、stack、BootInfo、只读DTB或已有设备映射。
     if !crate::task::range_available(user_va, pages) {
         return 5;
     }
@@ -622,8 +622,8 @@ fn sys_irq_bind(intid: u64, notification: u64, badge: u64, target_cpu: u64) -> u
         uart::puts(")\r\n");
         return 1;
     }
-    // INTID必须来自EL1根据DTB/PCI INTx建立的当前任务IRQ grant。
-    // UserBootInfo中看见一个数字并不等于可以绑定任意GIC中断。
+    // INTID必须来自EL1可信平台配置建立的当前任务IRQ grant。
+    // EL0解析DTB看见一个数字，并不等于可以绑定任意GIC中断。
     let Some(flags) = crate::task::irq_flags(intid) else {
         uart::puts("\r\n[exo] SYS_IRQ_BIND rejected: IRQ not granted to task\r\n");
         return 2;

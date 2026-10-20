@@ -177,7 +177,7 @@ async fn open_scservo_transport_filtered(
 ///
 /// 机器人场景一次性取得三个root-port设备后调用此函数，避免再次探测时
 /// 由于端口变化标志已经被消费而看不到串口板。
-#[cfg(any(feature = "app-robot-act-once", feature = "app-robot-observation"))]
+#[cfg(any(feature = "ide", feature = "app-robot-act-once", feature = "app-robot-observation"))]
 pub(crate) async fn configure_scservo(
     host: &mut USBHost,
     info: &crab_usb::DeviceInfo,

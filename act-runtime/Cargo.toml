@@ -14,4 +14,4 @@ acl-neon = ["kernel-acl-shared"]
 profile = ["rutorch-runtime-upstream/profile"]
 
 [dependencies]
-rutorch-runtime-upstream = { package = "rutorch-runtime", path = "../../rutorch/crates/rutorch-runtime", default-features = false, features = ["platform-libos"] }
+rutorch-runtime-upstream = { package = "rutorch-runtime", path = "../vendor/rutorch/crates/rutorch-runtime", default-features = false, features = ["platform-libos"] }

@@ -70,7 +70,12 @@ pub extern "C" fn _start(boot_info_va: u64) -> ! {
         runtime::exit(0x103)
     });
     let heap_mapping = heap_frame
-        .map(0, heap_pages, exo_abi::USER_HEAP_BASE, memory::Rights::READ_WRITE)
+        .map(
+            0,
+            heap_pages,
+            exo_abi::USER_HEAP_BASE,
+            memory::Rights::READ_WRITE,
+        )
         .unwrap_or_else(|_| {
             runtime::puts(b"[libos] heap frame map failed\r\n");
             runtime::exit(0x104)
@@ -79,7 +84,22 @@ pub extern "C" fn _start(boot_info_va: u64) -> ! {
 
     // `_start`不再了解具体场景或设备组合。所有可执行路径都从这个稳定边界
     // 进入，由apps模块校验并分发唯一的编译期场景。
-    apps::run(info)
+    // DTB 只读页面属于启动交接；在 EL0 解析设备，再把稳定地址交给应用线程。
+    if info.dtb_va != exo_abi::USER_DTB_VA || info.dtb_size < 40
+        || info.dtb_size > exo_abi::USER_DTB_MAX_SIZE {
+        runtime::puts(b"[libos] invalid DTB handoff\r\n");
+        runtime::exit(0x105);
+    }
+    // SAFETY: 已校验固定 VA 和窗口长度，EL1 保证整段映射只读且在任务期间保留。
+    let dtb = unsafe { core::slice::from_raw_parts(info.dtb_va as *const u8, info.dtb_size as usize) };
+    let devices = drivers::dtb::discover(dtb, info.cpu_count).unwrap_or_else(|_| {
+        runtime::puts(b"[libos] DTB discovery failed\r\n");
+        runtime::exit(0x106)
+    });
+    runtime::puts(b"[libos] full DTB parsed in EL0\r\n");
+    // 目录是纯用户态数据，不再受 BootInfo 布局约束；独立 USB 线程共享只读引用。
+    let devices = alloc::boxed::Box::leak(alloc::boxed::Box::new(devices));
+    apps::run(devices)
 }
 
 // no_std 程序必须提供 panic handler；这里避免展开栈和依赖完整运行时。

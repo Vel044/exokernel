@@ -11,9 +11,7 @@ use std::{
     time::Instant,
 };
 
-use act_runtime::{
-    ActModel, Observation, ACTION_DIM, ACTION_STEPS, IMAGE_BYTES, WORKSPACE_FLOATS,
-};
+use act_runtime::{ActModel, Observation, ACTION_DIM, ACTION_STEPS, IMAGE_BYTES, WORKSPACE_FLOATS};
 
 const DATA_ROOT: &str = "/data";
 const CASE_COUNT: usize = 5;
@@ -25,10 +23,9 @@ fn main() {
     let root = Path::new(DATA_ROOT);
     println!("[linux-rust] loading ACT model");
     let model_bytes = fs::read(root.join("model.safetensors")).expect("read model.safetensors");
-    let stats_bytes = fs::read(
-        root.join("policy_preprocessor_step_3_normalizer_processor.safetensors"),
-    )
-    .expect("read normalizer");
+    let stats_bytes =
+        fs::read(root.join("policy_preprocessor_step_3_normalizer_processor.safetensors"))
+            .expect("read normalizer");
     let model = ActModel::load(&model_bytes, &stats_bytes).expect("parse ACT model");
 
     // 工作区在五次推理之间复用；正确性计时不作为实验03的正式性能结果。

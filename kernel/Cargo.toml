@@ -10,7 +10,6 @@ path = "src/main.rs"
 [dependencies]
 uefi = { version = "0.33", default-features = false, features = ["panic_handler"] }
 exo-abi = { path = "../abi" }
-fdt = { path = "../libos/vendor/fdt", version = "=0.1.5" }
 
 [features]
 default = ["qemu"]

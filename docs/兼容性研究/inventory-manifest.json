@@ -1,0 +1,22 @@
+{
+  "baseline": "Linux v6.12 / AArch64 native",
+  "abis": [
+    "64",
+    "common",
+    "memfd_secret",
+    "renameat",
+    "rlimit"
+  ],
+  "linux_named_numbers": 318,
+  "exokernel_calls": 37,
+  "sha256": {
+    "abi/src/lib.rs": "555c9f6562c9e20f401ad2c692fd99c227aeb4128da5a8047824e049721e7f92",
+    "kernel/src/syscall/dispatch.rs": "e321338b89800e028493338bd5491631fe2f882963a025367aaf6b24be20a671",
+    "docs/兼容性研究/sources/linux-v6.12-arch_arm64_kernel_Makefile.syscalls": "27e95d7bd10c3ab67c8a3f16c7dfe5da30c586c2fda3993c42025109a22098c5",
+    "docs/兼容性研究/sources/linux-v6.12-arch_arm64_tools_syscall_64.tbl": "e0a5d9a188af7952060d69e4e248675df79a583610ae535e68787bb5481a30db",
+    "docs/兼容性研究/sources/linux-v6.12-arm64-unistd.h": "cc7ad787b726c5a50b9ed3765977beadc8867f7933a9f9daa1747d77ce7bda06",
+    "docs/兼容性研究/sources/linux-v6.12-scripts_Makefile.asm-headers": "a41518fb74c884e12f0b6a3addb974d13d76f008582f4e0e7c332a5e8201e325",
+    "docs/兼容性研究/sources/linux-v6.12-scripts_syscallhdr.sh": "a0faed17e23781d10296eeebe89a7ed35cd80e70ce309c309b95fb916fee779f",
+    "docs/兼容性研究/sources/linux-v6.12-syscall.tbl": "8872daa692005172eccfee147ee38591ce2c005103026ea33a049f044418d41d"
+  }
+}

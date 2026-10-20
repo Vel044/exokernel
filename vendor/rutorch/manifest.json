@@ -1,0 +1,30 @@
+{
+  "upstream_head": "b04b586d9b01352164fc1757ad7aa27f6fad05ce",
+  "upstream_diff_sha256": "0afccf7a4d784ecb57125499f32f6d39453f4a0b18c2ad9e5d4f8ccd3303708e",
+  "acl_version": "52.7.0",
+  "source_tree_sha256": "bc7325ff0b8f997484244c63042a8212aa97bc6d8366ff9971d2f8848a5a4549",
+  "files": {
+    "acl/LICENSES/Apache-2.0.txt": "074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff",
+    "acl/LICENSES/BSD-3-Clause.txt": "5a93d5831e1297ab10fe643e1a631e83be392896da14ee2951285a79012df69d",
+    "acl/LICENSES/MIT.txt": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5",
+    "acl/src/core/NEON/kernels/arm_gemm/asmlib.hpp": "9ce1af08a2a6708ed36406a9a61ae8ce2ab220cb9a627d394f619842e7584048",
+    "acl/src/core/NEON/kernels/arm_gemm/kernels/a64_sgemm_8x12/generic.cpp": "76de529b215b6092b4e81132b5e2e3e7afdc0cba1d8cadc3a69b0eeb11165718",
+    "crates/rutorch-kernels-acl/Cargo.toml": "3fb5ae593c903d84e208dde5c5e30333d3a02abf434f25ce5b1a93fed98e55ae",
+    "crates/rutorch-kernels-acl/build.rs": "180c474c2f26405d242fa21a8ace237aec31a53e768cb735a6d5a0fd8dfcd2db",
+    "crates/rutorch-kernels-acl/native/acl_shim.cpp": "aa97cacbb1fd91adb5e9da50aac0e33b928329bb3c5aac501468afc41aaecd64",
+    "crates/rutorch-kernels-acl/src/lib.rs": "a52f751b7571ab36c3d73ce84fcaa1a2f9b722ca684ad43e12d9a4503e949f04",
+    "crates/rutorch-kernels-acl-shared/Cargo.toml": "fb6d2e224c82508ba1f636e70e8c8be895365c6897c4bf1ceaa2735c2f086984",
+    "crates/rutorch-kernels-acl-shared/build.rs": "f31dad6dc2ca58e527dd5e5b490f32e3570ccabc4cd2069c05875fe1b75652e4",
+    "crates/rutorch-kernels-acl-shared/native/acl_shim.cpp": "0b4c99632f57e39d7f8a884da97d3921bf476b983fa35920dae10ea6083af87e",
+    "crates/rutorch-kernels-acl-shared/src/lib.rs": "0c3c8e235be0fea37205fa75f801eb561338e66ce958d426ea0812e2d263e391",
+    "crates/rutorch-runtime/Cargo.toml": "ec50774777438c55a0cfeb69a709c46f83e3cf54d28e6fe5ec470bc93136b2c6",
+    "crates/rutorch-runtime/examples/run_shared_act.rs": "25ab2df31ad89fdf12aead25781235b913927afa2cc38a501a1da9f418af3cff",
+    "crates/rutorch-runtime/src/engine.rs": "1ce8ce7ac12a2f8afe6bf792f479deb2ac215abff543ec9fb450a7223865cc2d",
+    "crates/rutorch-runtime/src/execution.rs": "b3db659580d14127157567019dceaca39d215b01cae2379c07c2c5d46d03122a",
+    "crates/rutorch-runtime/src/lib.rs": "9cc9f0e504109f6d4830d2e5f9e6b0cd383ebb7e8d3c204b3072609ae63f5694",
+    "crates/rutorch-runtime/src/prepared.rs": "522d833d9c77beff4b7fbf617c163f69ac73d0fe2df03e9704135c7230a5b29a",
+    "crates/rutorch-runtime/src/safetensors.rs": "d0236b8e4d92c45878581f121f596b7960355e2e1a01fb9ed9bef2a451ec1cb9",
+    "crates/rutorch-runtime/src/sha256.rs": "bd60ee9d6cdf976fc5f1bdcb87f2fb28ddf6622863d8913b548a9b1113acb9a5",
+    "tools/act_release.py": "be30c356c22fed947a9e7274a1d9dc672f94db4d85c2602a83e5365568c947c4"
+  }
+}

@@ -1,7 +1,7 @@
 //! kmain —— EL1 外核主逻辑
 //!
 //! EL2 boot shim 只负责 UEFI/EBS 和 eret。这里开始才是真正外核:
-//! 初始化物理页分配器、解析 DTB、安装 EL1 异常向量、建立 stage-1 页表、
+//! 初始化物理页分配器、装载平台配置、安装 EL1 异常向量、建立 stage-1 页表、
 //! 加载 EL0 libOS, 最后 eret 进 EL0。
 
 use crate::boot_info::BootInfo; // EL2 boot shim 收集后传给 EL1 的启动信息
@@ -39,32 +39,11 @@ pub extern "C" fn el1_main(boot_info_addr: u64) -> ! {
     // 用 EL2 收集到的 UEFI conventional memory ranges 初始化 EL1 物理页分配器。
     init_allocator_from_bootinfo(bi);
 
-    // 选择 DTB 来源。
-    //
-    // 情况 A: UEFI config table 里提供了 FDT_GUID, bi.dtb != 0, 直接解析那块物理地址。
-    // 情况 B: 平台配置允许 fallback 时，复制构建期嵌入的 DTB。
-    let dtb_addr = if bi.dtb == 0 {
-        let fallback = match crate::platform::FALLBACK_DTB {
-            Some(dtb) => dtb,
-            // Pi5 没有真实 DTB 就无法可靠发现设备，此时 UART 尚未初始化。
-            None => loop {},
-        };
-        let pages = (fallback.len() as u64 + PAGE_SIZE - 1) / PAGE_SIZE;
-        let pa = crate::mem::alloc_pages(pages).expect("no mem for DTB");
-        unsafe { core::ptr::copy_nonoverlapping(fallback.as_ptr(), pa as *mut u8, fallback.len()) };
-        pa
-    } else {
-        bi.dtb
-    };
+    // DTB 已由 UEFI 复制到独占 LoaderData；EL1 只移交字节和建立只读映射。
+    assert!(bi.dtb != 0 && bi.dtb % PAGE_SIZE == 0);
+    assert!(bi.dtb_size >= 40 && bi.dtb_size <= exo_abi::USER_DTB_MAX_SIZE);
 
-    let dtb_total_size = crate::dtb::total_size(dtb_addr).expect("bad DTB");
-
-    // 打开 EL1 identity stage-1。
-    //
-    // EL1 MMU 关闭时 ARM 对部分栈上的宽访问会按严格对齐处理, Rust 的 DTB
-    // parser 容易触发对齐异常。先把代码/数据/栈/DTB 按 Normal memory 做
-    // identity map。UART 的 MMIO 区域暂不映射 — 等 DTB 发现 UART 地址后再
-    // 精确映射为 Device memory。
+    // 先建立 Normal identity 映射，再按平台配置映射 EL1 的 UART/GIC。
     let root = crate::mmu::create_table();
     crate::mmu::map_range_2m(
         root,
@@ -76,23 +55,19 @@ pub extern "C" fn el1_main(boot_info_addr: u64) -> ! {
     );
     crate::mmu::activate(root);
 
-    // 从完整 DTB 生成一次平台资源快照；后续 UserBootInfo、保护表和任务
-    // grant 都使用同一份结果，完整 DTB 不会映射给 EL0。
-    let platform = crate::resources::discover(dtb_addr).expect("invalid platform DTB");
+    // 启动与授权来自显式平台配置；EL0 的设备发现结果不能修改授权。
+    let platform = &crate::resources::PLATFORM;
     crate::arch::aarch64::smp::set_cpu_count(platform.cpus.count);
-    let uart_reg = platform.uart;
+    let uart_pa = platform.uart_pa;
 
-    // 把 DTB 发现的 UART 地址所在的 2MB block 映射为 Device memory,
-    // 然后初始化 UART。从这行开始, 所有日志都走 DTB 发现的 UART, 不再有硬编码地址。
     crate::mmu::map_block_2m(
         root,
-        uart_reg.base & !0x1f_ffff,
-        uart_reg.base & !0x1f_ffff,
+        uart_pa & !0x1f_ffff,
+        uart_pa & !0x1f_ffff,
         crate::mmu::MMU_DEV,
     );
     crate::mmu::flush_el1_tlb();
-    crate::protect::register(uart_reg.base, uart_reg.size);
-    uart::init(uart_reg.base);
+    uart::init(uart_pa);
 
     uart::puts("\r\n*** [exo] EL1 kernel alive ***\r\n");
     uart::puts("[exo] VBAR_EL1=");
@@ -103,23 +78,15 @@ pub extern "C" fn el1_main(boot_info_addr: u64) -> ! {
     uart::hex(crate::mem::free_pages_total() * 4);
     uart::puts(" KB\r\n");
 
-    if bi.dtb == 0 {
-        uart::puts("[exo] using embedded QEMU DTB\r\n");
-    }
-    uart::puts("[exo] DTB pa=");
-    uart::hex(dtb_addr);
+    uart::puts("[exo] opaque DTB for EL0: pa=");
+    uart::hex(bi.dtb);
     uart::puts(" size=");
-    uart::hex(dtb_total_size);
-    uart::puts("\r\n");
-    uart::puts("[exo] DTB UART base=");
-    uart::hex(uart_reg.base);
-    uart::puts(" size=");
-    uart::hex(uart_reg.size);
+    uart::hex(bi.dtb_size);
     uart::puts("\r\n");
 
     // 初始化 GICv2 中断控制器。
     //
-    // 从 DTB 找到 GIC 的 Distributor 和 CPU Interface 物理地址，
+    // 从平台配置取得 GIC 的 Distributor 和 CPU Interface 物理地址，
     // 映射为 Device memory 后初始化 GICD/GICC。后续 SYS_IRQ_BIND
     // 等 syscall 依赖 GIC 就绪。
     {
@@ -142,124 +109,21 @@ pub extern "C" fn el1_main(boot_info_addr: u64) -> ! {
         crate::mmu::flush_el1_tlb();
         crate::gic::init(gicd_pa, gicc_pa);
 
-        // GIC 只能由 EL1 操作。deny 表优先于通用 DTB MMIO 登记。
+        // GIC 只能由 EL1 操作。deny 表优先于平台 MMIO 授权。
         crate::protect::deny(gicd_pa, 0x10000);
         crate::protect::deny(gicc_pa, 0x10000);
 
         // 启动根页表从这一刻起登记为 VSpaceHandle(1)。后续创建的独立
         // VSpace 会复用同一份 Kernel UART/GIC 设备块，但不会继承当前 EL0
         // 的 ELF、heap、stack、MMIO 或 Frame 映射。
-        crate::vspace::initialize(root, uart_reg.base, gicd_pa, gicc_pa);
+        crate::vspace::initialize(root, uart_pa, gicd_pa, gicc_pa);
     }
 
-    let uart_intid = platform.uart_irq.intid;
-    let pci_info = platform.pci;
-    let direct_xhci = platform.xhci;
-    let mut mmio_grants = [crate::task::MmioGrant::EMPTY; crate::task::MAX_MMIO_GRANTS];
-    let mut mmio_grant_count = 0usize;
-    mmio_grants[mmio_grant_count] = crate::task::MmioGrant {
-        base: uart_reg.base & !0xfff,
-        size: (uart_reg.size + 0xfff) & !0xfff,
-    };
-    mmio_grant_count += 1;
-    if let Some((xhci_reg, _)) = direct_xhci {
-        crate::protect::register(xhci_reg.base, xhci_reg.size);
-        if mmio_grant_count < crate::task::MAX_MMIO_GRANTS {
-            mmio_grants[mmio_grant_count] = crate::task::MmioGrant {
-                base: xhci_reg.base & !0xfff,
-                size: (xhci_reg.size + 0xfff) & !0xfff,
-            };
-            mmio_grant_count += 1;
-        }
-        uart::puts("[exo] RP1 xHCI MMIO=");
-        uart::hex(xhci_reg.base);
-        uart::puts(" size=");
-        uart::hex(xhci_reg.size);
-        uart::puts("\r\n");
-    }
-    if let Some(virtio) = platform.virtio_mmio {
-        crate::protect::register(virtio.base, virtio.size);
-        if mmio_grant_count < crate::task::MAX_MMIO_GRANTS {
-            mmio_grants[mmio_grant_count] = crate::task::MmioGrant {
-                base: virtio.base,
-                size: virtio.size,
-            };
-            mmio_grant_count += 1;
-        }
-        uart::puts("[exo] virtio-mmio window=");
-        uart::hex(virtio.base);
-        uart::puts(" size=");
-        uart::hex(virtio.size);
-        uart::puts("\r\n");
-    }
-    if pci_info.present != 0 {
-        crate::protect::register(pci_info.ecam_pa, pci_info.ecam_size);
-        mmio_grants[mmio_grant_count] = crate::task::MmioGrant {
-            base: pci_info.ecam_pa,
-            size: pci_info.ecam_size.min(0x0010_0000),
-        };
-        mmio_grant_count += 1;
-        let mut index = 0usize;
-        while index < pci_info.range_count as usize {
-            let range = pci_info.ranges[index];
-            let space = range.flags & 0x0300_0000;
-            if space == 0x0200_0000 || space == 0x0300_0000 {
-                crate::protect::register(range.parent_base, range.size);
-                if mmio_grant_count < crate::task::MAX_MMIO_GRANTS {
-                    mmio_grants[mmio_grant_count] = crate::task::MmioGrant {
-                        base: range.parent_base,
-                        size: range.size,
-                    };
-                    mmio_grant_count += 1;
-                }
-            }
-            index += 1;
-        }
-        uart::puts("[exo] PCI ECAM=");
-        uart::hex(pci_info.ecam_pa);
-        uart::puts(" size=");
-        uart::hex(pci_info.ecam_size);
-        uart::puts(" INTx routes=");
-        uart::hex(pci_info.intx_route_count as u64);
-        uart::puts("\r\n");
-    }
-
-    let mut irq_grants = [crate::task::IrqGrant::EMPTY; crate::task::MAX_IRQ_GRANTS];
-    let mut irq_grant_count = 0usize;
-    irq_grants[irq_grant_count] = crate::task::IrqGrant {
-        intid: uart_intid,
-        flags: platform.uart_irq.flags,
-    };
-    irq_grant_count += 1;
-    if let Some((_, xhci_irq)) = direct_xhci {
-        if !irq_grants[..irq_grant_count]
-            .iter()
-            .any(|grant| grant.intid == xhci_irq.intid)
-            && irq_grant_count < crate::task::MAX_IRQ_GRANTS
-        {
-            irq_grants[irq_grant_count] = crate::task::IrqGrant {
-                intid: xhci_irq.intid,
-                flags: xhci_irq.flags,
-            };
-            irq_grant_count += 1;
-        }
-    }
-    let mut index = 0usize;
-    while index < pci_info.intx_route_count as usize
-        && irq_grant_count < crate::task::MAX_IRQ_GRANTS
-    {
-        let route = pci_info.intx_routes[index];
-        if !irq_grants[..irq_grant_count]
-            .iter()
-            .any(|grant| grant.intid == route.intid)
-        {
-            irq_grants[irq_grant_count] = crate::task::IrqGrant {
-                intid: route.intid,
-                flags: route.flags,
-            };
-            irq_grant_count += 1;
-        }
-        index += 1;
+    // 注册平台授予的设备窗口；GIC 等 EL1 专用区域始终优先拒绝。
+    assert!(platform.mmio.len() <= crate::task::MAX_MMIO_GRANTS);
+    assert!(platform.irqs.len() <= crate::task::MAX_IRQ_GRANTS);
+    for grant in platform.mmio {
+        crate::protect::register(grant.base, grant.size);
     }
 
     // ELF loader 按 PT_LOAD 的 R/W/X 权限分别分配并映射用户段。
@@ -279,35 +143,9 @@ pub extern "C" fn el1_main(boot_info_addr: u64) -> ! {
             magic: exo_abi::USER_BOOT_INFO_MAGIC,
             version: exo_abi::USER_BOOT_INFO_VERSION,
             size: core::mem::size_of::<exo_abi::UserBootInfo>() as u16,
-            uart: exo_abi::DeviceResource {
-                base: uart_reg.base,
-                size: uart_reg.size,
-                intid: uart_intid,
-            },
-            xhci: direct_xhci
-                .map(|(reg, irq)| exo_abi::DeviceResource {
-                    base: reg.base,
-                    size: reg.size,
-                    intid: irq.intid,
-                })
-                .unwrap_or_default(),
-            virtio_mmio: platform
-                .virtio_mmio
-                .map(|reg| exo_abi::DeviceResource {
-                    base: reg.base,
-                    size: reg.size,
-                    intid: 0,
-                })
-                .unwrap_or_default(),
-            xhci_transport: if direct_xhci.is_some() {
-                exo_abi::XHCI_TRANSPORT_DIRECT
-            } else if pci_info.present != 0 {
-                exo_abi::XHCI_TRANSPORT_PCI
-            } else {
-                exo_abi::XHCI_TRANSPORT_NONE
-            },
+            dtb_va: exo_abi::USER_DTB_VA,
+            dtb_size: bi.dtb_size,
             cpu_count: platform.cpus.count as u32,
-            pci: pci_info,
         });
     }
 
@@ -329,13 +167,7 @@ pub extern "C" fn el1_main(boot_info_addr: u64) -> ! {
     //   1. EL1 外核自己继续运行: 需要 identity map 当前代码、栈、DTB、UART 等。
     //   2. EL0 libOS 能启动: 需要把 USER_BASE 映射到 code_paddr,
     //      把 USER_STACK_TOP 下方的栈窗口映射到 stack_paddr。
-    complete_el1_stage1(
-        root,
-        bi,
-        stack_paddr,
-        user_boot_info_pa,
-        initial_ipc_pa,
-    );
+    complete_el1_stage1(root, bi, stack_paddr, user_boot_info_pa, initial_ipc_pa);
     uart::puts("[exo] EL1 stage-1 root=");
     uart::hex(root);
     uart::puts("\r\n");
@@ -346,8 +178,8 @@ pub extern "C" fn el1_main(boot_info_addr: u64) -> ! {
         &loaded.segments[..loaded.segment_count],
         stack_paddr,
         user_boot_info_pa,
-        &mmio_grants[..mmio_grant_count],
-        &irq_grants[..irq_grant_count],
+        platform.mmio,
+        platform.irqs,
     );
     crate::ipc::init();
     crate::thread::install_initial(loaded.entry, USER_STACK_TOP, initial_ipc_pa);
@@ -358,13 +190,12 @@ pub extern "C" fn el1_main(boot_info_addr: u64) -> ! {
     // 初始固件在EL1交付时（macOS HVF）PSCI由HVC调用；EL2 boot shim路径
     // 继续使用SMC。此处依据EBS时保存的CurrentEL选择，不依赖平台名称。
     let psci_hvc = ((bi.el2.current_el >> 2) & 3) == 1;
-    let timer_irq = if psci_hvc {
-        crate::dtb::find_virtual_timer_irq(dtb_addr)
-            .expect("virtual Generic Timer interrupt missing")
+    let timer_intid = if psci_hvc {
+        platform.virtual_timer_intid
     } else {
-        platform.timer_irq
+        platform.physical_timer_intid
     };
-    if !crate::arch::aarch64::smp::boot_secondaries(&platform.cpus, root, timer_irq.intid, psci_hvc)
+    if !crate::arch::aarch64::smp::boot_secondaries(&platform.cpus, root, timer_intid, psci_hvc)
     {
         uart::puts("[exo] SMP startup failed: all four PSCI CPUs are required\r\n");
         loop {
@@ -379,7 +210,7 @@ pub extern "C" fn el1_main(boot_info_addr: u64) -> ! {
 
     // 辅助核上线后再启动CPU0的1ms抢占Timer，避免SMP握手期间把尚未
     // 进入EL0的CPU0误当成正在运行的用户线程。
-    crate::scheduler::init(timer_irq.intid, psci_hvc);
+    crate::scheduler::init(timer_intid, psci_hvc);
 
     uart::puts("[exo] enter EL0 libOS...\r\n");
 
@@ -461,7 +292,17 @@ fn complete_el1_stage1(
         );
     }
 
-    // EL0 只看到 EL1 裁剪后的 UserBootInfo，不再直接读取完整 DTB。
+    // 完整 DTB 映射为 Normal、EL0 只读且不可执行；有效长度以 BootInfo 为准。
+    // LoaderData 在任务生命周期中保留，EL0 不获得其 Frame 所有权。
+    crate::mmu::map(
+        root,
+        exo_abi::USER_DTB_VA,
+        bi.dtb,
+        crate::mmu::MMU_USER_RO,
+        bi.dtb_size.div_ceil(PAGE_SIZE),
+    );
+
+    // BootInfo 仅包含交接地址、长度和实际上线 CPU 数。
     crate::mmu::map(
         root,
         USER_BOOT_INFO_VA,

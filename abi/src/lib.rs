@@ -4,6 +4,11 @@ pub const PAGE_SIZE: u64 = 4096;
 
 pub const USER_BASE: u64 = 0x4000_0000;
 pub const USER_BOOT_INFO_VA: u64 = 0x4020_0000;
+/// 完整 DTB 的只读、不可执行窗口；保留整段，禁止 MMIO/DMA 覆盖。
+// 放在初始线程栈顶与 DMA arena 之间的独立 2MiB 窗口，互不覆盖。
+// EDK2 的固件 DTB 常含扩展空闲区，实际 totalsize 可大于 1MiB。
+pub const USER_DTB_VA: u64 = 0x4100_0000;
+pub const USER_DTB_MAX_SIZE: u64 = 2 * 1024 * 1024;
 pub const UART_VA: u64 = 0x4040_0000;
 pub const PCI_ECAM_VA: u64 = 0x4050_0000;
 pub const XHCI_VA: u64 = 0x4060_0000;
@@ -83,13 +88,8 @@ pub const THREAD_TIME_SLICE_NS: u64 = 1_000_000;
 pub const IRQ_TARGET_CURRENT: u64 = u64::MAX;
 
 pub const USER_BOOT_INFO_MAGIC: u32 = 0x4558_4f42;
-// v12删除UserBootInfo中EL0不读取的冗余字段：DeviceResource.irq_flags、PciHostInfo.dma_coherent/bus_end、PciRange.reserved。
-pub const USER_BOOT_INFO_VERSION: u16 = 12;
-pub const XHCI_TRANSPORT_NONE: u32 = 0;
-pub const XHCI_TRANSPORT_PCI: u32 = 1;
-pub const XHCI_TRANSPORT_DIRECT: u32 = 2;
-pub const MAX_PCI_RANGES: usize = 3;
-pub const MAX_PCI_INTX_ROUTES: usize = 16;
+// v13只传完整只读DTB和实际上线CPU数；设备目录移至libOS。
+pub const USER_BOOT_INFO_VERSION: u16 = 13;
 
 pub const FRAME_RIGHT_READ: u64 = 1 << 0;
 pub const FRAME_RIGHT_WRITE: u64 = 1 << 1;
@@ -175,76 +175,18 @@ impl Default for ReplyHandle {
     }
 }
 
-#[derive(Clone, Copy, Default)]
-#[repr(C)]
-pub struct DeviceResource {
-    pub base: u64,
-    pub size: u64,
-    pub intid: u32,
-}
-
-#[derive(Clone, Copy, Default)]
-#[repr(C)]
-pub struct PciRange {
-    pub flags: u32,
-    pub child_base: u64,
-    pub parent_base: u64,
-    pub size: u64,
-}
-
-#[derive(Clone, Copy, Default)]
-#[repr(C)]
-pub struct PciIntxRoute {
-    pub child_address_hi: u32,
-    pub pin: u32,
-    pub intid: u32,
-    pub flags: u32,
-}
-
-#[derive(Clone, Copy)]
-#[repr(C)]
-pub struct PciHostInfo {
-    pub present: u32,
-    pub ecam_pa: u64,
-    pub ecam_size: u64,
-    pub bus_start: u8,
-    pub range_count: u8,
-    pub intx_route_count: u8,
-    pub interrupt_map_mask_hi: u32,
-    pub interrupt_map_mask_pin: u32,
-    pub ranges: [PciRange; MAX_PCI_RANGES],
-    pub intx_routes: [PciIntxRoute; MAX_PCI_INTX_ROUTES],
-}
-
-impl Default for PciHostInfo {
-    fn default() -> Self {
-        Self {
-            present: 0,
-            ecam_pa: 0,
-            ecam_size: 0,
-            bus_start: 0,
-            range_count: 0,
-            intx_route_count: 0,
-            interrupt_map_mask_hi: 0,
-            interrupt_map_mask_pin: 0,
-            ranges: [PciRange::default(); MAX_PCI_RANGES],
-            intx_routes: [PciIntxRoute::default(); MAX_PCI_INTX_ROUTES],
-        }
-    }
-}
-
+/// EL1 交给初始 libOS 的只读启动交接；设备目录由 EL0 自行解析 DTB。
 #[derive(Clone, Copy, Default)]
 #[repr(C)]
 pub struct UserBootInfo {
+    /// 启动结构标记、ABI 版本及结构长度。
     pub magic: u32,
     pub version: u16,
     pub size: u16,
-    pub uart: DeviceResource,
-    pub xhci: DeviceResource,
-    /// QEMU virtio-mmio transport窗口；EL0仍需读取device_id选择块设备。
-    pub virtio_mmio: DeviceResource,
-    pub xhci_transport: u32,
-    /// Kernel已成功拉起并参与调度的CPU数量。
+    /// 完整 DTB 的只读 EL0 VA；不是设备寄存器 PA。
+    pub dtb_va: u64,
+    /// DTB 的有效字节数，不包含映射尾页填充。
+    pub dtb_size: u64,
+    /// Kernel 已成功拉起并参与调度的 CPU 数量。
     pub cpu_count: u32,
-    pub pci: PciHostInfo,
 }

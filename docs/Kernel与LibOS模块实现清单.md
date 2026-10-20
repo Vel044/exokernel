@@ -9,8 +9,8 @@
 实现位置：`abi/src/lib.rs`
 
 - 定义 syscall 编号和 AArch64 寄存器调用约定。
-- 定义 `UserBootInfo`、`DeviceResource`、`PciHostInfo`、`PciRange`、`PciIntxRoute`。
-- `UserBootInfo` 包含可选的直接 xHCI 资源和 `XHCI_TRANSPORT_PCI/DIRECT` 传输类型。
+- ABI v13 的 `UserBootInfo` 仅包含完整只读 DTB 的 VA/长度、CPU 数及版本头。
+- `DeviceInfo`、`DeviceResource` 和 PCI 描述类型在 `libos/src/drivers/platform.rs`，属于用户态设备目录。
 - ABI version 8包含`cpu_count`、独立`VSpaceHandle`和目标VSpace线程创建参数；当前QEMU和Pi5目标要求4个逻辑CPU上线。
 - 定义 BootInfo、UART、ECAM、xHCI BAR、heap、stack、DMA arena和Frame arena的固定EL0 VA。
 - 使用 `magic + version + size` 校验 EL1 与 EL0 的 ABI。
@@ -22,22 +22,23 @@
 实现位置：`kernel/src/main.rs`、`kernel/src/kmain.rs`、`kernel/src/boot/boot_info.rs`
 
 - 接收 UEFI/EL2 提供的内存图和 DTB 地址。
-- 解析CPU/PSCI信息，通过SMC `PSCI_CPU_ON`拉起CPU1..3，并等待online mask为`0xf`。
+- 从平台配置取得 CPU MPIDR，通过 PSCI 拉起 CPU1..3，并等待 online mask 为 `0xf`。
 - 初始化 EL1 栈、异常向量、物理内存和 stage-1 页表。
 - 加载 `libos.elf`。
 - 创建只读 `UserBootInfo`，把其 EL0 VA 放入 `x0`。
 - 设置 EL0 PC、SP、PSTATE并通过 `eret`进入libOS。
 
-### 2. DTB 与设备发现
+### 2. 平台配置与 DTB 交接
 
-实现位置：`kernel/src/boot/dtb.rs`、`kernel/src/resource/pci.rs`、`kernel/src/resource/resources.rs`
+实现位置：`kernel/src/boot/handoff.rs`、`kernel/src/resource/resources.rs`；
+设备解析位于 `libos/src/drivers/dtb.rs`、`pci_host.rs`。
 
-- **kernel内校验并解析完整 DTB，完整 DTB不映射给EL0**。
-- 解析 `reg`、`ranges`、`interrupts`、`bus-range`、`interrupt-map`和`dma-coherent`。（寄存器地址、中断、PIC总线、能否DMA）
-- 发现 PL011 MMIO/IRQ、GICv2 GICD/GICC、PCI ECAM、PCI MMIO windows和INTx routes。
-- 从同一份解析结果生成 Kernel 授权表和裁剪后的 **UserBootInfo**，避免两套资源描述不一致。
-- `UserBootInfo` 只暴露获准的 UART、直接 xHCI、PCI host 和 PCI INTx 信息；不暴露 GICD/GICC 物理地址。
-- QEMU xHCI 通过 PCI host 资源发现；Pi5 RP1 的 `snps,dwc3` 节点直接提供 xHCI MMIO/IRQ。
+- UEFI 入口只检查 DTB 容器魔数/长度并复制完整 blob，不解析设备节点。
+- EL1 只读映射完整 DTB；GIC、Timer、CPU 及资源授权来自 QEMU/Pi5 平台配置。
+- EL0 校验 DTB，解析 `reg`、`ranges`、`interrupts`、PCI windows 和 INTx 路由。
+- EL0 生成 `DeviceInfo`，应用、UART、xHCI、virtio 驱动从该目录取得设备描述。
+- 设备描述与权限独立：MMIO 映射及 IRQ 绑定仍逐项检查内核的平台 grant。
+- 新平台或拓扑变化需要更新可信平台配置；DTB 解析结果本身不能扩大访问权限。
 
 #### 与 seL4、MIT Exokernel 的对比
 
@@ -98,7 +99,7 @@ SYS_DEVICE_RELEASE(device_handle)
 实现位置：`kernel/src/resource/protect.rs`、`kernel/src/object/task.rs`、`kernel/src/interrupt/gic.rs`
 
 - 保存 DTB 生成的平台 MMIO grant 和 IRQ grant；MMIO、IRQ、DMA 仍是分开的资源类型。
-- 当前任务只允许映射自己的 grant，不能仅凭 `UserBootInfo` 中的地址伪造资源请求。
+- 当前任务只允许映射自己的 grant，不能仅凭 DTB 中的地址伪造资源请求。
 - 保存当前任务拥有的 ELF、BootInfo、stack、MMIO、DMA 和 IRQ 状态；heap 不再由任务记账，改由 EL0 以普通 Frame 自建。
 - `SYS_MAP_MMIO` 检查完整页对齐后的 PA 范围和用户 VA 重叠；`SYS_IRQ_BIND` 按 DTB flags 配置 level/edge。
 - 任务退出时禁用 IRQ、完成 active IRQ 的 EOI、撤销映射并释放 DMA 与普通页。
@@ -328,6 +329,7 @@ IRQ必须绑定到有效Notification且badge非零，不再提供直接在系统
 实现位置：`libos/src/main.rs`、`libos/src/runtime/mod.rs`
 
 - 从`x0`读取并校验`UserBootInfo`。
+- 初始化 heap 后解析完整 DTB，构建并共享用户态 `DeviceInfo`。
 - 通过`FRAME_ALLOC`+`FRAME_MAP`自建固定用户态heap，并初始化global allocator。
 - 封装所有AArch64 SVC接口。
 - UART接管前`runtime::puts`使用`SYS_PUTS`，接管后直接写PL011 MMIO。
@@ -363,7 +365,7 @@ IRQ必须绑定到有效Notification且badge非零，不再提供直接在系统
 
 实现位置：`libos/src/apps/uart_echo.rs`
 
-- 从`UserBootInfo.uart`读取已授权MMIO和INTID。
+- 从 EL0 生成的 `DeviceInfo.uart` 读取 MMIO 和 INTID，再申请内核授权映射/绑定。
 - 使用`arm-pl011-uart`直接访问EL0 UART VA。
 - QEMU smoke test验证TX和IRQ bind/unbind，并切换libOS日志到直接UART。
 - Pi5模式开启RXI/RTI，执行WAIT、读取FIFO、回写、清设备中断、ACK。
@@ -372,7 +374,7 @@ IRQ必须绑定到有效Notification且badge非零，不再提供直接在系统
 
 实现位置：`libos/src/drivers/pci.rs`
 
-- 从`UserBootInfo.pci`读取ECAM、bus范围、PCI windows和INTx routes。
+- 从 EL0 生成的 `DeviceInfo.pci` 读取 ECAM、bus 范围、PCI windows 和 INTx routes。
 - 映射bus 0 ECAM并扫描device/function。
 - 查找class code `0x0c0330`的xHCI。
 - 识别32-bit/64-bit BAR并探测BAR大小。
@@ -397,7 +399,7 @@ IRQ必须绑定到有效Notification且badge非零，不再提供直接在系统
 实现位置：`libos/vendor/crab-usb`、`libos/src/drivers/xhci.rs`
 
 - QEMU后端从PCI枚举结果映射xHCI BAR并绑定INTx IRQ。
-- Pi5后端直接从`UserBootInfo.xhci`映射RP1 DWC3标准xHCI区域并绑定IRQ。
+- Pi5后端直接从`DeviceInfo.xhci`映射RP1 DWC3标准xHCI区域并绑定IRQ。
 - 初始化DCBAA、Command Ring、Event Ring、ERST、device context和scratchpad。
 - 复位并启动xHCI控制器。
 - 配置primary interrupter并reset Root Hub ports。

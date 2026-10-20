@@ -4,9 +4,9 @@
 //! 启动顺序: UEFI 固件 → BOOTAA64.EFI(EL2) → EBS → eret 进 EL1 外核 → eret 进 EL0 libOS
 //!
 //! main.rs       UEFI/EL2 入口: 收 GOP/DTB/MemoryMap → EBS → eret 到 EL1
-//! kmain.rs      EL1 外核主逻辑: 初始化内存/DTB/MMU → 加载 EL0 libOS → eret
+//! kmain.rs      EL1 外核主逻辑: 初始化内存/平台/MMU → 加载 EL0 libOS → eret
 //! boot_info.rs  BootInfo 结构体 (显存地址 / 空闲内存数量 / CPU状态)
-//! uart.rs       EBS 后由 DTB 初始化的 PL011 串口驱动
+//! uart.rs       EBS 后由平台配置初始化的 PL011 串口驱动
 
 #![no_std] // 不用 Rust 标准库 (裸机, 没有操作系统)
 #![no_main] // 不用 Rust 默认的 main 函数 (用 UEFI 的 #[entry])
@@ -56,12 +56,14 @@ mod sync;
 mod syscall;
 
 pub(crate) use arch::aarch64::vectors;
-pub(crate) use boot::{boot_info, dtb, elf, platform};
+pub(crate) use boot::{boot_info, elf};
+#[cfg(feature = "pi5")]
+pub(crate) use boot::platform;
 pub(crate) use drivers::uart;
 pub(crate) use interrupt::gic;
 pub(crate) use memory::{frame, mmu, physical as mem, vspace};
 pub(crate) use object::{ipc, task, thread};
-pub(crate) use resource::{pci, protect, resources};
+pub(crate) use resource::{protect, resources};
 pub(crate) use syscall::dispatch as trap;
 
 // ── 导入需要用到的外部库 ──
@@ -317,57 +319,15 @@ fn main() -> Status {
         (rsdp, dtb) // 返回 (ACPI地址, DTB地址)
     });
     bi.rsdp = rsdp;
-    bi.dtb = dtb; // 存进 BootInfo, 后面 kmain 会拿它解析硬件信息
-
-    // EBS 前仍可用 UEFI console, 所以这里先用同一套 DTB parser 做一次只读预检。
-    //
-    // 目的:
-    //   1. 证明 UEFI config table 里到底有没有 FDT_GUID。
-    //   2. 证明 FDT header 是否有效。
-    //   3. 证明 stdout-path/aliases/reg/ranges 是否能解析出 UART CPU 物理地址。
-    //
-    // EBS 后 console 失效; 如果 EL1 UART 日志不出现, 这组日志能把问题切开:
-    //   - EBS 前就找不到 UART: DTB/解析逻辑问题。
-    //   - EBS 前能找到 UART, EBS 后没日志: EL2->EL1 或 UART MMU/访问问题。
-    uefi::println!("[exo] UEFI config: ACPI2=0x{:x}, FDT=0x{:x}", rsdp, dtb);
-    let mut pre_ebs_uart = None;
-    if dtb != 0 {
-        match crate::dtb::total_size(dtb) {
-            Some(size) => uefi::println!("[exo] pre-EBS FDT valid, size=0x{:x}", size),
-            None => uefi::println!("[exo] pre-EBS FDT bad header"),
-        }
-        match crate::dtb::find_pl011_reg(dtb) {
-            Some(reg) => {
-                uefi::println!(
-                    "[exo] pre-EBS DTB UART pa=0x{:x}, size=0x{:x}",
-                    reg.base,
-                    reg.size
-                );
-                pre_ebs_uart = Some(reg);
-            }
-            None => uefi::println!("[exo] pre-EBS DTB UART not found"),
-        }
+    uefi::println!("[exo] DTB source: {}", if dtb == 0 { "embedded QEMU" } else { "firmware" });
+    // 只复制完整 DTB，不在固件入口解析 UART/PCI/设备节点。
+    if let Err(error) = boot::handoff::copy_dtb(&mut bi, dtb) {
+        uefi::println!("[exo] DTB handoff failed: {}", error);
+        return Status::LOAD_ERROR;
     }
-    if let Some(reg) = pre_ebs_uart {
-        uart::init(reg.base);
-        uefi::println!("[exo] pre-EBS direct UART write test follows");
-        uart::puts("[exo] pre-EBS direct UART OK\r\n");
-    }
-
-    if dtb == 0 {
-        #[cfg(all(feature = "qemu", not(feature = "pi5")))]
-        {
-            uefi::println!(
-                "[exo] UEFI FDT not found; QEMU build will use embedded qemu-virt.dtb after EBS"
-            );
-            // QEMU UEFI不把FDT放入配置表。正式资源发现仍使用内嵌DTB，
-            // 这里只在EL2启动桥阶段临时启用virt固定PL011，确保EBS到EL1
-            // 之间的故障也能输出；该地址不会写入EL0授权表。
-            uart::init(0x0900_0000);
-        }
-        #[cfg(not(all(feature = "qemu", not(feature = "pi5"))))]
-        uefi::println!("[exo] UEFI FDT not found; no reliable UART after EBS");
-    }
+    uefi::println!("[exo] DTB handoff: {} bytes, device discovery runs in EL0", bi.dtb_size);
+    // 诊断串口属于板级启动配置；设备驱动稍后在 EL0 按 DTB 自行发现。
+    uart::init(crate::resources::PLATFORM.uart_pa);
 
     // ── 第三步: ExitBootServices —— 从此机器归内核管 ──
     // EBS 之前, UEFI 固件还在后台处理事件、管理协议、提供服务
@@ -384,7 +344,7 @@ fn main() -> Status {
     );
     uefi::println!("[exo] calling ExitBootServices...");
     let mmap = unsafe { uefi::boot::exit_boot_services(uefi::boot::MemoryType::LOADER_DATA) };
-    // EBS 之后 UEFI console 已经失效。后续日志必须等 EL1 从 DTB 初始化 UART。
+    // EBS 之后 UEFI console 已经失效。后续日志使用平台配置的内核诊断 UART。
     uart::puts("[exo] post-EBS direct UART OK\r\n");
 
     // ── 第四步: 提取空闲物理内存范围, 放进 BootInfo 给 EL1 外核 ──

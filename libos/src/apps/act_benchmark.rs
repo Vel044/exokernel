@@ -8,16 +8,48 @@ use act_runtime::{InferenceStage, ACTION_DIM, ACTION_STEPS, IMAGE_BYTES};
 const HANDEYE_VA: u64 = exo_abi::ACT_INPUT_ARENA_BASE;
 const FIXED_VA: u64 = HANDEYE_VA + 2 * 1024 * 1024;
 const STATE_VA: u64 = FIXED_VA + 2 * 1024 * 1024;
-const WARMUP_RUNS: usize = 5;
-const MEASURE_RUNS: usize = 10;
+const VERIFY_ONLY: bool = env_matches(option_env!("ACT_RUN_PHASE"), b"correctness");
+const WARMUP_RUNS: usize = if VERIFY_ONLY { 0 } else { 5 };
+const MEASURE_RUNS: usize = if VERIFY_ONLY { 1 } else { 10 };
 // 仅在专项长稳构建中启用：`ACT_CONTINUOUS_CHECK=1 ./build.sh`。默认基准
 // 不增加这100次运行，避免把稳定性检查混入 steady-state 性能样本。
-const CONTINUOUS_CHECK: bool = option_env!("ACT_CONTINUOUS_CHECK").is_some();
+const CONTINUOUS_CHECK: bool = env_matches(option_env!("ACT_CONTINUOUS_CHECK"), b"1");
 const CONTINUOUS_RUNS: usize = 100;
 
-pub(crate) fn run(info: &exo_abi::UserBootInfo) -> ! {
+const fn env_matches(value: Option<&str>, expected: &[u8]) -> bool {
+    let Some(value) = value else {
+        return false;
+    };
+    let bytes = value.as_bytes();
+    if bytes.len() != expected.len() {
+        return false;
+    }
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] != expected[index] {
+            return false;
+        }
+        index += 1;
+    }
+    true
+}
+
+pub(crate) fn run(info: &crate::drivers::platform::DeviceInfo) -> ! {
+    crate::runtime::act_stack::enter(info, run_on_stack)
+}
+
+#[inline(never)]
+extern "C" fn run_on_stack(info: &crate::drivers::platform::DeviceInfo) -> ! {
     // 启动固定观测的 ACT 性能基准。
     crate::runtime::puts(b"[libos] ACT fixed-observation benchmark start\r\n");
+    // 宿主在本次构建前生成唯一ID；串口结果必须回显该ID，不能复用旧启动输出。
+    crate::runtime::puts(b"ACT_RELEASE_RUN_ID=");
+    crate::runtime::puts(
+        option_env!("ACT_RELEASE_RUN_ID")
+            .unwrap_or("manual")
+            .as_bytes(),
+    );
+    crate::runtime::puts(b"\r\n");
 
     // 挂载用户态只读 ext4 文件系统。
     let filesystem = crate::fs::FileSystem::mount(info).unwrap_or_else(|_| fail(0x530));
@@ -72,8 +104,10 @@ pub(crate) fn run(info: &exo_abi::UserBootInfo) -> ! {
     crate::runtime::puts(b"[libos] fixed RGB/state loaded; model setup begin\r\n");
 
     // 解析模型权重和归一化参数，创建 ACT 策略对象。
+    let load_started = crate::runtime::counter();
     let mut policy = crate::drivers::act::Policy::from_files(model.as_slice(), stats.as_slice())
         .unwrap_or_else(|_| fail(0x537));
+    let load_ticks = crate::runtime::counter().wrapping_sub(load_started);
 
     // 创建 CPU1..3 的并行推理 worker，主线程运行 CPU0 的计算分片。
     let _parallel_pool = crate::runtime::act_parallel::ActParallelPool::create([
@@ -94,8 +128,53 @@ pub(crate) fn run(info: &exo_abi::UserBootInfo) -> ! {
 
     // 先完成固定次数 warm-up，再只统计 steady-state 前向推理；模型解析、
     // Frame 映射、worker 创建和第一次 cache 冷启动均不计入正式样本。
-    crate::runtime::puts(b"[libos] ACT steady-state warmup=5 runs=10\r\n");
+    crate::runtime::puts(b"[libos] ACT steady-state warmup=");
+    print_decimal(WARMUP_RUNS as u64);
+    crate::runtime::puts(b" runs=");
+    print_decimal(MEASURE_RUNS as u64);
+    crate::runtime::puts(b"\r\n");
     let mut actions = [[0.0f32; ACTION_DIM]; ACTION_STEPS];
+    // 旧用户接口与新计时接口必须产生相同动作；最终结果仍由宿主对golden比较。
+    policy
+        .prepare(handeye.as_slice(), fixed.as_slice(), state)
+        .unwrap_or_else(|_| fail(0x539));
+    let first_started = crate::runtime::counter();
+    policy
+        .predict_normalized_prepared(&mut actions)
+        .unwrap_or_else(|_| fail(0x539));
+    let first_ticks = crate::runtime::counter().wrapping_sub(first_started);
+    policy
+        .check_workspace_guards()
+        .unwrap_or_else(|_| fail(0x53d));
+    policy.denormalize_actions(&mut actions);
+    let legacy_actions = actions;
+    policy
+        .predict(handeye.as_slice(), fixed.as_slice(), state, &mut actions)
+        .unwrap_or_else(|_| fail(0x539));
+    if actions
+        .iter()
+        .flatten()
+        .zip(legacy_actions.iter().flatten())
+        .any(|(got, want)| got.to_bits() != want.to_bits())
+    {
+        fail(0x53d);
+    }
+    crate::runtime::puts(
+        b"[libos] ACT legacy/core compatibility passed; FPCR nearest FZ=0 workers=4\r\n",
+    );
+    if option_env!("ACT_PROFILE_STAGES").is_some() {
+        let started = crate::runtime::counter();
+        let mut previous = started;
+        policy
+            .predict_with_progress(
+                handeye.as_slice(),
+                fixed.as_slice(),
+                state,
+                &mut actions,
+                |stage| print_progress(stage, started, &mut previous),
+            )
+            .unwrap_or_else(|_| fail(0x539));
+    }
     for _ in 0..WARMUP_RUNS {
         policy
             .predict(handeye.as_slice(), fixed.as_slice(), state, &mut actions)
@@ -103,32 +182,53 @@ pub(crate) fn run(info: &exo_abi::UserBootInfo) -> ! {
     }
     let allocations_before = crate::runtime::allocation_count();
     let mut samples_ms = [0u64; MEASURE_RUNS];
-    let mut model_samples_ms = [0u64; MEASURE_RUNS];
+    let mut model_ticks = [0u64; MEASURE_RUNS];
+    let mut preprocess_ticks = [0u64; MEASURE_RUNS];
+    let mut postprocess_ticks = [0u64; MEASURE_RUNS];
     for (sample_index, sample) in samples_ms.iter_mut().enumerate() {
         let started = crate::runtime::counter();
-        let mut model_timer = ModelTimer::new(started);
         policy
-            .predict_with_progress(
-                handeye.as_slice(),
-                fixed.as_slice(),
-                state,
-                &mut actions,
-                |stage| model_timer.observe(stage),
-            )
+            .prepare(handeye.as_slice(), fixed.as_slice(), state)
             .unwrap_or_else(|_| fail(0x539));
+        let core_started = crate::runtime::counter();
+        policy
+            .predict_normalized_prepared(&mut actions)
+            .unwrap_or_else(|_| fail(0x539));
+        let core_ended = crate::runtime::counter();
+        policy
+            .check_workspace_guards()
+            .unwrap_or_else(|_| fail(0x53d));
+        let postprocess_started = crate::runtime::counter();
+        policy.denormalize_actions(&mut actions);
+        let ended = crate::runtime::counter();
+        preprocess_ticks[sample_index] = core_started.wrapping_sub(started);
+        model_ticks[sample_index] = core_ended.wrapping_sub(core_started);
+        postprocess_ticks[sample_index] = ended.wrapping_sub(postprocess_started);
         let elapsed = crate::runtime::counter().wrapping_sub(started);
         *sample = elapsed.saturating_mul(1_000) / crate::runtime::counter_frequency().max(1);
-        model_samples_ms[sample_index] = model_timer.elapsed_ms();
     }
+    let model_samples_ms = model_ticks
+        .map(|ticks| ticks.saturating_mul(1_000) / crate::runtime::counter_frequency().max(1));
     if CONTINUOUS_CHECK {
         // 长稳检查复用同一输入、输出和 workspace；每次 predict 都重新走完整
         // 图，若 worker 屏障、临时 arena 或 ACL panel 生命周期有问题，这里会
         // 以非零错误码退出，而不是把一次偶然成功当作稳定性证据。
         let continuous_allocations_before = crate::runtime::allocation_count();
+        // 最后正式样本由宿主对固定golden验收；每一次连续推理必须与该样本一致。
+        let reference = actions;
         for _ in 0..CONTINUOUS_RUNS {
             policy
-                .predict(handeye.as_slice(), fixed.as_slice(), state, &mut actions)
+                .predict_normalized_prepared(&mut actions)
                 .unwrap_or_else(|_| fail(0x53a));
+            policy
+                .check_workspace_guards()
+                .unwrap_or_else(|_| fail(0x53d));
+            policy.denormalize_actions(&mut actions);
+            for (got, want) in actions.iter().flatten().zip(reference.iter().flatten()) {
+                if !got.is_finite() || got.to_bits() != want.to_bits() {
+                    fail(0x53d);
+                }
+            }
         }
         let continuous_allocations_after = crate::runtime::allocation_count();
         if continuous_allocations_after != continuous_allocations_before {
@@ -141,6 +241,13 @@ pub(crate) fn run(info: &exo_abi::UserBootInfo) -> ! {
     crate::runtime::puts(b"[libos] ACT steady allocations=");
     print_decimal((allocations_after - allocations_before) as u64);
     crate::runtime::puts(b"\r\n");
+
+    // 正式证据保留原始ticks，宿主统一换算并计算median/P95，不截断到整数毫秒。
+    print_ticks(b"ACT_CORE_TICKS", &model_ticks);
+    print_ticks(b"ACT_PREPROCESS_TICKS", &preprocess_ticks);
+    print_ticks(b"ACT_POSTPROCESS_TICKS", &postprocess_ticks);
+    print_ticks(b"ACT_LOAD_TICKS", &[load_ticks]);
+    print_ticks(b"ACT_FIRST_CORE_TICKS", &[first_ticks]);
     let mut ordered = samples_ms;
     ordered.sort_unstable();
     let mut ordered_model = model_samples_ms;
@@ -184,6 +291,19 @@ pub(crate) fn run(info: &exo_abi::UserBootInfo) -> ! {
     crate::runtime::exit(0)
 }
 
+fn print_ticks(label: &[u8], ticks: &[u64]) {
+    crate::runtime::puts(b"[libos] ");
+    crate::runtime::puts(label);
+    crate::runtime::puts(b" frequency=");
+    print_decimal(crate::runtime::counter_frequency());
+    crate::runtime::puts(b" samples=");
+    for tick in ticks {
+        print_decimal(*tick);
+        crate::runtime::puts(b",");
+    }
+    crate::runtime::puts(b"\r\n");
+}
+
 fn print_progress(stage: InferenceStage, started: u64, previous: &mut u64) {
     let now = crate::runtime::counter();
     crate::runtime::puts(b"[libos] ACT benchmark stage=");
@@ -210,48 +330,6 @@ fn print_progress(stage: InferenceStage, started: u64, previous: &mut u64) {
     print_decimal(now.wrapping_sub(started).saturating_mul(1_000) / frequency);
     crate::runtime::puts(b"\r\n");
     *previous = now;
-}
-
-/// 从阶段回调中提取与 PyTorch `model_ms` 相同边界的 Rust 模型时间。
-///
-/// `CameraNormalized` 回调发生在一张图像的 HWC→FP32 归一化完成后；从该事件
-/// 到下一次归一化事件（或 ActionHead）只包含网络算子。InputPrepared 和两次
-/// CameraNormalized 之前的区间属于输入预处理，故不计入 model-only 样本。
-struct ModelTimer {
-    previous: u64,
-    model_ticks: u64,
-    in_model: bool,
-}
-
-impl ModelTimer {
-    fn new(started: u64) -> Self {
-        Self {
-            previous: started,
-            model_ticks: 0,
-            in_model: false,
-        }
-    }
-
-    fn observe(&mut self, stage: InferenceStage) {
-        let now = crate::runtime::counter();
-        let is_normalized = matches!(stage, InferenceStage::CameraNormalized { .. });
-        if self.in_model && !is_normalized {
-            self.model_ticks = self
-                .model_ticks
-                .wrapping_add(now.wrapping_sub(self.previous));
-        }
-        if is_normalized {
-            self.in_model = true;
-        }
-        self.previous = now;
-    }
-
-    fn elapsed_ms(&self) -> u64 {
-        self.model_ticks
-            .saturating_mul(1_000)
-            .checked_div(crate::runtime::counter_frequency().max(1))
-            .unwrap_or(0)
-    }
 }
 
 fn print_camera(camera: u8, suffix: &[u8]) {

@@ -7,9 +7,11 @@
 use alloc::vec::Vec;
 
 use act_runtime::{
-    ActModel, InferenceStage, KernelProvider, LoadOptions, Observation, ACTION_DIM, ACTION_STEPS,
-    WORKSPACE_FLOATS,
+    ActModel, InferenceStage, Observation, PreparedObservation, ACTION_DIM, ACTION_STEPS,
+    PREPARED_OBSERVATION_FLOATS, WORKSPACE_FLOATS,
 };
+#[cfg(feature = "acl-neon")]
+use act_runtime::{KernelProvider, LoadOptions};
 #[cfg(feature = "acl-neon")]
 use core::mem::MaybeUninit;
 
@@ -28,7 +30,8 @@ pub const STATS_FILE_MAX_SIZE: u64 = 64 * 1024;
 const WORKSPACE_VA: u64 = STATS_FILE_VA + 1024 * 1024;
 const WORKSPACE_BYTES: u64 = (WORKSPACE_FLOATS * core::mem::size_of::<f32>()) as u64;
 const PERSISTENT_VA: u64 = WORKSPACE_VA
-    + WORKSPACE_BYTES.div_ceil(exo_abi::PAGE_SIZE) * exo_abi::PAGE_SIZE;
+    + WORKSPACE_BYTES.div_ceil(exo_abi::PAGE_SIZE) * exo_abi::PAGE_SIZE
+    + exo_abi::PAGE_SIZE;
 /// ACT case、JPEG 和动作文件的共享输入窗口；模型、临时 workspace 与 ACL
 /// persistent arena 必须在该地址之前结束。
 pub const ACT_INPUT_VA: u64 = exo_abi::ACT_INPUT_ARENA_BASE;
@@ -39,6 +42,11 @@ pub struct Policy<'a> {
     model: ActModel<'a>,
     _persistent: Option<MappedWorkspace>,
     workspace: MappedWorkspace,
+    // 加载期分配的归一化图像和state，稳态由Policy独占复用。
+    prepared: MappedWorkspace,
+    prepared_state: [f32; 6],
+    // 仅prepare完整成功后置位；输入校验失败不得复用上次观测。
+    prepared_valid: bool,
 }
 
 impl<'a> Policy<'a> {
@@ -50,20 +58,22 @@ impl<'a> Policy<'a> {
         {
             return Err(0x501);
         }
-        let (model, persistent) = {
+        let (model, persistent): (ActModel<'a>, Option<MappedWorkspace>) = {
             #[cfg(feature = "acl-neon")]
             {
                 let options = LoadOptions {
                     provider: KernelProvider::SharedAcl,
                     threads: 4,
                 };
-                let bytes = act_runtime::required_persistent_bytes(
-                    model_bytes,
-                    stats_bytes,
-                    options,
-                )
-                .map_err(|_| 0x502u64)?;
-                let persistent = MappedWorkspace::allocate(PERSISTENT_VA, bytes as u64, ACT_INPUT_VA)?;
+                let bytes =
+                    act_runtime::required_persistent_bytes(model_bytes, stats_bytes, options)
+                        .map_err(|_| 0x502u64)?;
+                // 输入窗口之前的1MiB保留为模型加载栈，禁止persistent arena覆盖。
+                let persistent = MappedWorkspace::allocate(
+                    PERSISTENT_VA,
+                    bytes as u64,
+                    ACT_INPUT_VA - 1024 * 1024,
+                )?;
                 // SAFETY:persistent 映射由返回的 Policy 独占持有，model 字段先于
                 // _persistent 析构；因此人工扩展到模型生命周期的借用不会悬空。
                 let storage: &'a mut [MaybeUninit<u8>] = unsafe {
@@ -72,10 +82,8 @@ impl<'a> Policy<'a> {
                         bytes,
                     )
                 };
-                let model = ActModel::load_with_options(
-                    model_bytes, stats_bytes, storage, options,
-                )
-                .map_err(|_| 0x502u64)?;
+                let model = ActModel::load_with_options(model_bytes, stats_bytes, storage, options)
+                    .map_err(|_| 0x502u64)?;
                 (model, Some(persistent))
             }
             #[cfg(not(feature = "acl-neon"))]
@@ -86,15 +94,25 @@ impl<'a> Policy<'a> {
                 )
             }
         };
-        let workspace = MappedWorkspace::allocate(
-            WORKSPACE_VA,
-            WORKSPACE_BYTES,
-            PERSISTENT_VA,
+        let workspace =
+            MappedWorkspace::allocate_guarded(WORKSPACE_VA, WORKSPACE_BYTES, PERSISTENT_VA)?;
+        // 预处理图像约5.3MiB，使用Frame而不是容量有限的LibOS全局堆。
+        let prepared_va = persistent.as_ref().map_or(PERSISTENT_VA, |arena| {
+            arena.base as u64
+                + arena.bytes.div_ceil(exo_abi::PAGE_SIZE as usize) as u64 * exo_abi::PAGE_SIZE
+        });
+        let prepared = MappedWorkspace::allocate(
+            prepared_va,
+            (PREPARED_OBSERVATION_FLOATS * 4) as u64,
+            ACT_INPUT_VA - 1024 * 1024,
         )?;
         Ok(Self {
             model,
             _persistent: persistent,
             workspace,
+            prepared,
+            prepared_state: [0.0; 6],
+            prepared_valid: false,
         })
     }
 
@@ -111,9 +129,62 @@ impl<'a> Policy<'a> {
             fixed_rgb,
             state,
         };
-        self.model
+        let result = self
+            .model
             .predict(&observation, self.workspace.as_f32_slice(), actions)
-            .map_err(|_| 0x503)
+            .map_err(|_| 0x503);
+        self.workspace.check_guards()?;
+        result
+    }
+
+    /// 在模型计时前完成双图像和state归一化，缓冲区由Policy持有。
+    pub fn prepare(&mut self, handeye: &[u8], fixed: &[u8], state: [f32; 6]) -> Result<(), u64> {
+        self.prepared_valid = false;
+        let prepared = self
+            .model
+            .prepare_observation(
+                &Observation {
+                    handeye_rgb: handeye,
+                    fixed_rgb: fixed,
+                    state,
+                },
+                self.prepared.as_f32_slice(),
+            )
+            .map_err(|_| 0x503u64)?;
+        self.prepared_state = prepared.state();
+        self.prepared_valid = true;
+        Ok(())
+    }
+
+    /// 模型核心只输出归一化动作；不包含文件读取、输入归一化或日志。
+    pub fn predict_normalized_prepared(
+        &mut self,
+        actions: &mut [[f32; ACTION_DIM]; ACTION_STEPS],
+    ) -> Result<(), u64> {
+        if !self.prepared_valid {
+            return Err(0x503);
+        }
+        let (handeye, fixed) = self
+            .prepared
+            .as_f32_slice()
+            .split_at(PREPARED_OBSERVATION_FLOATS / 2);
+        let observation = PreparedObservation::from_parts(handeye, fixed, self.prepared_state)
+            .map_err(|_| 0x503u64)?;
+        let result = self
+            .model
+            .predict_normalized_prepared(&observation, self.workspace.as_f32_slice(), actions)
+            .map_err(|_| 0x503);
+        result
+    }
+
+    /// 宿主验证/稳定性检查调用此边界；正式模型计时结束后检查哨兵。
+    pub fn check_workspace_guards(&self) -> Result<(), u64> {
+        self.workspace.check_guards()
+    }
+
+    /// 在模型计时后原地恢复物理动作单位。
+    pub fn denormalize_actions(&self, actions: &mut [[f32; ACTION_DIM]; ACTION_STEPS]) {
+        self.model.denormalize_actions(actions);
     }
 
     /// 与`predict`计算完全相同，但把主要网络阶段交给应用记录进度。
@@ -151,6 +222,8 @@ struct MappedWorkspace {
     _mappings: Vec<Mapping>,
     base: *mut u8,
     bytes: usize,
+    // 有guard时base指向64字节前哨兵后的payload；页映射的所有权仍由_frames持有。
+    guarded: bool,
 }
 
 impl MappedWorkspace {
@@ -195,7 +268,37 @@ impl MappedWorkspace {
             _mappings: mappings,
             base: base as *mut u8,
             bytes: bytes as usize,
+            guarded: false,
         })
+    }
+
+    fn allocate_guarded(base: u64, bytes: u64, limit: u64) -> Result<Self, u64> {
+        let mut arena = Self::allocate(base, bytes.checked_add(128).ok_or(0x504u64)?, limit)?;
+        // SAFETY: 分配容量包含两侧64字节哨兵，两个地址均在独占RW映射内部。
+        unsafe {
+            core::ptr::write_bytes(arena.base, 0xa5, 64);
+            core::ptr::write_bytes(arena.base.add(64 + bytes as usize), 0xa5, 64);
+            arena.base = arena.base.add(64);
+        }
+        arena.bytes = bytes as usize;
+        arena.guarded = true;
+        Ok(arena)
+    }
+
+    fn check_guards(&self) -> Result<(), u64> {
+        if self.guarded {
+            for offset in 0..64 {
+                // SAFETY: guarded只在上述分配后设置，前后哨兵随映射存活。
+                unsafe {
+                    if self.base.sub(64).add(offset).read() != 0xa5
+                        || self.base.add(self.bytes + offset).read() != 0xa5
+                    {
+                        return Err(0x505);
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     fn as_f32_slice(&mut self) -> &mut [f32] {

@@ -76,11 +76,11 @@ extern "C" fn control_worker(_arg: u64, _thread_handle: u64, ipc_va: u64) -> ! {
     crate::thread::exit(0)
 }
 
-/// USB线程获得BootInfo地址后独占整个USB软件栈。回显模式在Bulk endpoint
+/// USB线程获得用户态DeviceInfo地址后独占整个USB软件栈。回显模式在Bulk endpoint
 /// 配置完成后报告ready；SCServo模式会等PING、读取和可选中位运动完成。
 #[cfg(any(feature = "qemu-xhci", feature = "pi5-xhci"))]
 extern "C" fn usb_worker(boot_info_va: u64, _thread_handle: u64, _ipc_va: u64) -> ! {
-    let info = unsafe { &*(boot_info_va as *const exo_abi::UserBootInfo) };
+    let info = unsafe { &*(boot_info_va as *const crate::drivers::platform::DeviceInfo) };
     let notification = exo_abi::NotificationHandle(ROBOT_EVENTS.load(Ordering::Acquire));
     crate::usb_task::run_with_ready_signal(
         info,
@@ -91,7 +91,7 @@ extern "C" fn usb_worker(boot_info_va: u64, _thread_handle: u64, _ipc_va: u64) -
     )
 }
 
-pub fn run(_info: &exo_abi::UserBootInfo) -> ! {
+pub fn run(_info: &crate::drivers::platform::DeviceInfo) -> ! {
     crate::runtime::puts(b"[libos] Robot thread integration start\r\n");
 
     let events = crate::notification::Notification::create()
@@ -122,7 +122,7 @@ pub fn run(_info: &exo_abi::UserBootInfo) -> ! {
     #[cfg(any(feature = "qemu-xhci", feature = "pi5-xhci"))]
     let usb = crate::thread::Thread::spawn(
         usb_worker,
-        _info as *const exo_abi::UserBootInfo as u64,
+        _info as *const crate::drivers::platform::DeviceInfo as u64,
         crate::thread::ThreadConfig::new(2, 48, 48),
     )
     .unwrap_or_else(|error| fail(b"USB thread", error));

@@ -31,7 +31,7 @@ pub struct FileSystem {
 
 impl FileSystem {
     /// 扫描Kernel授权窗口中的块设备，选择第一个能通过ext4 superblock校验的盘。
-    pub fn mount(info: &exo_abi::UserBootInfo) -> Result<Self, FsError> {
+    pub fn mount(info: &crate::drivers::platform::DeviceInfo) -> Result<Self, FsError> {
         // 枚举Kernel授权的virtio-blk设备。
         let mut devices = BlockDevices::discover(info).map_err(|_| FsError::NoBlockDevice)?;
         // 记录是否找到过块设备。

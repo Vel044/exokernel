@@ -18,7 +18,7 @@ const MAX_DMA_MAPPINGS: usize = 64;
 pub const MAX_MMIO_GRANTS: usize = 8;
 pub const MAX_IRQ_GRANTS: usize = 32;
 
-/// EL1 从 DTB 资源快照中授予当前任务的一段 MMIO 物理地址范围。
+/// EL1 从可信平台配置中授予当前任务的一段 MMIO 物理地址范围。
 #[derive(Clone, Copy)]
 pub struct MmioGrant {
     pub base: u64,
@@ -29,7 +29,7 @@ impl MmioGrant {
     pub const EMPTY: Self = Self { base: 0, size: 0 };
 }
 
-/// 当前任务可绑定的 GIC SPI，以及 DTB interrupt specifier 中的触发标志。
+/// 当前任务可绑定的 GIC SPI，以及 可信平台配置中的触发标志。
 #[derive(Clone, Copy)]
 pub struct IrqGrant {
     pub intid: u32,
@@ -295,7 +295,8 @@ pub fn range_available(va: u64, pages: u64) -> bool {
             }
             index += 1;
         }
-        if overlaps(USER_BOOT_INFO_VA, 1)
+        if overlaps(exo_abi::USER_DTB_VA, exo_abi::USER_DTB_MAX_SIZE / 4096)
+            || overlaps(USER_BOOT_INFO_VA, 1)
             || overlaps(USER_HEAP_BASE, USER_HEAP_SIZE / 4096)
             || overlaps(USER_STACK_TOP - USER_STACK_PAGES * 4096, USER_STACK_PAGES)
         {
@@ -565,6 +566,7 @@ pub fn exit_current(code: u64) -> ! {
             USER_STACK_PAGES,
         );
         mmu::unmap(root, USER_BOOT_INFO_VA, 1);
+        mmu::unmap(root, exo_abi::USER_DTB_VA, exo_abi::USER_DTB_MAX_SIZE / 4096);
 
         let mut i = 0;
         while i < CURRENT.mmio_count {

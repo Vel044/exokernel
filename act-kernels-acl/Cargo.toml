@@ -12,4 +12,4 @@ default = []
 acl-freestanding = ["rutorch-kernels-acl-shared/acl-freestanding"]
 
 [dependencies]
-rutorch-kernels-acl-shared = { path = "../../rutorch/crates/rutorch-kernels-acl-shared", default-features = false }
+rutorch-kernels-acl-shared = { path = "../vendor/rutorch/crates/rutorch-kernels-acl-shared", default-features = false }
