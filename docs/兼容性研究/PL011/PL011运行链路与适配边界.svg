@@ -12,11 +12,11 @@
 <text x="60" y="266" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="23" font-weight="700" fill="#175B9C">1 发现与注册</text>
 <text x="1000" y="266" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="23" font-weight="700" fill="#007F76">1 发现与注册</text>
 <text x="60" y="296" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="20" font-weight="400" fill="#233947">pl011_init → AMBA 匹配 → pl011_probe</text>
-<text x="1000" y="296" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="20" font-weight="400" fill="#233947">UserBootInfo.uart 提供 base / size / INTID</text>
+<text x="1000" y="296" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="20" font-weight="400" fill="#233947">EL0 解析完整 DTB → DeviceInfo.uart</text>
 <text x="60" y="322" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="20" font-weight="400" fill="#233947">分配对象 / 时钟句柄 → setup_port 映射 MMIO</text>
 <text x="1000" y="322" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="20" font-weight="400" fill="#233947">uart_echo::run → map_mmio → Uart::new</text>
 <text x="60" y="348" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="20" font-weight="400" fill="#233947">register_port → uart_register_driver / uart_add_one_port</text>
-<text x="1000" y="348" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="20" font-weight="400" fill="#233947">资源来源相近；当前没有 AMBA / serial_core 对象模型</text>
+<text x="1000" y="348" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="20" font-weight="400" fill="#233947">MAP_MMIO / IRQ_BIND 仍查 EL1 授权；无 AMBA 门面</text>
 <text x="949" y="313" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="27" font-weight="400" fill="#8398A7">↔</text>
 <rect x="40" y="381" width="900" height="131" rx="12" fill="#FFFFFF" stroke="#D2DEE7"/>
 <rect x="980" y="381" width="900" height="131" rx="12" fill="#FFFFFF" stroke="#D2DEE7"/>
@@ -56,5 +56,5 @@
 <text x="60" y="901" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="23" font-weight="400" fill="#233947">MMIO / IRQ / 内存有现有基础；需要补设备与时钟契约、数据队列、回调生命周期和错误回滚。</text>
 <text x="60" y="939" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="23" font-weight="400" fill="#233947">首阶段 CONFIG_DMA_ENGINE=n，使用 Linux 已有的 PIO 后备路径；不需要先实现 DMAengine。</text>
 <text x="40" y="1016" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="22" font-weight="400" fill="#58707F">已编译：PL011 43 个外部符号；导入串口框架后仍有 119 个。兼容层与迁移运行尚未实现。</text>
-<text x="40" y="1052" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="19" font-weight="400" fill="#58707F">依据：sources/amba-pl011.c · sources/serial_core.c · libos/src/apps/uart_echo.rs  |  2026-10-19</text>
+<text x="40" y="1052" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="19" font-weight="400" fill="#58707F">依据：sources/amba-pl011.c · sources/serial_core.c · libos/src/apps/uart_echo.rs  |  BootInfo v13 · 2026-10-21</text>
 </svg>

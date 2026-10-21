@@ -10,13 +10,13 @@ DOCS = ROOT / "docs"
 # 每行：编号、去掉 SYS_ 的名称、图中简述、寄存器参数、返回值、行为及约束。
 GROUPS = [
     ("设备访问与 DMA", "映射设备寄存器；申请设备可见内存", "#B65B08", [
-        (6,"MAP_MMIO","建立寄存器映射","PA, size_bytes, EL0_VA","0；失败为正整数状态码","验证设备授权、页对齐及 VA 冲突，建立 Device-nGnRE、EL0 可访问且不可执行的映射。size 向上取整到 4 KiB；映射后驱动直接 volatile 访问寄存器。"),
+        (6,"MAP_MMIO","建立寄存器映射","PA, size_bytes, EL0_VA","0；失败为正整数状态码","对照 EL1 平台配置授予的 MMIO grant，检查页对齐及 VA 冲突（含只读 DTB 窗口），建立 Device-nGnRE、EL0 可访问且不可执行的映射。size 向上取整到 4 KiB；映射后驱动直接 volatile 访问寄存器。"),
         (11,"UNMAP_MMIO","撤销寄存器映射","EL0_VA, size_bytes","0；失败为正整数状态码","按已登记的 VA 和取整后的长度撤销完整 MMIO 映射并刷新 TLB；不负责停止设备。"),
         (12,"DMA_ALLOC","分配 DMA 内存","size_bytes, alignment_bytes, EL0_VA","DMA address；失败为 u64::MAX","分配连续、清零的物理页并映射到指定 CPU VA，属性为 Normal Non-cacheable；当前无 IOMMU 路径返回 PA 作为设备 DMA 地址。alignment 必须为非零 2 的幂且不超过 2 MiB；VA 按 4 KiB 对齐。"),
         (13,"DMA_FREE","解除映射并回收 DMA","EL0_VA, size_bytes","0；失败为正整数状态码","按当前任务的 VA+取整长度核对记录，撤销映射并释放物理页。调用者必须先确保设备不再访问该缓冲区。"),
     ]),
     ("IRQ 与异步通知", "将硬件事件送达 EL0 等待线程", "#1562B5", [
-        (7,"IRQ_BIND","绑定中断与通知","INTID, notification_handle, badge, target_cpu","0；失败为正整数或 SYS_ERR_*","只允许获授权的 SPI；验证通知对象及非零 badge。配置 GIC 路由并开放 IRQ。target_cpu 可为 IRQ_TARGET_CURRENT；设备自身中断使能仍由 EL0 写寄存器。"),
+        (7,"IRQ_BIND","绑定中断与通知","INTID, notification_handle, badge, target_cpu","0；失败为正整数或 SYS_ERR_*","只允许平台配置授予的 SPI，触发标志由 EL1 授权记录决定；验证通知对象及非零 badge。配置 GIC 路由并开放 IRQ。target_cpu 可为 IRQ_TARGET_CURRENT；设备自身中断使能仍由 EL0 写寄存器。"),
         (9,"IRQ_ACK","处理后重新开放 IRQ","INTID","0；失败为 1","确认当前绑定的中断处理完成，重新开放该 IRQ；不是设备寄存器清中断操作。EL1 收到 IRQ 时已先屏蔽并 EOI，EL0 必须先处理设备状态再 ACK。"),
         (10,"IRQ_UNBIND","屏蔽并解除 IRQ 绑定","INTID","0；失败为 1","解除当前任务的 IRQ 绑定，禁用相应中断；驱动应先完成设备侧停机和事件处理。"),
         (28,"NOTIFICATION_CREATE","创建通知对象","无","NotificationHandle；失败为 SYS_ERR_*","创建当前任务拥有的 pending badge 位图和等待队列；handle 不是地址。"),
@@ -43,7 +43,7 @@ GROUPS = [
         (19,"THREAD_EXIT","结束当前线程","exit_code","不返回到退出线程","取消 IPC 等待，回收该线程由内核拥有的栈/IPC Buffer，交给调度器；没有同 owner 的存活线程时走 task 退出路径。不是 pthread_join 接口。"),
         (20,"THREAD_YIELD","主动让出执行机会","无","恢复执行后返回 0","把当前执行机会交给调度器，线程仍可运行；不是 sleep，也不保证所有较低优先级线程都得到运行。"),
         (21,"THREAD_SET_PRIORITY","调整线程基础优先级","thread_handle, priority","0；失败为 SYS_ERR_*","在授权范围内调整优先级。范围 0..63，数值越大优先级越高，受线程 mcp 限制。"),
-        (33,"THREAD_RUNTIME","查询累计运行 tick","thread_handle","运行 tick；失败为 SYS_ERR_*","读取内核记账的 CPU 运行时间，不是墙上时钟，也不是睡眠接口。"),
+        (33,"THREAD_RUNTIME","查询累计运行 tick","thread_handle","运行 tick；失败为 SYS_ERR_*","读取累计 CPU 运行 tick，包含未结算的当前运行区间；阻塞前的运行区间也会累计，阻塞等待时间不计入。不是墙上时钟或睡眠接口。"),
     ]),
     ("Endpoint 同步 IPC", "通过消息与 Reply 连接用户态服务", "#265077", [
         (22,"ENDPOINT_CREATE","创建同步通信端点","无","EndpointHandle；失败为 SYS_ERR_*","创建当前任务拥有的发送/接收会合端点。这里的 Endpoint 不是 USB endpoint。"),
@@ -62,7 +62,7 @@ GROUPS = [
 
 
 def generate_markdown():
-    lines = ["# Exokernel 系统调用接口清单", "", "核查日期：2026-10-19。依据当前工作区实现；共 **37 个系统调用，分为 6 类**。本文只说明本系统已存在的接口，不包含 Linux 兼容层设想。", "",
+    lines = ["# Exokernel 系统调用接口清单", "", "核查日期：2026-10-21。已复核 DTB 迁移后的 BootInfo v13 与当前源码；共 **37 个系统调用，分为 6 类**。本文只说明本系统已存在的接口，不包含 Linux 兼容层设想。", "",
              "![系统调用分类总览](Exokernel系统调用分类.svg)", "", "## 调用入口与记号", "",
              "- EL0 通过 `runtime::svc/svc5/svc6` 设置 x8=调用编号、x0…x5=参数，再执行 `svc #0`；EL1 分发器处理，通常以 x0 返回结果。",
              "- 下表参数按 x0、x1…顺序排列。VA 是 CPU 虚拟地址，PA 是物理地址；handle 是带对象身份的凭据，不能当指针或 fd。",
@@ -78,12 +78,19 @@ def generate_markdown():
                   "| --- | --- | --- | --- |"]
         for no, name, short, args, result, details in rows:
             lines.append(f"| {no} · `SYS_{name}`<br>{short} | `{args}` | {result} | {details} |")
-    lines += ["", "## 容易混淆的边界", "",
+    lines += ["", "## BootInfo v13：设备发现与授权", "",
+              "本次内核修改没有新增、删除或重编号系统调用，37 项 syscall 的参数布局保持不变；变化发生在启动结构和设备发现职责。", "",
+              "- `UserBootInfo` 只传 `magic/version/size`、完整 DTB 的 `dtb_va/dtb_size` 和实际上线的 `cpu_count`，不再含 uart/xhci/pci 等设备字段。",
+              "- UEFI 启动层仅检查 DTB 容器魔数和长度、复制并保留交接页；EL1 在 `USER_DTB_VA = 0x4100_0000` 建立只读、不可执行映射，窗口上限 2 MiB。它不是通过 syscall 获取的。",
+              "- libOS 初始化 heap 后在 `drivers/dtb.rs` 解析完整 DTB，生成 `drivers/platform.rs::DeviceInfo`，驱动从 `DeviceInfo.uart/xhci/pci/virtio_mmio` 取得设备描述。",
+              "- 内核启动所需 GIC/Timer/CPU 及初始 MMIO/IRQ 授权来自 `kernel/src/resource/resources.rs` 的 QEMU/Pi5 平台配置。看见 DTB 中的地址和 INTID 不等于取得访问权限，`MAP_MMIO` / `IRQ_BIND` 仍校验 grant。",
+              "- clocks/reset/pinctrl 等属性现在可由用户态继续查询，但当前 DeviceInfo 和兼容层尚未自动实现这些资源的控制。详见 [启动交接说明](Stack和Heap和Userbootinfo.md#2当前的userbootinfo)。", "",
+              "## 容易混淆的边界", "",
               "**Frame 与 DMA**：两者底层都使用内存页。Frame 面向 CPU 地址空间，返回对象 handle，再单独建立映射；DMA_ALLOC 直接组合物理分配与指定 VA 映射，返回设备地址。当前两者都可能连续，区别不能简单写成‘连续和不连续’。",
               "", "**IRQ 与 Notification**：IRQ 是设备事件来源，Notification 是唤醒线程的内核对象；软件 SIGNAL 也能发送通知。典型顺序为硬件 IRQ → EL1 屏蔽并 EOI → 投递 badge → EL0 WAIT 返回 → 处理设备状态/Event Ring → IRQ_ACK 重新开放。",
               "", "**Endpoint 与 Notification**：Endpoint 携带消息并提供同步会合/回复；Notification 合并事件位图，不传输任意 payload。IPC Buffer 是 48 字节的 IpcMessage，包含 label、4 个 u64 words 和 reply；大块数据需另行安排共享内存。",
               "", "**Task、VSpace 与 Thread**：Task 是当前授权/资源管理上下文；VSpace 是地址空间；Thread 是执行上下文。创建 VSpace 不等于启动进程。ELF 装载由 EL0 ProcessBuilder 组合 Frame、VSpace、Thread 完成。",
-              "", "**这些是用户态普通操作，不是新增 syscall**：UART read_word/write_word/set_interrupt_masks；xHCI 寄存器编程和 Event Ring 解析；Rust poll/await；runtime::delay_ns 的计数器忙等；ext4 路径和文件解析。", "",
+              "", "**这些是用户态普通操作，不是新增 syscall**：DTB 解析、DeviceInfo 构造；UART read_word/write_word/set_interrupt_masks；xHCI 寄存器编程和 Event Ring 解析；Rust poll/await；runtime::delay_ns 的计数器忙等；ext4 路径和文件解析。", "",
               "## 返回值与当前实现差异", "",
               "当前 ABI 没有统一成一种错误返回约定，使用时必须按接口处理：", "",
               "| 接口范围 | 错误约定 |", "| --- | --- |",
@@ -101,10 +108,13 @@ def generate_markdown():
               "| WOULD_BLOCK | MAX−7 | 非阻塞检查当前没有可消费事件 |", "",
               "本次发现的文档/封装差异：Notification::poll 的注释说空时返回 0，但 EL1 实际返回 WOULD_BLOCK，封装返回 Err；runtime::irq_ack 丢弃底层返回值，清单中的返回值指原生 syscall。Frame::free 的旧注释容易让人误以为自动回收映射，EL1 实际在仍有映射时返回 BUSY。此处记录实现事实，未修改源码。", "",
               "## 常见使用顺序", "",
-              "```text\nUART：MAP_MMIO → NOTIFICATION_CREATE → IRQ_BIND\n      → EL0 打开设备中断 → WAIT → EL0 寄存器读写/清状态 → IRQ_ACK\n\nDMA：DMA_ALLOC → EL0 写描述符/缓冲区 → 设备使用\n     → 确认设备不再访问 → DMA_FREE\n\n普通内存：FRAME_ALLOC → FRAME_MAP → CPU 访问 → FRAME_UNMAP → FRAME_FREE\n\n新地址空间：VSPACE_CREATE → 映射 ELF/栈 → THREAD_CREATE_IN → THREAD_START\n            → 线程结束/销毁 → 解除映射/释放 Frame → VSPACE_DESTROY\n\n同步服务：ENDPOINT_CREATE → 客户端 CALL ↔ 服务端 RECV/REPLY_RECV\n```", "",
+              "```text\n设备发现：只读 UserBootInfo → EL0 解析完整 DTB → DeviceInfo（不是 syscall）\n\nUART：从 DeviceInfo.uart 取得 PA/长度/INTID\n      → MAP_MMIO → NOTIFICATION_CREATE → IRQ_BIND\n      → EL0 打开设备中断 → WAIT → EL0 寄存器读写/清状态 → IRQ_ACK\n\nDMA：DMA_ALLOC → EL0 写描述符/缓冲区 → 设备使用\n     → 确认设备不再访问 → DMA_FREE\n\n普通内存：FRAME_ALLOC → FRAME_MAP → CPU 访问 → FRAME_UNMAP → FRAME_FREE\n\n新地址空间：VSPACE_CREATE → 映射 ELF/栈 → THREAD_CREATE_IN → THREAD_START\n            → 线程结束/销毁 → 解除映射/释放 Frame → VSPACE_DESTROY\n\n同步服务：ENDPOINT_CREATE → 客户端 CALL ↔ 服务端 RECV/REPLY_RECV\n```", "",
               "## 源码定位", "",
               "| 层次 | 文件 |", "| --- | --- |",
               "| 编号、句柄、配置结构 | [abi/src/lib.rs](../abi/src/lib.rs) |",
+              "| DTB 复制与只读启动映射 | [handoff.rs](../kernel/src/boot/handoff.rs)、[kmain.rs](../kernel/src/kmain.rs) |",
+              "| EL0 DTB 解析与设备目录 | [dtb.rs](../libos/src/drivers/dtb.rs)、[platform.rs](../libos/src/drivers/platform.rs)、[pci_host.rs](../libos/src/drivers/pci_host.rs) |",
+              "| EL1 平台启动及设备授权 | [resources.rs](../kernel/src/resource/resources.rs)、[task.rs](../kernel/src/object/task.rs) |",
               "| EL0 SVC、MMIO/DMA/IRQ 封装 | [runtime/mod.rs](../libos/src/runtime/mod.rs) |",
               "| EL0 对象封装 | [kernel_api](../libos/src/kernel_api/mod.rs) |",
               "| EL1 分发、MMIO/DMA/IRQ 实现 | [syscall/dispatch.rs](../kernel/src/syscall/dispatch.rs) |",
@@ -158,7 +168,7 @@ def generate_svg():
             text(x+36,y+284,"以及文件系统逻辑由 EL0 实现。",21)
             text(x+36,y+318,"这些操作并非每一步都要进入内核。",20,color="#60717D")
     text(40,994,"阅读重点：设备访问 4 项  +  IRQ 与通知 8 项，是用户态驱动接入内核的主要接口。",24,weight="600")
-    text(40,1033,"来源：abi/src/lib.rs · kernel/src/syscall/dispatch.rs  |  2026-10-19 源码核查  |  编号 8 为历史空洞",19,color="#60717D")
+    text(40,1033,"来源：abi/src/lib.rs · syscall/dispatch.rs  |  BootInfo v13 · 2026-10-21 核查  |  syscall 编号未变，8 为历史空洞",19,color="#60717D")
     text(40,1061,"完整参数、返回值、状态限制和错误约定：Exokernel系统调用清单.md",18,color="#60717D")
     s.append('</svg>')
     (DOCS / "Exokernel系统调用分类.svg").write_text("\n".join(s)+"\n")

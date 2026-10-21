@@ -1,6 +1,6 @@
 # Linux 驱动迁移与 libOS 兼容层调研
 
-核查日期：2026-10-19。exokernel 依据当前工作区源码（包含尚未提交的修改）；Linux 编号对比固定为 **v6.12、AArch64 原生 ABI**，不含 AArch32。选择固定版本是为了复现，不表示它是最新版本。
+调研日期：2026-10-19；目标侧接口复核：2026-10-21。exokernel 已按 BootInfo v13 和 DTB 用户态解析后的源码同步；Linux 编号对比固定为 **v6.12、AArch64 原生 ABI**，不含 AArch32。选择固定版本是为了复现，不表示它是最新版本。
 
 ## 结论
 
@@ -16,6 +16,16 @@
 | 完整 Linux 环境 | 原有 Linux 应用和内核驱动 | 运行 Linux 客体内核的 VMM、设备分配/虚拟化 | 另一条路线，不等于驱动已移入原生 libOS |
 
 这些是可行性判断，并不是本项目已经具备的兼容能力。本次只做源码核查、清单和设计，没有移植驱动或运行兼容性测试。
+
+## 目标侧接口变更（BootInfo v13）
+
+37 个 syscall 的编号与参数未变，Linux v6.12 表保持原样。启动交接已改为完整 DTB
+只读映射；EL0 构建 `DeviceInfo`，不再从 `UserBootInfo` 中读取 UART/PCI/xHCI 字段。
+MMIO/IRQ 访问仍受 EL1 平台配置中的 grant 限制。设备描述不是访问授权。
+目标侧清单、SVG、源码行号和来源哈希已重新生成；PL011 的资源/时钟说明同步更新。
+
+[2026-10-20 原生系统验证](../validation/2026-10-20.json) 覆盖目标系统启动、驱动和 ACT，
+不等于 Linux 驱动兼容层已经实现或通过测试。
 
 ## 阅读顺序
 
@@ -41,6 +51,8 @@
 
 ```sh
 python3 docs/兼容性研究/generate_inventory.py
+python3 docs/兼容性研究/generate_exokernel_reference.py
+python3 docs/兼容性研究/PL011/build_assets.py
 ```
 
 脚本离线读取已保存的上游表和当前 `abi/src/lib.rs`，并核对 `kernel/src/syscall/dispatch.rs` 的分发分支。产物哈希记录在 [inventory-manifest.json](inventory-manifest.json)。更新源码后可重跑；当前文档中的语义说明仍需人工复核。

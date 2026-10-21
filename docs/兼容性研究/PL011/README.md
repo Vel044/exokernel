@@ -100,7 +100,7 @@ TTY 输出进入 serial_core::uart_write
 
 | 项目 | 当前已存在的事实 | 迁移时需要做的事 |
 | --- | --- | --- |
-| 资源入口 | UserBootInfo.uart 有 PA、长度、GIC INTID | 为 Linux 设备门面构造 resource、IRQ 与私有数据；不能伪造任意设备授权 |
+| 资源入口 | EL0 解析完整 DTB，DeviceInfo.uart 保存 PA、长度、GIC INTID；内核独立检查授权 | 为 Linux 设备门面构造 resource、IRQ 与私有数据；不能伪造任意设备授权 |
 | 寄存器映射 | map_mmio 后，Uart 对象持有 UART_VA | 兼容 devm_ioremap_resource 的成功、失败及回收约定 |
 | 初始化 | Uart::new 只保存寄存器指针；当前 run 没调用 enable | 明确继承配置还是冷启动配置；记录时钟、波特率、FIFO 和格式的来源 |
 | 访问宽度 | Rust 库使用其定义的寄存器类型 | Linux pl011_read/write 根据 iotype 使用 16 或 32 位 relaxed 访问；不能统一替换为任意 32 位操作 |

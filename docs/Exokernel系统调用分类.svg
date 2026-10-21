@@ -161,6 +161,6 @@
 <text x="1316" y="871" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="21" font-weight="400" fill="#243441">以及文件系统逻辑由 EL0 实现。</text>
 <text x="1316" y="905" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="20" font-weight="400" fill="#60717D">这些操作并非每一步都要进入内核。</text>
 <text x="40" y="994" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="24" font-weight="600" fill="#243441">阅读重点：设备访问 4 项  +  IRQ 与通知 8 项，是用户态驱动接入内核的主要接口。</text>
-<text x="40" y="1033" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="19" font-weight="400" fill="#60717D">来源：abi/src/lib.rs · kernel/src/syscall/dispatch.rs  |  2026-10-19 源码核查  |  编号 8 为历史空洞</text>
+<text x="40" y="1033" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="19" font-weight="400" fill="#60717D">来源：abi/src/lib.rs · syscall/dispatch.rs  |  BootInfo v13 · 2026-10-21 核查  |  syscall 编号未变，8 为历史空洞</text>
 <text x="40" y="1061" font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,Arial,sans-serif" font-size="18" font-weight="400" fill="#60717D">完整参数、返回值、状态限制和错误约定：Exokernel系统调用清单.md</text>
 </svg>

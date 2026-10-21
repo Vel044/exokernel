@@ -14,7 +14,7 @@ TEXT = SOURCE.read_text()
 DEPS = [
     ('设备发现', 'amba_driver_register amba_set_drvdata amba_get_drvdata amba_rev', '设备门面', '用获授权资源构造受限设备对象，保留端口私有状态与型号来源'),
     ('内存与资源', 'devm_kzalloc devm_ioremap_resource', 'EL0 适配', '零初始化分配；授权 MMIO 映射；建立失败回滚和托管释放记录'),
-    ('时钟', 'devm_clk_get clk_prepare_enable clk_get_rate clk_disable_unprepare', '待补平台契约', '需要真实频率及启停策略；现有 UserBootInfo.uart 不提供这些数据'),
+    ('时钟', 'devm_clk_get clk_prepare_enable clk_get_rate clk_disable_unprepare', '待补平台契约', 'EL0 可查询完整 DTB 的 clocks；还需解析频率并实现启停契约，DeviceInfo.uart 未封装时钟控制'),
     ('引脚', 'pinctrl_pm_select_default_state pinctrl_pm_select_sleep_state', '限定平台前提', 'QEMU 可声明无 pinmux；真机必须检查固件配置或提供控制'),
     ('寄存器访问', 'readl_relaxed readw_relaxed writel_relaxed writew_relaxed', 'EL0 适配', '保留访问宽度、Device 属性、volatile 与所需顺序'),
     ('IRQ', 'request_irq free_irq', 'EL0 IRQ 分发器', '保存 handler/dev_id；Notification 驱动处理；同步卸载后释放'),
@@ -76,9 +76,9 @@ def diagram():
         (235,'1 发现与注册',['pl011_init → AMBA 匹配 → pl011_probe',
                          '分配对象 / 时钟句柄 → setup_port 映射 MMIO',
                          'register_port → uart_register_driver / uart_add_one_port'],
-         ['UserBootInfo.uart 提供 base / size / INTID',
+         ['EL0 解析完整 DTB → DeviceInfo.uart',
           'uart_echo::run → map_mmio → Uart::new',
-          '资源来源相近；当前没有 AMBA / serial_core 对象模型']),
+          'MAP_MMIO / IRQ_BIND 仍查 EL1 授权；无 AMBA 门面']),
         (381,'2 打开与配置',['TTY open → uart_startup → ops->startup',
                          'pl011_startup：hwinit / request_irq / CR / IFLS / IMSC',
                          'serial_core 随后通过 set_termios 配置波特率和格式'],
@@ -116,7 +116,7 @@ def diagram():
         measured = json.loads(result.read_text())
         status = f"已编译：PL011 {measured['pl011_undefined']} 个外部符号；导入串口框架后仍有 {measured['combined_undefined']} 个。兼容层与迁移运行尚未实现。"
     txt(40,1016,status,22,'#58707F')
-    txt(40,1052,'依据：sources/amba-pl011.c · sources/serial_core.c · libos/src/apps/uart_echo.rs  |  2026-10-19',19,'#58707F')
+    txt(40,1052,'依据：sources/amba-pl011.c · sources/serial_core.c · libos/src/apps/uart_echo.rs  |  BootInfo v13 · 2026-10-21',19,'#58707F')
     out.append('</svg>')
     (HERE/'PL011运行链路与适配边界.svg').write_text('\n'.join(out)+'\n')
 

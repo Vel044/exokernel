@@ -56,8 +56,16 @@ def main():
             "| 编号 | 名称 | 内核入口 | ABI 筛选标签 |", "| --- | --- | --- | --- |"]
     text += [f"| {r['number']} | `{r['name']}` | `{r['entry']}` | {r['abi']} |" for r in linux]
     (HERE / "Linux系统调用完整清单.md").write_text("\n".join(text) + "\n")
-    files = [abi_path, dispatch_path, *sorted(SOURCES.glob("*"))]
-    manifest = dict(baseline="Linux v6.12 / AArch64 native", abis=sorted(abis),
+    # 启动结构与资源授权语义同样纳入来源哈希，不能只更新 syscall 编号。
+    context_files = [ROOT / name for name in (
+        "kernel/src/boot/handoff.rs", "kernel/src/kmain.rs", "kernel/src/resource/resources.rs",
+        "kernel/src/object/task.rs", "kernel/src/scheduler/priority.rs", "libos/src/main.rs",
+        "libos/src/drivers/dtb.rs", "libos/src/drivers/platform.rs", "libos/src/drivers/pci_host.rs",
+    )]
+    files = [abi_path, dispatch_path, *context_files, *sorted(SOURCES.glob("*"))]
+    manifest = dict(baseline="Linux v6.12 / AArch64 native", verified_on="2026-10-21",
+                    exokernel_boot_info_version=int(re.search(r"USER_BOOT_INFO_VERSION: u16 = (\d+);", source)[1]),
+                    abis=sorted(abis),
                     linux_named_numbers=len(linux), exokernel_calls=len(exo),
                     sha256={str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest()
                             for p in files if p.is_file()})

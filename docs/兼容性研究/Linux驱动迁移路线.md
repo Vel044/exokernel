@@ -6,6 +6,9 @@ Linux 内核驱动通常不通过用户态 `read/write` syscall 使用硬件，�
 
 因此 syscall 清单用于分析应用兼容；驱动移植还需要 **驱动内部依赖清单**。Linux 的设备模型包含总线、设备及 probe/remove 等关系。[Linux 设备模型](https://docs.kernel.org/6.12/driver-api/driver-model/overview.html)
 
+目标侧已按 BootInfo v13（2026-10-21 复核）更新：DTB 查询和设备目录在 EL0，
+`UserBootInfo` 只传启动交接地址/长度及 CPU 数；资源授权由 EL1 平台配置独立维护。
+
 ## 驱动 API 与本项目能力对照
 
 这里的 Linux 函数是待分析依赖类别，不表示每个驱动都依赖每一项。实际范围必须由固定源码、Kconfig 和编译结果确定。
@@ -22,7 +25,7 @@ Linux 内核驱动通常不通过用户态 `read/write` syscall 使用硬件，�
 | mutex、wait_queue、completion | Notification + Thread | 计数或条件状态、注册等待的原子性、超时、取消；badge 合并不保存事件次数 |
 | workqueue、tasklet、timer | 线程、执行器，EL0 counter | 调度队列、不可睡眠/可睡眠上下文、定时触发、flush/cancel 语义 |
 | `udelay/msleep` | EL0 `delay_ns` 忙等 | 微小轮询延迟与可调度睡眠分开；长延迟不能一律忙等 |
-| PCI/platform/DTB、clock/reset/regulator | UserBootInfo、PCI 枚举和授权资源 | 设备模型、资源索引、时钟/复位的实际控制；不能用空函数吞掉必需操作 |
+| PCI/platform/DTB、clock/reset/regulator | EL0 解析完整 DTB，生成 DeviceInfo；PCI 枚举与内核授权 | 设备模型、资源索引、时钟/复位的实际控制；不能用空函数吞掉必需操作 |
 | `usb_submit_urb/usb_kill_urb` | CrabUSB 请求/Future/Event Ring | URB、完成回调、取消、错误、buffer 所有权和断开流程，不能只改函数名 |
 | serial_core/tty、net_device、block layer | 现有 UART/USB transport/块驱动对象 | 决定导入对应 Linux 子系统，还是替换其对外接口；两者移植范围不同 |
 | `devm_*`、引用计数、probe/remove | 本地资源对象及释放接口 | 失败回滚、按依赖顺序释放、异步回调结束后再销毁资源 |

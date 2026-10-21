@@ -1,5 +1,7 @@
 {
   "baseline": "Linux v6.12 / AArch64 native",
+  "verified_on": "2026-10-21",
+  "exokernel_boot_info_version": 13,
   "abis": [
     "64",
     "common",
@@ -10,8 +12,17 @@
   "linux_named_numbers": 318,
   "exokernel_calls": 37,
   "sha256": {
-    "abi/src/lib.rs": "555c9f6562c9e20f401ad2c692fd99c227aeb4128da5a8047824e049721e7f92",
-    "kernel/src/syscall/dispatch.rs": "e321338b89800e028493338bd5491631fe2f882963a025367aaf6b24be20a671",
+    "abi/src/lib.rs": "fddd48250414aa8e7299786b6264a151f66257d191e3382c5f391a87ffe2612f",
+    "kernel/src/syscall/dispatch.rs": "f668b8fcd3d68aed59e72ae9301cd5a498e241818c94f9aa6f459000b8c867a6",
+    "kernel/src/boot/handoff.rs": "7a8ebeff94882e90020ac9435c8dfe402c9f9c4225ade7a7513e3e06b42b5831",
+    "kernel/src/kmain.rs": "0e9942a0611eb5005cf91ec3ad8c7525a8c2d3909492be1cd62632c71bc7125a",
+    "kernel/src/resource/resources.rs": "36454b73995be4e41d5cffb4f5d4c67f130302e535a34f153f8947547b4e4de2",
+    "kernel/src/object/task.rs": "08897fe3cac9223eae6662898092ca74a6a033d8bdee951c00b1be7303777062",
+    "kernel/src/scheduler/priority.rs": "274fd4b12bc7d71bda57c7d550b60845b025b175369569af7cf598f82fe46f82",
+    "libos/src/main.rs": "c1f05bdb17f416337672613912e9e22484be7931788c482de2bbddc6e20c6676",
+    "libos/src/drivers/dtb.rs": "e8e050141549e86ba8b37fc7e3d8408b14c9bf5bee84ee3c6767f2cea3889c8d",
+    "libos/src/drivers/platform.rs": "371e72311a7dc476b745b0a5fcec92eeb9ac82090b9be0c4fdc94259cf4f0629",
+    "libos/src/drivers/pci_host.rs": "63c8a82f5424d75db6f025253df1e6ba3fa6186f943b02080b6194001bda9954",
     "docs/兼容性研究/sources/linux-v6.12-arch_arm64_kernel_Makefile.syscalls": "27e95d7bd10c3ab67c8a3f16c7dfe5da30c586c2fda3993c42025109a22098c5",
     "docs/兼容性研究/sources/linux-v6.12-arch_arm64_tools_syscall_64.tbl": "e0a5d9a188af7952060d69e4e248675df79a583610ae535e68787bb5481a30db",
     "docs/兼容性研究/sources/linux-v6.12-arm64-unistd.h": "cc7ad787b726c5a50b9ed3765977beadc8867f7933a9f9daa1747d77ce7bda06",
