@@ -106,6 +106,8 @@ ACT 正确性另用 `scripts/run_act_release.py --provider portable --case 000 -
 ## 阅读与协作
 
 - [驱动协作入口与第一阶段产出](docs/驱动移植/README.md)
+- [LiteEth 原 Linux C 驱动的 EL0 移植与收发验收](docs/兼容性研究/LiteEth/移植实现与验收.md)
+- [LiteEth AI 定向翻译 Rust 驱动实验汇报](docs/兼容性研究/LiteEth/AI定向翻译实验汇报.md)
 - [目标侧接口与 UART / DMA 链路](docs/驱动移植/target-interfaces.md)
 - [首次会议提纲](docs/驱动移植/meeting.md)
 - [现有 Kernel 与 libOS 实现清单](docs/Kernel与LibOS模块实现清单.md)

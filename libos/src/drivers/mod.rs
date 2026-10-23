@@ -1,6 +1,8 @@
 //! 用户态设备发现、设备驱动和协议栈。
 
 pub(crate) mod dtb;
+#[cfg(feature = "app-liteeth-smoke")]
+pub(crate) mod linux_liteeth;
 pub(crate) mod pci_host;
 pub(crate) mod platform;
 
@@ -50,3 +52,8 @@ pub(crate) mod uvc;
 pub(crate) mod virtio_blk;
 #[cfg(any(feature = "qemu-xhci", feature = "pi5-xhci"))]
 pub(crate) mod xhci;
+
+#[cfg(feature = "app-liteeth-rust-smoke")]
+pub(crate) mod liteeth;
+#[cfg(feature = "app-liteeth-rust-smoke")]
+pub(crate) mod liteeth_core;

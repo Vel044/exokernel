@@ -1,0 +1,34 @@
+{
+  "passed": true,
+  "source_sha256": "bb8b3c2cac2f8821647c66cf00a96adf7eed02b0c6c9acc925d37eb7b628285e",
+  "source_version": "Linux 6.12.75",
+  "compared": [
+    "frames",
+    "stats",
+    "device_tx",
+    "device_rx",
+    "lifecycle"
+  ],
+  "frames": 17,
+  "bytes": 10752,
+  "stats": {
+    "rx_packets": 17,
+    "tx_packets": 17,
+    "rx_bytes": 10752,
+    "tx_bytes": 10752,
+    "rx_errors": 0,
+    "tx_errors": 1,
+    "rx_dropped": 0,
+    "tx_dropped": 1
+  },
+  "rust_core_tests": 11,
+  "c_host_sanitizers": [
+    "AddressSanitizer",
+    "UndefinedBehaviorSanitizer"
+  ],
+  "c_elf_bytes": 152472,
+  "rust_elf_bytes": 146568,
+  "rust_c_ffi_symbols": [],
+  "scope": "单设备、单所属 EL0 线程；QEMU LiteEth 模型；L2 收发、超长 TX 丢弃、失败回滚、启停回收；不含真实 FPGA/IP/socket/形式化证明",
+  "evidence_path": "target/liteeth-comparison/20261023-120009"
+}

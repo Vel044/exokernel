@@ -6,6 +6,8 @@
 #[cfg(all(
     not(feature = "ide"),
     not(any(
+        feature = "app-liteeth-smoke",
+        feature = "app-liteeth-rust-smoke",
         feature = "app-system-smoke",
         feature = "app-process-smoke",
         feature = "app-uart-echo",
@@ -173,6 +175,8 @@ pub(crate) mod uvc_smoke;
 /// `ide`会保留全部枚举成员，让rust-analyzer能够分析每条分发路径；正式构建
 /// 只保留所选场景对应的成员，不把其他应用链接进最终ELF。
 enum Application {
+    #[cfg(any(feature = "app-liteeth-smoke", feature = "app-liteeth-rust-smoke"))]
+    LiteEthSmoke,
     #[cfg(any(feature = "ide", feature = "app-act-benchmark"))]
     ActBenchmark,
     #[cfg(any(feature = "ide", feature = "app-act-inference"))]
@@ -205,6 +209,8 @@ pub(crate) fn run(info: &crate::drivers::platform::DeviceInfo) -> ! {
 /// 把互斥Cargo feature收敛成单个值；这里不执行任何设备初始化。
 #[allow(unreachable_code)]
 fn selected_application() -> Application {
+    #[cfg(any(feature = "app-liteeth-smoke", feature = "app-liteeth-rust-smoke"))]
+    return Application::LiteEthSmoke;
     #[cfg(feature = "app-act-benchmark")]
     return Application::ActBenchmark;
 
@@ -253,6 +259,8 @@ fn selected_application() -> Application {
 /// 直接进入具体应用；正式构建时条件编译只留下一个有效分支。
 fn dispatch(application: Application, info: &crate::drivers::platform::DeviceInfo) -> ! {
     match application {
+        #[cfg(any(feature = "app-liteeth-smoke", feature = "app-liteeth-rust-smoke"))]
+        Application::LiteEthSmoke => liteeth_smoke::run(info),
         // 纯ACT性能基准：从只读ext4加载模型和一组冻结的真实观测，使用
         // CPU0..3执行一次100步ACT前向传播并记录各阶段耗时。它不初始化
         // PCI/xHCI，不访问摄像头或舵机，也绝不会产生物理运动。
@@ -359,3 +367,28 @@ fn prepare_xhci_logging(info: &crate::drivers::platform::DeviceInfo) {
         crate::runtime::exit(0x103);
     }
 }
+
+#[cfg(all(
+    any(feature = "app-liteeth-smoke", feature = "app-liteeth-rust-smoke"),
+    any(
+        feature = "app-system-smoke",
+        feature = "app-process-smoke",
+        feature = "app-uart-echo",
+        feature = "app-usb-echo",
+        feature = "app-uvc-smoke",
+        feature = "app-scservo",
+        feature = "app-act-inference",
+        feature = "app-act-benchmark",
+        feature = "app-robot-act-once",
+        feature = "app-robot-observation",
+        feature = "app-robot-action-replay",
+        feature = "qemu-xhci",
+        feature = "pi5-xhci"
+    )
+))]
+compile_error!("LiteEth 场景与其他应用/USB 平台特性互斥");
+#[cfg(any(feature = "app-liteeth-smoke", feature = "app-liteeth-rust-smoke"))]
+mod liteeth_smoke;
+
+#[cfg(all(feature = "app-liteeth-smoke", feature = "app-liteeth-rust-smoke"))]
+compile_error!("LiteEth C/Rust 对照版本一次只能选择一个");

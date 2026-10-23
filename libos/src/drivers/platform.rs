@@ -89,6 +89,8 @@ impl Default for PciHostInfo {
 pub struct DeviceInfo {
     /// PL011 的 CPU PA、寄存器长度和 GIC INTID。
     pub uart: DeviceResource,
+    /// LiteEth 两段 MMIO 和 slot 布局；仅是描述，EL1 仍审核授权。
+    pub liteeth: Option<LiteEthInfo>,
     /// Pi5 直接连接的 RP1 xHCI，QEMU 通过 PCI 枚举填充。
     pub xhci: DeviceResource,
     /// virtio transport 的物理窗口，设备类型由驱动读取寄存器识别。
@@ -99,4 +101,21 @@ pub struct DeviceInfo {
     pub cpu_count: u32,
     /// 用户态解析的 ECAM、PCI 地址窗口与 INTx 路由。
     pub pci: PciHostInfo,
+}
+
+/// LiteEth CSR 与设备 SRAM；均为设备 MMIO，不是 DMA 主存。
+#[derive(Clone, Copy, Default)]
+pub struct LiteEthInfo {
+    /// CSR CPU PA、长度与 GIC INTID。
+    pub mac: DeviceResource,
+    /// RX/TX slot 共享设备 SRAM 的 CPU PA 与长度。
+    pub buffer: DeviceResource,
+    /// SRAM 中 RX slot 数，TX 紧随 RX。
+    pub rx_slots: u32,
+    /// SRAM 中 TX slot 数。
+    pub tx_slots: u32,
+    /// 每个 slot 的字节容量。
+    pub slot_size: u32,
+    /// 设备树声明的以太网地址；零地址让驱动生成本地地址。
+    pub address: [u8; 6],
 }

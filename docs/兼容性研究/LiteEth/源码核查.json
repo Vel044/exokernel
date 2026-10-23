@@ -1,0 +1,530 @@
+{
+  "linux_version": "6.12.75",
+  "source": "/Users/vel/Work/RobotOS/Lerobot/linux/drivers/net/ethernet/litex/litex_liteeth.c",
+  "sha256": "bb8b3c2cac2f8821647c66cf00a96adf7eed02b0c6c9acc925d37eb7b628285e",
+  "scope": "Complete lexical direct function-like external names (49), 9 driver functions. Not recursive Linux dependency closure. SVG 01 is an IPv4 socket flow example, not a trace of the supplied guest binaries.",
+  "functions": {
+    "liteeth_rx": {
+      "line": 57,
+      "calls": {
+        "netdev_priv": [
+          59
+        ],
+        "litex_read8": [
+          65
+        ],
+        "litex_read32": [
+          66
+        ],
+        "netdev_alloc_skb_ip_align": [
+          71
+        ],
+        "netdev_err": [
+          73
+        ],
+        "skb_put": [
+          77
+        ],
+        "memcpy_fromio": [
+          78
+        ],
+        "eth_type_trans": [
+          79
+        ],
+        "dev_sw_netstats_rx_add": [
+          81
+        ],
+        "netif_rx": [
+          83
+        ]
+      }
+    },
+    "liteeth_interrupt": {
+      "line": 92,
+      "calls": {
+        "netdev_priv": [
+          95
+        ],
+        "litex_read8": [
+          98,
+          105
+        ],
+        "netif_queue_stopped": [
+          100
+        ],
+        "netif_wake_queue": [
+          101
+        ],
+        "litex_write8": [
+          102,
+          108
+        ],
+        "liteeth_rx": [
+          107
+        ]
+      }
+    },
+    "liteeth_open": {
+      "line": 114,
+      "calls": {
+        "netdev_priv": [
+          116
+        ],
+        "litex_write8": [
+          120,
+          121,
+          130,
+          131
+        ],
+        "request_irq": [
+          123
+        ],
+        "netdev_err": [
+          125
+        ],
+        "netif_carrier_on": [
+          133
+        ],
+        "netif_start_queue": [
+          134
+        ]
+      }
+    },
+    "liteeth_stop": {
+      "line": 139,
+      "calls": {
+        "netdev_priv": [
+          141
+        ],
+        "netif_stop_queue": [
+          143
+        ],
+        "netif_carrier_off": [
+          144
+        ],
+        "litex_write8": [
+          146,
+          147
+        ],
+        "free_irq": [
+          149
+        ]
+      }
+    },
+    "liteeth_start_xmit": {
+      "line": 154,
+      "calls": {
+        "netdev_priv": [
+          157
+        ],
+        "litex_read8": [
+          160
+        ],
+        "net_ratelimit": [
+          161,
+          171
+        ],
+        "netdev_err": [
+          162,
+          172
+        ],
+        "netif_stop_queue": [
+          164
+        ],
+        "unlikely": [
+          170
+        ],
+        "dev_kfree_skb_any": [
+          174,
+          190
+        ],
+        "memcpy_toio": [
+          182
+        ],
+        "litex_write8": [
+          183,
+          185
+        ],
+        "litex_write16": [
+          184
+        ],
+        "dev_sw_netstats_tx_add": [
+          187
+        ]
+      }
+    },
+    "liteeth_get_stats64": {
+      "line": 195,
+      "calls": {
+        "netdev_stats_to_stats64": [
+          198
+        ],
+        "dev_fetch_sw_netstats": [
+          199
+        ]
+      }
+    },
+    "liteeth_setup_slots": {
+      "line": 209,
+      "calls": {
+        "of_property_read_u32": [
+          214,
+          220,
+          226
+        ],
+        "dev_dbg": [
+          216,
+          222,
+          228
+        ]
+      }
+    },
+    "liteeth_probe": {
+      "line": 233,
+      "calls": {
+        "devm_alloc_etherdev": [
+          240
+        ],
+        "SET_NETDEV_DEV": [
+          244
+        ],
+        "platform_set_drvdata": [
+          245
+        ],
+        "netdev_priv": [
+          247
+        ],
+        "devm_netdev_alloc_pcpu_stats": [
+          251
+        ],
+        "platform_get_irq": [
+          256
+        ],
+        "devm_platform_ioremap_resource_byname": [
+          261,
+          265
+        ],
+        "IS_ERR": [
+          262,
+          266
+        ],
+        "PTR_ERR": [
+          263,
+          267
+        ],
+        "liteeth_setup_slots": [
+          269
+        ],
+        "of_get_ethdev_address": [
+          279
+        ],
+        "eth_hw_addr_random": [
+          281
+        ],
+        "register_netdev": [
+          285
+        ],
+        "dev_err": [
+          287
+        ],
+        "netdev_info": [
+          291
+        ]
+      }
+    },
+    "liteeth_remove": {
+      "line": 297,
+      "calls": {
+        "platform_get_drvdata": [
+          299
+        ],
+        "unregister_netdev": [
+          301
+        ]
+      }
+    }
+  },
+  "groups": [
+    {
+      "id": "A",
+      "names": [
+        "devm_alloc_etherdev",
+        "SET_NETDEV_DEV",
+        "platform_set_drvdata",
+        "platform_get_drvdata",
+        "netdev_priv",
+        "devm_netdev_alloc_pcpu_stats",
+        "platform_get_irq",
+        "devm_platform_ioremap_resource_byname",
+        "register_netdev",
+        "unregister_netdev",
+        "of_property_read_u32",
+        "of_get_ethdev_address",
+        "eth_hw_addr_random"
+      ]
+    },
+    {
+      "id": "B",
+      "names": [
+        "litex_read8",
+        "litex_read32",
+        "litex_write8",
+        "litex_write16",
+        "memcpy_fromio",
+        "memcpy_toio"
+      ]
+    },
+    {
+      "id": "C",
+      "names": [
+        "request_irq",
+        "free_irq"
+      ]
+    },
+    {
+      "id": "D",
+      "names": [
+        "netdev_alloc_skb_ip_align",
+        "skb_put",
+        "eth_type_trans",
+        "netif_rx",
+        "dev_kfree_skb_any"
+      ]
+    },
+    {
+      "id": "E",
+      "names": [
+        "netif_queue_stopped",
+        "netif_wake_queue",
+        "netif_start_queue",
+        "netif_stop_queue",
+        "netif_carrier_on",
+        "netif_carrier_off",
+        "dev_sw_netstats_rx_add",
+        "dev_sw_netstats_tx_add",
+        "netdev_stats_to_stats64",
+        "dev_fetch_sw_netstats"
+      ]
+    },
+    {
+      "id": "F",
+      "names": [
+        "dev_dbg",
+        "dev_err",
+        "netdev_err",
+        "netdev_info",
+        "net_ratelimit",
+        "IS_ERR",
+        "PTR_ERR",
+        "unlikely",
+        "module_platform_driver",
+        "MODULE_DEVICE_TABLE",
+        "MODULE_AUTHOR",
+        "MODULE_DESCRIPTION",
+        "MODULE_LICENSE"
+      ]
+    }
+  ],
+  "registered_callbacks": {
+    "ndo_open": "liteeth_open",
+    "ndo_stop": "liteeth_stop",
+    "ndo_start_xmit": "liteeth_start_xmit",
+    "ndo_get_stats64": "liteeth_get_stats64",
+    "probe": "liteeth_probe",
+    "remove_new": "liteeth_remove",
+    "request_irq.handler": "liteeth_interrupt"
+  },
+  "internal_calls": [
+    [
+      "liteeth_interrupt",
+      "liteeth_rx"
+    ],
+    [
+      "liteeth_probe",
+      "liteeth_setup_slots"
+    ]
+  ],
+  "non_function_dependencies": {
+    "structs": [
+      "device",
+      "device_node",
+      "liteeth",
+      "net_device",
+      "net_device_ops",
+      "of_device_id",
+      "pcpu_sw_netstats",
+      "platform_device",
+      "platform_driver",
+      "rtnl_link_stats64",
+      "sk_buff"
+    ],
+    "register_definitions": [
+      [
+        "LITEETH_WRITER_SLOT",
+        "0x00"
+      ],
+      [
+        "LITEETH_WRITER_LENGTH",
+        "0x04"
+      ],
+      [
+        "LITEETH_WRITER_ERRORS",
+        "0x08"
+      ],
+      [
+        "LITEETH_WRITER_EV_STATUS",
+        "0x0C"
+      ],
+      [
+        "LITEETH_WRITER_EV_PENDING",
+        "0x10"
+      ],
+      [
+        "LITEETH_WRITER_EV_ENABLE",
+        "0x14"
+      ],
+      [
+        "LITEETH_READER_START",
+        "0x18"
+      ],
+      [
+        "LITEETH_READER_READY",
+        "0x1C"
+      ],
+      [
+        "LITEETH_READER_LEVEL",
+        "0x20"
+      ],
+      [
+        "LITEETH_READER_SLOT",
+        "0x24"
+      ],
+      [
+        "LITEETH_READER_LENGTH",
+        "0x28"
+      ],
+      [
+        "LITEETH_READER_EV_STATUS",
+        "0x2C"
+      ],
+      [
+        "LITEETH_READER_EV_PENDING",
+        "0x30"
+      ],
+      [
+        "LITEETH_READER_EV_ENABLE",
+        "0x34"
+      ],
+      [
+        "LITEETH_PREAMBLE_CRC",
+        "0x38"
+      ],
+      [
+        "LITEETH_PREAMBLE_ERRORS",
+        "0x3C"
+      ],
+      [
+        "LITEETH_CRC_ERRORS",
+        "0x40"
+      ],
+      [
+        "LITEETH_PHY_CRG_RESET",
+        "0x00"
+      ],
+      [
+        "LITEETH_MDIO_W",
+        "0x04"
+      ],
+      [
+        "LITEETH_MDIO_R",
+        "0x0C"
+      ]
+    ],
+    "member_paths": [
+      "netdev->irq",
+      "netdev->name",
+      "netdev->netdev_ops",
+      "netdev->stats",
+      "netdev->tstats",
+      "pdev->dev",
+      "priv->base",
+      "priv->dev",
+      "priv->dev->of_node",
+      "priv->netdev",
+      "priv->num_rx_slots",
+      "priv->num_tx_slots",
+      "priv->rx_base",
+      "priv->rx_slot",
+      "priv->slot_size",
+      "priv->tx_base",
+      "priv->tx_slot",
+      "skb->data",
+      "skb->len",
+      "skb->protocol"
+    ],
+    "symbolic_names": [
+      "DRV_NAME",
+      "ENOMEM",
+      "GPL",
+      "IRQ_HANDLED",
+      "IS_ERR",
+      "LITEETH_CRC_ERRORS",
+      "LITEETH_MDIO_R",
+      "LITEETH_MDIO_W",
+      "LITEETH_PHY_CRG_RESET",
+      "LITEETH_PREAMBLE_CRC",
+      "LITEETH_PREAMBLE_ERRORS",
+      "LITEETH_READER_EV_ENABLE",
+      "LITEETH_READER_EV_PENDING",
+      "LITEETH_READER_EV_STATUS",
+      "LITEETH_READER_LENGTH",
+      "LITEETH_READER_LEVEL",
+      "LITEETH_READER_READY",
+      "LITEETH_READER_SLOT",
+      "LITEETH_READER_START",
+      "LITEETH_WRITER_ERRORS",
+      "LITEETH_WRITER_EV_ENABLE",
+      "LITEETH_WRITER_EV_PENDING",
+      "LITEETH_WRITER_EV_STATUS",
+      "LITEETH_WRITER_LENGTH",
+      "LITEETH_WRITER_SLOT",
+      "MODULE_AUTHOR",
+      "MODULE_DESCRIPTION",
+      "MODULE_DEVICE_TABLE",
+      "MODULE_LICENSE",
+      "NETDEV_TX_BUSY",
+      "NETDEV_TX_OK",
+      "NET_RX_DROP",
+      "PTR_ERR",
+      "SET_NETDEV_DEV",
+      "SPDX"
+    ],
+    "type_aliases": [
+      "u8",
+      "u32",
+      "irqreturn_t",
+      "netdev_tx_t",
+      "__iomem"
+    ],
+    "resource_and_config_strings": [
+      "mac",
+      "buffer",
+      "litex,liteeth",
+      "litex,rx-slots",
+      "litex,tx-slots",
+      "litex,slot-size"
+    ]
+  },
+  "source_evidence": {
+    "syscall_numbers": "include/uapi/asm-generic/unistd.h:538-551",
+    "socket_entries": "net/socket.c:2181,2221,2243,2675,2696,2904",
+    "netlink_dispatch": "net/netlink/af_netlink.c:1807; net/core/rtnetlink.c:2806,2932,3197,3586,3765,6567,6691",
+    "open_stop_callbacks": "net/core/dev.c:1552,1636",
+    "transmit_callback": "include/linux/netdevice.h:4931-4946; net/core/dev.c:3676,4436",
+    "irq_dispatch": "kernel/irq/handle.c:140-158; drivers/irqchip/irq-gic.c:370; drivers/irqchip/irq-sifive-plic.c:390",
+    "irq_registration_and_sync": "include/linux/interrupt.h:169-172; kernel/irq/manage.c:1879-2042,2148",
+    "rx_queue_and_delivery": "net/core/dev.c:5281-5370,6206-6230",
+    "platform_callbacks": "drivers/base/platform.c:1335,1379-1424",
+    "litex_csr_access": "include/linux/litex.h:12-19,38-76"
+  }
+}

@@ -36,6 +36,13 @@ resolve_libos_features() {
             fi
             ;;
         process-smoke) printf 'app-process-smoke\n' ;;
+        liteeth-smoke|liteeth-rust-smoke)
+            if [ "$platform" != "qemu" ]; then
+                echo "ERROR: liteeth-smoke当前只支持已配置LiteEth模型的QEMU" >&2
+                return 1
+            fi
+            printf 'app-%s\n' "$app"
+            ;;
         uart-echo) printf 'app-uart-echo\n' ;;
         usb-echo) printf 'app-usb-echo,%s\n' "$xhci_feature" ;;
         uvc-smoke) printf 'app-uvc-smoke,%s\n' "$xhci_feature" ;;

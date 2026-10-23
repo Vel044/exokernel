@@ -1,0 +1,437 @@
+{
+  "version": 1,
+  "status": "implemented_and_tested",
+  "source": {
+    "path": "libos/vendor/liteeth-linux/litex_liteeth.c",
+    "version": "Linux 6.12.75",
+    "sha256": "bb8b3c2cac2f8821647c66cf00a96adf7eed02b0c6c9acc925d37eb7b628285e"
+  },
+  "generation": {
+    "method": "当前会话 AI 阅读源文件与依赖实现后定向重写，再通过构建和测试修订",
+    "task": "翻译为直接使用 exokernel 现有接口的 Rust LiteEth 驱动；保留原 C 文件作对照",
+    "not_claimed": [
+      "可重放的自动翻译器",
+      "可执行语义 IR 编译管线",
+      "完整 Linux 兼容",
+      "完整功能形式化等价"
+    ],
+    "contract_timing": "Rust 实现和对照测试完成后汇总；不是生成前冻结的输入",
+    "actual_sequence": [
+      "阅读原始源码、已有定位清单及依赖实现",
+      "在会话分析中决定替换方式并编写 Rust 实现",
+      "构建、宿主测试和 QEMU C/Rust 对照",
+      "事后整理本结构化契约及实验汇报"
+    ],
+    "stage_limitations": [
+      "生成前未单独交付完整驱动解释与未知项列表",
+      "生成前未固定完整、带版本的依赖替换契约",
+      "没有读取契约并生成实现的自动工具",
+      "忙状态未逐事件采用相同时序重放",
+      "非法 RX 异常等并未全部在 C/Rust 间差分验证"
+    ]
+  },
+  "scope": [
+    "单设备、单所属 EL0 线程",
+    "线性完整 L2 帧，18..2048 字节测试输入",
+    "固定 MMIO VA；原有 EL1 grant 和 Notification/ACK 机制",
+    "设备 SRAM 复制，无 DMA"
+  ],
+  "functions": [
+    {
+      "source_function": "liteeth_rx",
+      "source_line": 57,
+      "target": "Device::receive_slot",
+      "invariant": "按 slot/length 读取 SRAM 并交付完整帧；替换 skb 分配和 netif_rx"
+    },
+    {
+      "source_function": "liteeth_interrupt",
+      "source_line": 92,
+      "target": "Device::handle_irq + Driver::wait_irq",
+      "invariant": "先 TX 后 RX；设备 W1C 在 kernel IRQ_ACK 前"
+    },
+    {
+      "source_function": "liteeth_open",
+      "source_line": 114,
+      "target": "Device::prepare_open + Driver::open + Device::enable",
+      "invariant": "清旧 pending → 绑定 Notification → 开设备事件"
+    },
+    {
+      "source_function": "liteeth_stop",
+      "source_line": 139,
+      "target": "Device::stop + Driver::close",
+      "invariant": "停止发送 → 关闭两路设备事件 → IRQ_UNBIND"
+    },
+    {
+      "source_function": "liteeth_start_xmit",
+      "source_line": 154,
+      "target": "Device::send",
+      "invariant": "READY/队列检查 → 容量判断 → SRAM copy → SLOT/LENGTH/START → 统计和轮转"
+    },
+    {
+      "source_function": "liteeth_get_stats64",
+      "source_line": 195,
+      "target": "Device::stats",
+      "invariant": "单所属线程返回值类型统计，不构造 Linux 结构"
+    },
+    {
+      "source_function": "liteeth_setup_slots",
+      "source_line": 209,
+      "target": "dtb::discover + Layout::validate",
+      "invariant": "延用 2/2/2048 默认值，并校验乘积和资源容量"
+    },
+    {
+      "source_function": "liteeth_probe",
+      "source_line": 233,
+      "target": "Driver::attach",
+      "invariant": "校验描述 → 独占固定 VA → 创建通知 → 映射两段设备区；失败逆序回滚"
+    },
+    {
+      "source_function": "liteeth_remove",
+      "source_line": 297,
+      "target": "Driver::detach + Drop",
+      "invariant": "先关闭/解绑，再释放映射、通知和固定 VA 所有权"
+    }
+  ],
+  "dependencies": [
+    {
+      "name": "IS_ERR",
+      "action": "replace",
+      "target": "Result / match / 条件分支",
+      "reason": "不再使用编码错误指针；unlikely 不承担设备语义"
+    },
+    {
+      "name": "MODULE_AUTHOR",
+      "action": "eliminate",
+      "target": "Cargo 场景分发与 SPDX/原始源码版权文件",
+      "reason": "不提供 Linux 模块加载和总线自动匹配；保留来源与版权"
+    },
+    {
+      "name": "MODULE_DESCRIPTION",
+      "action": "eliminate",
+      "target": "Cargo 场景分发与 SPDX/原始源码版权文件",
+      "reason": "不提供 Linux 模块加载和总线自动匹配；保留来源与版权"
+    },
+    {
+      "name": "MODULE_DEVICE_TABLE",
+      "action": "eliminate",
+      "target": "Cargo 场景分发与 SPDX/原始源码版权文件",
+      "reason": "不提供 Linux 模块加载和总线自动匹配；保留来源与版权"
+    },
+    {
+      "name": "MODULE_LICENSE",
+      "action": "eliminate",
+      "target": "Cargo 场景分发与 SPDX/原始源码版权文件",
+      "reason": "不提供 Linux 模块加载和总线自动匹配；保留来源与版权"
+    },
+    {
+      "name": "PTR_ERR",
+      "action": "replace",
+      "target": "Result / match / 条件分支",
+      "reason": "不再使用编码错误指针；unlikely 不承担设备语义"
+    },
+    {
+      "name": "SET_NETDEV_DEV",
+      "action": "replace",
+      "target": "Driver / Device 的字段和所有权",
+      "reason": "消除 Linux 对象和私有指针关联；限定单设备、单所属线程"
+    },
+    {
+      "name": "dev_dbg",
+      "action": "replace",
+      "target": "应用错误日志 / 确定的测试统计",
+      "reason": "取消 Linux 日志接口，未保留全部逐字日志；该驱动无时间驱动的硬件协议"
+    },
+    {
+      "name": "dev_err",
+      "action": "replace",
+      "target": "应用错误日志 / 确定的测试统计",
+      "reason": "取消 Linux 日志接口，未保留全部逐字日志；该驱动无时间驱动的硬件协议"
+    },
+    {
+      "name": "dev_fetch_sw_netstats",
+      "action": "replace",
+      "target": "Stats 值类型",
+      "reason": "保留计数含义；不承诺 Linux per-CPU 并发统计"
+    },
+    {
+      "name": "dev_kfree_skb_any",
+      "action": "eliminate",
+      "target": "有界帧数组和借用切片",
+      "reason": "本次仅线性 L2 帧；取消每包堆分配，BUSY 保留调用者报文所有权"
+    },
+    {
+      "name": "dev_sw_netstats_rx_add",
+      "action": "replace",
+      "target": "Stats 值类型",
+      "reason": "保留计数含义；不承诺 Linux per-CPU 并发统计"
+    },
+    {
+      "name": "dev_sw_netstats_tx_add",
+      "action": "replace",
+      "target": "Stats 值类型",
+      "reason": "保留计数含义；不承诺 Linux per-CPU 并发统计"
+    },
+    {
+      "name": "devm_alloc_etherdev",
+      "action": "replace",
+      "target": "Driver / Device 的字段和所有权",
+      "reason": "消除 Linux 对象和私有指针关联；限定单设备、单所属线程"
+    },
+    {
+      "name": "devm_netdev_alloc_pcpu_stats",
+      "action": "replace",
+      "target": "Stats 值类型",
+      "reason": "保留计数含义；不承诺 Linux per-CPU 并发统计"
+    },
+    {
+      "name": "devm_platform_ioremap_resource_byname",
+      "action": "map",
+      "target": "Mapping::map / Drop → runtime MAP_MMIO / UNMAP_MMIO",
+      "reason": "保留页对齐、Device 内存属性、grant 审核和失败释放"
+    },
+    {
+      "name": "eth_hw_addr_random",
+      "action": "out_of_scope",
+      "target": "上层 DeviceInfo.address",
+      "reason": "原文件只设置 net_device 身份，不写硬件 MAC 寄存器；本次上层提供完整 L2 帧，不生成 MAC、ARP 或 IP"
+    },
+    {
+      "name": "eth_type_trans",
+      "action": "replace",
+      "target": "Device 接收槽 → Driver::receive",
+      "reason": "交付完整帧，不进行 Linux 协议分类；槽满保留第一帧并显式记录 delivery_drops"
+    },
+    {
+      "name": "free_irq",
+      "action": "map",
+      "target": "Notification::bind_irq / runtime::irq_unbind",
+      "reason": "回调改成所属 EL0 线程主动处理；无 C 回调指针，不承诺 Linux 硬中断上下文"
+    },
+    {
+      "name": "litex_read32",
+      "action": "translate",
+      "target": "Io::read/write 的 Mmio 实现",
+      "reason": "保持 32 位 CSR 事务、低 8/16 位含义、LE 和 ARM dmb osh"
+    },
+    {
+      "name": "litex_read8",
+      "action": "translate",
+      "target": "Io::read/write 的 Mmio 实现",
+      "reason": "保持 32 位 CSR 事务、低 8/16 位含义、LE 和 ARM dmb osh"
+    },
+    {
+      "name": "litex_write16",
+      "action": "translate",
+      "target": "Io::read/write 的 Mmio 实现",
+      "reason": "保持 32 位 CSR 事务、低 8/16 位含义、LE 和 ARM dmb osh"
+    },
+    {
+      "name": "litex_write8",
+      "action": "translate",
+      "target": "Io::read/write 的 Mmio 实现",
+      "reason": "保持 32 位 CSR 事务、低 8/16 位含义、LE 和 ARM dmb osh"
+    },
+    {
+      "name": "memcpy_fromio",
+      "action": "translate",
+      "target": "Io::copy_from/copy_to 的 Mmio 实现",
+      "reason": "设备 SRAM 上逐字节 volatile；只允许已验证的 slot 和长度"
+    },
+    {
+      "name": "memcpy_toio",
+      "action": "translate",
+      "target": "Io::copy_from/copy_to 的 Mmio 实现",
+      "reason": "设备 SRAM 上逐字节 volatile；只允许已验证的 slot 和长度"
+    },
+    {
+      "name": "module_platform_driver",
+      "action": "eliminate",
+      "target": "Cargo 场景分发与 SPDX/原始源码版权文件",
+      "reason": "不提供 Linux 模块加载和总线自动匹配；保留来源与版权"
+    },
+    {
+      "name": "net_ratelimit",
+      "action": "replace",
+      "target": "应用错误日志 / 确定的测试统计",
+      "reason": "取消 Linux 日志接口，未保留全部逐字日志；该驱动无时间驱动的硬件协议"
+    },
+    {
+      "name": "netdev_alloc_skb_ip_align",
+      "action": "eliminate",
+      "target": "有界帧数组和借用切片",
+      "reason": "本次仅线性 L2 帧；取消每包堆分配，BUSY 保留调用者报文所有权"
+    },
+    {
+      "name": "netdev_err",
+      "action": "replace",
+      "target": "应用错误日志 / 确定的测试统计",
+      "reason": "取消 Linux 日志接口，未保留全部逐字日志；该驱动无时间驱动的硬件协议"
+    },
+    {
+      "name": "netdev_info",
+      "action": "replace",
+      "target": "应用错误日志 / 确定的测试统计",
+      "reason": "取消 Linux 日志接口，未保留全部逐字日志；该驱动无时间驱动的硬件协议"
+    },
+    {
+      "name": "netdev_priv",
+      "action": "replace",
+      "target": "Driver / Device 的字段和所有权",
+      "reason": "消除 Linux 对象和私有指针关联；限定单设备、单所属线程"
+    },
+    {
+      "name": "netdev_stats_to_stats64",
+      "action": "replace",
+      "target": "Stats 值类型",
+      "reason": "保留计数含义；不承诺 Linux per-CPU 并发统计"
+    },
+    {
+      "name": "netif_carrier_off",
+      "action": "eliminate",
+      "target": "open/close 状态",
+      "reason": "本次不向 Linux 网络核心发布链路状态，不支持 PHY 管理"
+    },
+    {
+      "name": "netif_carrier_on",
+      "action": "eliminate",
+      "target": "open/close 状态",
+      "reason": "本次不向 Linux 网络核心发布链路状态，不支持 PHY 管理"
+    },
+    {
+      "name": "netif_queue_stopped",
+      "action": "replace",
+      "target": "opened / stopped 状态和 TX pending",
+      "reason": "BUSY 不轮转 slot；完成事件重启提交；不实现 qdisc/NAPI"
+    },
+    {
+      "name": "netif_rx",
+      "action": "replace",
+      "target": "Device 接收槽 → Driver::receive",
+      "reason": "交付完整帧，不进行 Linux 协议分类；槽满保留第一帧并显式记录 delivery_drops"
+    },
+    {
+      "name": "netif_start_queue",
+      "action": "replace",
+      "target": "opened / stopped 状态和 TX pending",
+      "reason": "BUSY 不轮转 slot；完成事件重启提交；不实现 qdisc/NAPI"
+    },
+    {
+      "name": "netif_stop_queue",
+      "action": "replace",
+      "target": "opened / stopped 状态和 TX pending",
+      "reason": "BUSY 不轮转 slot；完成事件重启提交；不实现 qdisc/NAPI"
+    },
+    {
+      "name": "netif_wake_queue",
+      "action": "replace",
+      "target": "opened / stopped 状态和 TX pending",
+      "reason": "BUSY 不轮转 slot；完成事件重启提交；不实现 qdisc/NAPI"
+    },
+    {
+      "name": "of_get_ethdev_address",
+      "action": "out_of_scope",
+      "target": "上层 DeviceInfo.address",
+      "reason": "原文件只设置 net_device 身份，不写硬件 MAC 寄存器；本次上层提供完整 L2 帧，不生成 MAC、ARP 或 IP"
+    },
+    {
+      "name": "of_property_read_u32",
+      "action": "map",
+      "target": "DeviceInfo / LiteEthInfo / dtb::discover",
+      "reason": "设备树仍在 EL0 解析；描述不授予资源权限"
+    },
+    {
+      "name": "platform_get_drvdata",
+      "action": "replace",
+      "target": "Driver / Device 的字段和所有权",
+      "reason": "消除 Linux 对象和私有指针关联；限定单设备、单所属线程"
+    },
+    {
+      "name": "platform_get_irq",
+      "action": "map",
+      "target": "DeviceInfo / LiteEthInfo / dtb::discover",
+      "reason": "设备树仍在 EL0 解析；描述不授予资源权限"
+    },
+    {
+      "name": "platform_set_drvdata",
+      "action": "replace",
+      "target": "Driver / Device 的字段和所有权",
+      "reason": "消除 Linux 对象和私有指针关联；限定单设备、单所属线程"
+    },
+    {
+      "name": "register_netdev",
+      "action": "eliminate",
+      "target": "Driver attach/open/close/detach",
+      "reason": "保留驱动生命周期；本次完整 L2 帧契约不提供 Linux 网络设备注册语义"
+    },
+    {
+      "name": "request_irq",
+      "action": "map",
+      "target": "Notification::bind_irq / runtime::irq_unbind",
+      "reason": "回调改成所属 EL0 线程主动处理；无 C 回调指针，不承诺 Linux 硬中断上下文"
+    },
+    {
+      "name": "skb_put",
+      "action": "eliminate",
+      "target": "有界帧数组和借用切片",
+      "reason": "本次仅线性 L2 帧；取消每包堆分配，BUSY 保留调用者报文所有权"
+    },
+    {
+      "name": "unlikely",
+      "action": "replace",
+      "target": "Result / match / 条件分支",
+      "reason": "不再使用编码错误指针；unlikely 不承担设备语义"
+    },
+    {
+      "name": "unregister_netdev",
+      "action": "eliminate",
+      "target": "Driver attach/open/close/detach",
+      "reason": "保留驱动生命周期；本次完整 L2 帧契约不提供 Linux 网络设备注册语义"
+    }
+  ],
+  "invariants": [
+    "TX_READY==0 或发送暂停时，不写 SRAM/START，不增加 TX 包数，不轮转 slot，不取得调用者报文所有权",
+    "SRAM copy 先于 SLOT/LENGTH/START；slot 按 tx_slots 取模",
+    "IRQ 先 TX pending，再 RX；RX 数据复制先于 RX W1C；设备处理先于 IRQ_ACK",
+    "停止后禁止发送；先关闭设备事件并解绑，再撤销映射/销毁通知",
+    "attach 中任一步失败，已取得资源必须回滚，下一次 attach 必须成功"
+  ],
+  "explicit_differences": [
+    {
+      "case": "设备给出越界 RX slot 或长度",
+      "c": "原 C 对 slot 检查不足；现有 C 适配层越界时终止任务",
+      "rust": "先校验 slot/长度，计入 rx_errors/rx_dropped，清 pending 后继续；单元测试覆盖"
+    },
+    {
+      "case": "RX 短于 14 字节",
+      "c": "C 适配层丢弃，但原驱动已累计 RX 包统计",
+      "rust": "作为非法 L2 帧计入错误/丢弃；非等价行为，明确收紧边界"
+    },
+    {
+      "case": "上层接收缓冲过小",
+      "c": "C 参考桥终止任务",
+      "rust": "core 返回错误并保留帧；当前共享应用固定 2048 字节，Driver 包装仍按不可恢复错误处理"
+    },
+    {
+      "case": "MAC 自动生成、Linux 链路发布和协议分类",
+      "c": "C 兼容层提供简化实现",
+      "rust": "移出当前完整 L2 帧契约；不声称 Linux 网络栈功能等价"
+    }
+  ],
+  "validation": {
+    "comparison_summary": "对照测试摘要.json",
+    "native_tests": "tests/liteeth_native.rs",
+    "qemu_runner": "tools/liteeth/compare.py",
+    "kernel_syscalls": [
+      "MAP_MMIO",
+      "UNMAP_MMIO",
+      "NOTIFICATION_CREATE",
+      "NOTIFICATION_WAIT",
+      "NOTIFICATION_DESTROY",
+      "IRQ_BIND",
+      "IRQ_ACK",
+      "IRQ_UNBIND",
+      "PUTS 仅诊断"
+    ],
+    "new_kernel_syscalls": 0
+  }
+}

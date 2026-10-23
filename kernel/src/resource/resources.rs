@@ -44,6 +44,17 @@ pub static PLATFORM: PlatformResources = PlatformResources {
         mpidrs: [0, 1, 2, 3],
     },
     mmio: &[
+        // 仅显式 LiteEth 实验平台授权；DTB 不能自行扩大范围。
+        #[cfg(feature = "qemu-liteeth")]
+        MmioGrant {
+            base: 0x0b00_0000,
+            size: 0x1000,
+        },
+        #[cfg(feature = "qemu-liteeth")]
+        MmioGrant {
+            base: 0x0b01_0000,
+            size: 0x2000,
+        },
         MmioGrant {
             base: 0x0900_0000,
             size: 0x1000,
@@ -66,6 +77,12 @@ pub static PLATFORM: PlatformResources = PlatformResources {
         }, // PCI 64 位 MMIO
     ],
     irqs: &[
+        // QEMU SPI 10，电平高；GIC INTID 为 32 + 10。
+        #[cfg(feature = "qemu-liteeth")]
+        IrqGrant {
+            intid: 42,
+            flags: 4,
+        },
         IrqGrant {
             intid: 33,
             flags: 4,

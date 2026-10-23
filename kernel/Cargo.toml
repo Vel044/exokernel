@@ -14,4 +14,5 @@ exo-abi = { path = "../abi" }
 [features]
 default = ["qemu"]
 qemu = []
+qemu-liteeth = ["qemu"]
 pi5  = []

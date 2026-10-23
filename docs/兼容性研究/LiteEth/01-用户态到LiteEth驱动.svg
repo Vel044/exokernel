@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1150" viewBox="0 0 1800 1150" role="img"><title>LiteEth：三种调用入口与接收返回路径</title><desc>本地 Linux 6.12.75 源码核查。网络设备核心、platform 设备框架、IRQ 框架分别调用四个、两个、一个驱动入口，与图02保持一致，不展开驱动内部函数。用户工具及 syscall 为 RV64/ARM64 的示例；具体镜像未跟踪。绿色虚线表示接收报文流向，不是 IRQ 回调直接执行完整网络协议栈；netif_rx 的排队与软中断处理在此合并为简化路径。</desc>
+<defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#475569"/></marker><marker id="rx" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#087f8c"/></marker></defs>
+<g font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,sans-serif">
+<text x="40" y="51" font-size="37" fill="#172b3a" font-weight="700">LiteEth：三种调用入口与接收返回路径</text>
+<text x="40" y="91" font-size="22" fill="#526575" font-weight="400">Linux 6.12.75 · 灰色箭头：调用 / 事件分发；绿色虚线：接收报文流向</text>
+<rect x="40" y="120" width="980" height="160" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="4"/>
+<text x="60" y="155" font-size="26" fill="#1d4ed8" font-weight="700">用户态 · 应用程序</text>
+<rect x="65" y="175" width="450" height="80" rx="10" fill="#fff" stroke="#93b4e8" stroke-width="2"/>
+<text x="80" y="209" font-size="25" fill="#172b3a" font-weight="700">网卡启停 / 查询统计</text>
+<text x="80" y="241" font-size="21" fill="#172b3a" font-weight="400">ip 等工具</text>
+<rect x="535" y="175" width="450" height="80" rx="10" fill="#fff" stroke="#93b4e8" stroke-width="2"/>
+<text x="550" y="209" font-size="25" fill="#172b3a" font-weight="700">网络发送 / 接收</text>
+<text x="550" y="241" font-size="21" fill="#172b3a" font-weight="400">ping 等网络应用</text>
+<rect x="1505" y="165" width="230" height="100" rx="10" fill="#eef2f6" stroke="#526575" stroke-width="3"/>
+<text x="1520" y="205" font-size="24" fill="#172b3a" font-weight="700">LiteEth 网卡硬件</text>
+<text x="1520" y="243" font-size="22" fill="#172b3a" font-weight="400">产生硬件 IRQ</text>
+<rect x="40" y="330" width="1720" height="780" rx="10" fill="#f8fafc" stroke="#334155" stroke-width="4"/>
+<text x="60" y="367" font-size="27" fill="#334155" font-weight="700">Linux 内核态</text>
+<rect x="65" y="400" width="950" height="90" rx="10" fill="#fff7ed" stroke="#d97706" stroke-width="3"/>
+<text x="82" y="433" font-size="25" fill="#9a4b08" font-weight="700">系统调用入口 · RV64 / ARM64 示例</text>
+<text x="82" y="471" font-size="22" fill="#172b3a" font-weight="400">配置 sendmsg 211；发送 sendto 206；接收 recvmsg 212 / recvfrom 207</text>
+<path d="M 290 255 V 400" fill="none" stroke="#475569" stroke-width="2.5" marker-end="url(#arr)"/>
+<path d="M 720 255 V 400" fill="none" stroke="#475569" stroke-width="2.5" marker-end="url(#arr)"/>
+<path d="M 950 400 V 255" fill="none" stroke="#087f8c" stroke-width="2.5" stroke-dasharray="8 6" marker-end="url(#rx)"/>
+<rect x="65" y="540" width="950" height="90" rx="10" fill="#e8eef5" stroke="#62768a" stroke-width="3"/>
+<text x="82" y="574" font-size="27" fill="#172b3a" font-weight="700">Netlink 配置处理 / 网络协议栈与 Socket</text>
+<text x="82" y="610" font-size="22" fill="#172b3a" font-weight="400">配置与发送向下；接收报文经过接收核心、协议栈与 socket 队列返回应用。</text>
+<path d="M 420 490 V 540" fill="none" stroke="#475569" stroke-width="2.5" marker-end="url(#arr)"/>
+<path d="M 950 540 V 490" fill="none" stroke="#087f8c" stroke-width="2.5" stroke-dasharray="8 6" marker-end="url(#rx)"/>
+<rect x="1040" y="400" width="440" height="125" rx="10" fill="#e8eef5" stroke="#62768a" stroke-width="3"/>
+<text x="1055" y="436" font-size="25" fill="#172b3a" font-weight="700">设备发现 / 驱动注册 / 解绑</text>
+<text x="1055" y="475" font-size="22" fill="#172b3a" font-weight="400">设备树匹配 litex,liteeth</text>
+<text x="1055" y="508" font-size="21" fill="#172b3a" font-weight="400">内核设备生命周期流程</text>
+<path d="M 1260 525 V 700" fill="none" stroke="#475569" stroke-width="2.5" marker-end="url(#arr)"/>
+<path d="M 1620 265 V 700" fill="none" stroke="#475569" stroke-width="2.5" marker-end="url(#arr)"/>
+<path d="M 40 1025 H 20 V 585 H 65" fill="none" stroke="#087f8c" stroke-width="2.5" stroke-dasharray="8 6" marker-end="url(#rx)"/>
+<text x="65" y="672" font-size="23" fill="#087f8c" font-weight="700">接收：LiteEth → 网络栈 / Socket → 用户程序</text>
+<rect x="65" y="700" width="950" height="100" rx="10" fill="#e8eef5" stroke="#62768a" stroke-width="3"/>
+<text x="80" y="738" font-size="26" fill="#172b3a" font-weight="700">① 网络设备核心</text>
+<text x="80" y="776" font-size="17" fill="#172b3a" font-weight="400">net/core/dev.c · include/linux/netdevice.h</text>
+<rect x="1025" y="700" width="470" height="100" rx="10" fill="#e8eef5" stroke="#62768a" stroke-width="3"/>
+<text x="1040" y="738" font-size="26" fill="#172b3a" font-weight="700">② platform 设备框架</text>
+<text x="1040" y="776" font-size="17" fill="#172b3a" font-weight="400">drivers/base/platform.c</text>
+<rect x="1505" y="700" width="230" height="100" rx="10" fill="#e8eef5" stroke="#62768a" stroke-width="3"/>
+<text x="1520" y="738" font-size="26" fill="#172b3a" font-weight="700">③ IRQ 框架</text>
+<text x="1520" y="776" font-size="17" fill="#172b3a" font-weight="400">kernel/irq/handle.c</text>
+<path d="M 850 630 V 700" fill="none" stroke="#475569" stroke-width="2.5" marker-end="url(#arr)"/>
+<rect x="40" y="880" width="1720" height="190" rx="10" fill="#eaf3ff" stroke="#1459b5" stroke-width="5"/>
+<rect x="65" y="910" width="230" height="100" rx="10" fill="#fff" stroke="#4281cc" stroke-width="2"/>
+<text x="75" y="946" font-size="18" fill="#1459b5" font-weight="700">liteeth_open()</text>
+<text x="75" y="983" font-size="18" fill="#172b3a" font-weight="400">ndo_open</text>
+<rect x="305" y="910" width="230" height="100" rx="10" fill="#fff" stroke="#4281cc" stroke-width="2"/>
+<text x="315" y="946" font-size="18" fill="#1459b5" font-weight="700">liteeth_stop()</text>
+<text x="315" y="983" font-size="18" fill="#172b3a" font-weight="400">ndo_stop</text>
+<rect x="545" y="910" width="230" height="100" rx="10" fill="#fff" stroke="#4281cc" stroke-width="2"/>
+<text x="555" y="946" font-size="18" fill="#1459b5" font-weight="700">liteeth_start_xmit()</text>
+<text x="555" y="983" font-size="18" fill="#172b3a" font-weight="400">ndo_start_xmit</text>
+<rect x="785" y="910" width="230" height="100" rx="10" fill="#fff" stroke="#4281cc" stroke-width="2"/>
+<text x="795" y="946" font-size="18" fill="#1459b5" font-weight="700">liteeth_get_stats64()</text>
+<text x="795" y="983" font-size="18" fill="#172b3a" font-weight="400">ndo_get_stats64</text>
+<rect x="1025" y="910" width="230" height="100" rx="10" fill="#fff" stroke="#4281cc" stroke-width="2"/>
+<text x="1035" y="946" font-size="18" fill="#1459b5" font-weight="700">liteeth_probe()</text>
+<text x="1035" y="983" font-size="18" fill="#172b3a" font-weight="400">probe</text>
+<rect x="1265" y="910" width="230" height="100" rx="10" fill="#fff" stroke="#4281cc" stroke-width="2"/>
+<text x="1275" y="946" font-size="18" fill="#1459b5" font-weight="700">liteeth_remove()</text>
+<text x="1275" y="983" font-size="18" fill="#172b3a" font-weight="400">remove_new</text>
+<rect x="1505" y="910" width="230" height="100" rx="10" fill="#fff" stroke="#4281cc" stroke-width="2"/>
+<text x="1515" y="946" font-size="18" fill="#1459b5" font-weight="700">liteeth_interrupt()</text>
+<text x="1515" y="983" font-size="18" fill="#172b3a" font-weight="400">IRQ handler</text>
+<path d="M 540 800 V 845 H 180" fill="none" stroke="#475569" stroke-width="2.5"/>
+<path d="M 540 845 H 900" fill="none" stroke="#475569" stroke-width="2.5"/>
+<path d="M 180 845 V 910" fill="none" stroke="#475569" stroke-width="2.5" marker-end="url(#arr)"/>
+<path d="M 420 845 V 910" fill="none" stroke="#475569" stroke-width="2.5" marker-end="url(#arr)"/>
+<path d="M 660 845 V 910" fill="none" stroke="#475569" stroke-width="2.5" marker-end="url(#arr)"/>
+<path d="M 900 845 V 910" fill="none" stroke="#475569" stroke-width="2.5" marker-end="url(#arr)"/>
+<path d="M 1260 800 V 845 H 1140" fill="none" stroke="#475569" stroke-width="2.5"/>
+<path d="M 1260 845 H 1380" fill="none" stroke="#475569" stroke-width="2.5"/>
+<path d="M 1140 845 V 910" fill="none" stroke="#475569" stroke-width="2.5" marker-end="url(#arr)"/>
+<path d="M 1380 845 V 910" fill="none" stroke="#475569" stroke-width="2.5" marker-end="url(#arr)"/>
+<path d="M 1620 800 V 910" fill="none" stroke="#475569" stroke-width="2.5" marker-end="url(#arr)"/>
+<text x="65" y="1047" font-size="27" fill="#1459b5" font-weight="700">LiteEth 驱动模块 · drivers/net/ethernet/litex/litex_liteeth.c</text>
+</g></svg>

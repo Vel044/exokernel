@@ -41,7 +41,11 @@ echo "    libos.elf: $(wc -c < libos/libos.elf) bytes"
 
 echo ""
 echo "==> 3. 编译 exokernel (EL2 boot shim + EL1 kernel)"
-cargo build -p exokernel --target aarch64-unknown-uefi
+if [[ "$LIBOS_APP" = liteeth*-smoke ]]; then
+    cargo build -p exokernel --target aarch64-unknown-uefi --features qemu-liteeth
+else
+    cargo build -p exokernel --target aarch64-unknown-uefi
+fi
 
 echo ""
 echo "==> 完成!"

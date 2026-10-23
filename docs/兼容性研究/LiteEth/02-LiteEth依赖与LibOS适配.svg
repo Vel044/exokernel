@@ -1,0 +1,129 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1310" viewBox="0 0 1800 1310" role="img"><title>LiteEth：七个外部入口与 Linux 依赖</title><desc>核查本地 Linux 6.12.75。上方为三个框架对七个入口的回调，不画内部调用。下方为驱动依赖的模块分类，接口名称是代表性示例，完整直接依赖记录见同目录源码核查.json。依赖箭头从整个驱动模块指向服务分类，不表示每个入口都调用每个依赖。编译期宏属于编译依赖。</desc>
+<defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#475569"/></marker><marker id="dep" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#b8630a"/></marker></defs>
+<g font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,sans-serif">
+<text x="40" y="51" font-size="37" fill="#172b3a" font-weight="700">LiteEth：七个外部入口与 Linux 依赖</text>
+<text x="40" y="91" font-size="22" fill="#526575" font-weight="400">Linux 6.12.75 · 上方：框架调用入口；下方：驱动依赖的模块及源码位置</text>
+<rect x="65" y="140" width="950" height="100" rx="10" fill="#e8eef5" stroke="#62768a" stroke-width="3"/>
+<text x="80" y="178" font-size="27" fill="#172b3a" font-weight="700">网络设备核心</text>
+<text x="80" y="216" font-size="17" fill="#172b3a" font-weight="400">net/core/dev.c · include/linux/netdevice.h</text>
+<rect x="1025" y="140" width="470" height="100" rx="10" fill="#e8eef5" stroke="#62768a" stroke-width="3"/>
+<text x="1040" y="178" font-size="27" fill="#172b3a" font-weight="700">platform 设备框架</text>
+<text x="1040" y="216" font-size="17" fill="#172b3a" font-weight="400">drivers/base/platform.c</text>
+<rect x="1505" y="140" width="230" height="100" rx="10" fill="#e8eef5" stroke="#62768a" stroke-width="3"/>
+<text x="1520" y="178" font-size="27" fill="#172b3a" font-weight="700">IRQ 框架</text>
+<text x="1520" y="216" font-size="17" fill="#172b3a" font-weight="400">kernel/irq/handle.c</text>
+<rect x="40" y="310" width="1720" height="225" rx="10" fill="#eaf3ff" stroke="#1459b5" stroke-width="5"/>
+<rect x="65" y="350" width="230" height="105" rx="10" fill="#fff" stroke="#4281cc" stroke-width="2"/>
+<text x="75" y="387" font-size="18" fill="#1459b5" font-weight="700">liteeth_open()</text>
+<text x="75" y="426" font-size="18" fill="#172b3a" font-weight="400">ndo_open</text>
+<rect x="305" y="350" width="230" height="105" rx="10" fill="#fff" stroke="#4281cc" stroke-width="2"/>
+<text x="315" y="387" font-size="18" fill="#1459b5" font-weight="700">liteeth_stop()</text>
+<text x="315" y="426" font-size="18" fill="#172b3a" font-weight="400">ndo_stop</text>
+<rect x="545" y="350" width="230" height="105" rx="10" fill="#fff" stroke="#4281cc" stroke-width="2"/>
+<text x="555" y="387" font-size="18" fill="#1459b5" font-weight="700">liteeth_start_xmit()</text>
+<text x="555" y="426" font-size="18" fill="#172b3a" font-weight="400">ndo_start_xmit</text>
+<rect x="785" y="350" width="230" height="105" rx="10" fill="#fff" stroke="#4281cc" stroke-width="2"/>
+<text x="795" y="387" font-size="18" fill="#1459b5" font-weight="700">liteeth_get_stats64()</text>
+<text x="795" y="426" font-size="18" fill="#172b3a" font-weight="400">ndo_get_stats64</text>
+<rect x="1025" y="350" width="230" height="105" rx="10" fill="#fff" stroke="#4281cc" stroke-width="2"/>
+<text x="1035" y="387" font-size="18" fill="#1459b5" font-weight="700">liteeth_probe()</text>
+<text x="1035" y="426" font-size="18" fill="#172b3a" font-weight="400">probe</text>
+<rect x="1265" y="350" width="230" height="105" rx="10" fill="#fff" stroke="#4281cc" stroke-width="2"/>
+<text x="1275" y="387" font-size="18" fill="#1459b5" font-weight="700">liteeth_remove()</text>
+<text x="1275" y="426" font-size="18" fill="#172b3a" font-weight="400">remove_new</text>
+<rect x="1505" y="350" width="230" height="105" rx="10" fill="#fff" stroke="#4281cc" stroke-width="2"/>
+<text x="1515" y="387" font-size="18" fill="#1459b5" font-weight="700">liteeth_interrupt()</text>
+<text x="1515" y="426" font-size="18" fill="#172b3a" font-weight="400">IRQ handler</text>
+<path d="M 540 240 V 275 H 180" fill="none" stroke="#475569" stroke-width="2.5"/>
+<path d="M 540 275 H 900" fill="none" stroke="#475569" stroke-width="2.5"/>
+<path d="M 180 275 V 350" fill="none" stroke="#475569" stroke-width="2.5" marker-end="url(#arr)"/>
+<path d="M 420 275 V 350" fill="none" stroke="#475569" stroke-width="2.5" marker-end="url(#arr)"/>
+<path d="M 660 275 V 350" fill="none" stroke="#475569" stroke-width="2.5" marker-end="url(#arr)"/>
+<path d="M 900 275 V 350" fill="none" stroke="#475569" stroke-width="2.5" marker-end="url(#arr)"/>
+<path d="M 1260 240 V 275 H 1140" fill="none" stroke="#475569" stroke-width="2.5"/>
+<path d="M 1260 275 H 1380" fill="none" stroke="#475569" stroke-width="2.5"/>
+<path d="M 1140 275 V 350" fill="none" stroke="#475569" stroke-width="2.5" marker-end="url(#arr)"/>
+<path d="M 1380 275 V 350" fill="none" stroke="#475569" stroke-width="2.5" marker-end="url(#arr)"/>
+<path d="M 1620 240 V 350" fill="none" stroke="#475569" stroke-width="2.5" marker-end="url(#arr)"/>
+<text x="65" y="502" font-size="27" fill="#1459b5" font-weight="700">LiteEth 驱动模块 · drivers/net/ethernet/litex/litex_liteeth.c</text>
+<path d="M 900 535 V 610" fill="none" stroke="#b8630a" stroke-width="2.5"/>
+<path d="M 20 610 H 1580" fill="none" stroke="#b8630a" stroke-width="2.5"/>
+<path d="M 20 610 V 955 H 1580" fill="none" stroke="#b8630a" stroke-width="2.5"/>
+<text x="920" y="586" font-size="23" fill="#9a4b08" font-weight="700">驱动依赖（接口举例）</text>
+<path d="M 250 610 V 655" fill="none" stroke="#b8630a" stroke-width="2.5" marker-end="url(#dep)"/>
+<path d="M 250 955 V 990" fill="none" stroke="#b8630a" stroke-width="2.5" marker-end="url(#dep)"/>
+<path d="M 690 610 V 655" fill="none" stroke="#b8630a" stroke-width="2.5" marker-end="url(#dep)"/>
+<path d="M 690 955 V 990" fill="none" stroke="#b8630a" stroke-width="2.5" marker-end="url(#dep)"/>
+<path d="M 1130 610 V 655" fill="none" stroke="#b8630a" stroke-width="2.5" marker-end="url(#dep)"/>
+<path d="M 1130 955 V 990" fill="none" stroke="#b8630a" stroke-width="2.5" marker-end="url(#dep)"/>
+<path d="M 1570 610 V 655" fill="none" stroke="#b8630a" stroke-width="2.5" marker-end="url(#dep)"/>
+<path d="M 1570 955 V 990" fill="none" stroke="#b8630a" stroke-width="2.5" marker-end="url(#dep)"/>
+<rect x="50" y="655" width="400" height="275" rx="10" fill="#fffaf2" stroke="#d97706" stroke-width="2.5"/>
+<rect x="50" y="655" width="400" height="45" rx="10" fill="#b65e09" stroke="#b65e09" stroke-width="1"/>
+<text x="63" y="686" font-size="25" fill="#fff" font-weight="700">设备与资源</text>
+<text x="63" y="731" font-size="17" fill="#526575" font-weight="400">drivers/base/platform.c</text>
+<text x="63" y="756" font-size="17" fill="#526575" font-weight="400">include/linux/platform_device.h</text>
+<text x="63" y="820" font-size="16" fill="#172b3a" font-weight="400">platform_get_irq</text>
+<text x="63" y="843" font-size="16" fill="#172b3a" font-weight="400">devm_platform_ioremap_resource_byname</text>
+<text x="63" y="866" font-size="16" fill="#172b3a" font-weight="400">platform_set/get_drvdata</text>
+<text x="63" y="905" font-size="20" fill="#875018" font-weight="400">取得 IRQ、命名资源与私有状态</text>
+<rect x="490" y="655" width="400" height="275" rx="10" fill="#fffaf2" stroke="#d97706" stroke-width="2.5"/>
+<rect x="490" y="655" width="400" height="45" rx="10" fill="#b65e09" stroke="#b65e09" stroke-width="1"/>
+<text x="503" y="686" font-size="25" fill="#fff" font-weight="700">设备树与 MAC 配置</text>
+<text x="503" y="731" font-size="17" fill="#526575" font-weight="400">include/linux/of.h</text>
+<text x="503" y="756" font-size="17" fill="#526575" font-weight="400">drivers/of/property.c</text>
+<text x="503" y="781" font-size="17" fill="#526575" font-weight="400">net/core/of_net.c</text>
+<text x="503" y="820" font-size="16" fill="#172b3a" font-weight="400">of_property_read_u32</text>
+<text x="503" y="843" font-size="16" fill="#172b3a" font-weight="400">of_get_ethdev_address</text>
+<text x="503" y="905" font-size="20" fill="#875018" font-weight="400">读取 slot 参数与 MAC 地址</text>
+<rect x="930" y="655" width="400" height="275" rx="10" fill="#fffaf2" stroke="#d97706" stroke-width="2.5"/>
+<rect x="930" y="655" width="400" height="45" rx="10" fill="#b65e09" stroke="#b65e09" stroke-width="1"/>
+<text x="943" y="686" font-size="25" fill="#fff" font-weight="700">MMIO / I/O 访问</text>
+<text x="943" y="731" font-size="17" fill="#526575" font-weight="400">include/linux/litex.h</text>
+<text x="943" y="756" font-size="17" fill="#526575" font-weight="400">arch/*/include/asm/io.h</text>
+<text x="943" y="781" font-size="17" fill="#526575" font-weight="400">架构 I/O copy 实现</text>
+<text x="943" y="820" font-size="16" fill="#172b3a" font-weight="400">litex_read8 / litex_write8 / …</text>
+<text x="943" y="843" font-size="16" fill="#172b3a" font-weight="400">memcpy_toio / memcpy_fromio</text>
+<text x="943" y="905" font-size="20" fill="#875018" font-weight="400">寄存器读写与设备缓冲区复制</text>
+<rect x="1370" y="655" width="400" height="275" rx="10" fill="#fffaf2" stroke="#d97706" stroke-width="2.5"/>
+<rect x="1370" y="655" width="400" height="45" rx="10" fill="#b65e09" stroke="#b65e09" stroke-width="1"/>
+<text x="1383" y="686" font-size="25" fill="#fff" font-weight="700">中断申请与注销</text>
+<text x="1383" y="731" font-size="17" fill="#526575" font-weight="400">include/linux/interrupt.h</text>
+<text x="1383" y="756" font-size="17" fill="#526575" font-weight="400">kernel/irq/manage.c</text>
+<text x="1383" y="820" font-size="16" fill="#172b3a" font-weight="400">request_irq / free_irq</text>
+<text x="1383" y="905" font-size="20" fill="#875018" font-weight="400">注册中断处理函数、注销并同步</text>
+<rect x="50" y="990" width="400" height="275" rx="10" fill="#fffaf2" stroke="#d97706" stroke-width="2.5"/>
+<rect x="50" y="990" width="400" height="45" rx="10" fill="#b65e09" stroke="#b65e09" stroke-width="1"/>
+<text x="63" y="1021" font-size="25" fill="#fff" font-weight="700">报文缓冲与报文头</text>
+<text x="63" y="1066" font-size="17" fill="#526575" font-weight="400">include/linux/skbuff.h</text>
+<text x="63" y="1091" font-size="17" fill="#526575" font-weight="400">net/core/skbuff.c</text>
+<text x="63" y="1116" font-size="17" fill="#526575" font-weight="400">net/ethernet/eth.c</text>
+<text x="63" y="1155" font-size="16" fill="#172b3a" font-weight="400">netdev_alloc_skb_ip_align / skb_put</text>
+<text x="63" y="1178" font-size="16" fill="#172b3a" font-weight="400">eth_type_trans / dev_kfree_skb_any</text>
+<text x="63" y="1240" font-size="20" fill="#875018" font-weight="400">分配、调整报文头与释放</text>
+<rect x="490" y="990" width="400" height="275" rx="10" fill="#fffaf2" stroke="#d97706" stroke-width="2.5"/>
+<rect x="490" y="990" width="400" height="45" rx="10" fill="#b65e09" stroke="#b65e09" stroke-width="1"/>
+<text x="503" y="1021" font-size="25" fill="#fff" font-weight="700">网络队列、接收与统计</text>
+<text x="503" y="1066" font-size="17" fill="#526575" font-weight="400">include/linux/netdevice.h</text>
+<text x="503" y="1091" font-size="17" fill="#526575" font-weight="400">net/core/dev.c</text>
+<text x="503" y="1116" font-size="17" fill="#526575" font-weight="400">net/sched/sch_generic.c</text>
+<text x="503" y="1155" font-size="16" fill="#172b3a" font-weight="400">netif_rx / netif_*queue / netif_carrier_*</text>
+<text x="503" y="1178" font-size="16" fill="#172b3a" font-weight="400">dev_sw_netstats_* / dev_fetch_sw_netstats</text>
+<text x="503" y="1240" font-size="20" fill="#875018" font-weight="400">收包交付、发送背压与统计</text>
+<rect x="930" y="990" width="400" height="275" rx="10" fill="#fffaf2" stroke="#d97706" stroke-width="2.5"/>
+<rect x="930" y="990" width="400" height="45" rx="10" fill="#b65e09" stroke="#b65e09" stroke-width="1"/>
+<text x="943" y="1021" font-size="25" fill="#fff" font-weight="700">托管资源管理</text>
+<text x="943" y="1066" font-size="17" fill="#526575" font-weight="400">net/devres.c</text>
+<text x="943" y="1091" font-size="17" fill="#526575" font-weight="400">drivers/base/devres.c</text>
+<text x="943" y="1116" font-size="17" fill="#526575" font-weight="400">lib/devres.c</text>
+<text x="943" y="1155" font-size="16" fill="#172b3a" font-weight="400">devm_alloc_etherdev / devm_*</text>
+<text x="943" y="1240" font-size="20" fill="#875018" font-weight="400">分配资源、失败回滚与解绑清理</text>
+<rect x="1370" y="990" width="400" height="275" rx="10" fill="#fffaf2" stroke="#d97706" stroke-width="2.5"/>
+<rect x="1370" y="990" width="400" height="45" rx="10" fill="#b65e09" stroke="#b65e09" stroke-width="1"/>
+<text x="1383" y="1021" font-size="25" fill="#fff" font-weight="700">日志、错误与模块宏</text>
+<text x="1383" y="1066" font-size="17" fill="#526575" font-weight="400">include/linux/{module,err,compiler}.h</text>
+<text x="1383" y="1091" font-size="17" fill="#526575" font-weight="400">include/linux/{dev_printk,netdevice}.h</text>
+<text x="1383" y="1155" font-size="16" fill="#172b3a" font-weight="400">netdev_err / dev_* / IS_ERR / PTR_ERR</text>
+<text x="1383" y="1178" font-size="16" fill="#172b3a" font-weight="400">module_platform_driver / MODULE_*</text>
+<text x="1383" y="1240" font-size="20" fill="#875018" font-weight="400">日志、错误判断与注册元信息</text>
+</g></svg>

@@ -57,6 +57,67 @@ pub fn discover(bytes: &[u8], cpu_count: u32) -> Result<DeviceInfo, Error> {
         if compatible(node, "snps,dwc3") && path.contains("/rp1/") && info.xhci.size == 0 {
             info.xhci = resource(&tree, path, true)?;
         }
+        if compatible(node, "litex,liteeth") {
+            if info.liteeth.is_some() {
+                return Err(Error::InvalidResource);
+            }
+            let names = node
+                .property("reg-names")
+                .ok_or(Error::InvalidResource)?
+                .value;
+            let names: Vec<_> = names.split(|b| *b == 0).filter(|s| !s.is_empty()).collect();
+            // 原驱动按名字取资源，允许标准 DTB 在中间附带当前未用的 MDIO 窗口。
+            if names.first().copied() != Some(b"mac".as_slice()) {
+                return Err(Error::InvalidResource);
+            }
+            let buffer_index = names
+                .iter()
+                .position(|n| *n == b"buffer")
+                .ok_or(Error::InvalidResource)?;
+            let mac = resource(&tree, path, false)?;
+            let (base, size) = reg_at(&tree, path, buffer_index)?;
+            let property = |key, default| -> Result<u32, Error> {
+                node.property(key).map_or(Ok(default), |p| {
+                    if p.value.len() == 4 {
+                        u32be(p.value).ok_or(Error::InvalidResource)
+                    } else {
+                        Err(Error::InvalidResource)
+                    }
+                })
+            };
+            let rx_slots = property("litex,rx-slots", 2)?;
+            let tx_slots = property("litex,tx-slots", 2)?;
+            let slot_size = property("litex,slot-size", 2048)?;
+            if rx_slots == 0
+                || tx_slots == 0
+                || rx_slots > 256
+                || tx_slots > 256
+                || slot_size == 0
+                || slot_size > 2048
+                || (rx_slots as u64 + tx_slots as u64) * slot_size as u64 > size
+            {
+                return Err(Error::InvalidResource);
+            }
+            let mut address = [0; 6];
+            if let Some(p) = node
+                .property("local-mac-address")
+                .or_else(|| node.property("mac-address"))
+            {
+                address = p.value.try_into().map_err(|_| Error::InvalidResource)?;
+            }
+            info.liteeth = Some(LiteEthInfo {
+                mac,
+                buffer: DeviceResource {
+                    base,
+                    size,
+                    intid: 0,
+                },
+                rx_slots,
+                tx_slots,
+                slot_size,
+                address,
+            });
+        }
         if compatible(node, "virtio,mmio") {
             virtio.push(reg(&tree, path)?);
         }
@@ -156,6 +217,9 @@ fn cells(bytes: &[u8], count: usize) -> Option<u64> {
 }
 /// 逐级应用父总线 ranges；完整寄存器范围都必须落在选中的窗口内。
 fn reg(tree: &Fdt<'_>, path: &str) -> Result<(u64, u64), Error> {
+    reg_at(tree, path, 0)
+}
+fn reg_at(tree: &Fdt<'_>, path: &str, index: usize) -> Result<(u64, u64), Error> {
     let parse = || {
         let node = tree.find_node(path)?;
         let mut bus_path = parent_path(path);
@@ -164,6 +228,11 @@ fn reg(tree: &Fdt<'_>, path: &str) -> Result<(u64, u64), Error> {
         let raw = node.property("reg")?.value;
         let split = sizes.address_cells.checked_mul(4)?;
         let length = sizes.size_cells.checked_mul(4)?;
+        let stride = split.checked_add(length)?;
+        if stride == 0 || raw.len() % stride != 0 {
+            return None;
+        }
+        let raw = raw.get(index.checked_mul(stride)?..)?;
         let mut address = cells(raw.get(..split)?, sizes.address_cells)?;
         let size = cells(
             raw.get(split..split.checked_add(length)?)?,
