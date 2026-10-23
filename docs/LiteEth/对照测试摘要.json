@@ -22,13 +22,16 @@
     "tx_dropped": 1
   },
   "rust_core_tests": 11,
+  "rust_linux_api_tests": 13,
+  "same_name_linux_interfaces": 49,
   "c_host_sanitizers": [
     "AddressSanitizer",
     "UndefinedBehaviorSanitizer"
   ],
   "c_elf_bytes": 152472,
-  "rust_elf_bytes": 146568,
+  "rust_elf_bytes": 147832,
   "rust_c_ffi_symbols": [],
   "scope": "单设备、单所属 EL0 线程；QEMU LiteEth 模型；L2 收发、超长 TX 丢弃、失败回滚、启停回收；不含真实 FPGA/IP/socket/形式化证明",
-  "evidence_path": "target/liteeth-comparison/20261023-120009"
+  "evidence_path": "target/liteeth-comparison/20261023-174658",
+  "implementation": "原生 Rust LiteEth + libos/src/linux_api 同名公共封装"
 }

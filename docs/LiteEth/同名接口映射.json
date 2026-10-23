@@ -1,0 +1,300 @@
+{
+  "version": 1,
+  "scope": "44 个函数体直接接口及 5 个文件级函数式宏，均保留同名 Rust 函数；不是 Linux C ABI",
+  "interfaces": [
+    {
+      "name": "IS_ERR",
+      "path": "libos/src/linux_api/error.rs",
+      "line": 7,
+      "contract": "Rust Result/bool，不使用 C 错误指针 ABI；unlikely 不提供分支优化保证。"
+    },
+    {
+      "name": "MODULE_AUTHOR",
+      "path": "libos/src/linux_api/module.rs",
+      "line": 9,
+      "contract": "同名元信息构造函数与显式 OF probe/remove，不提供 Linux 动态模块加载。"
+    },
+    {
+      "name": "MODULE_DESCRIPTION",
+      "path": "libos/src/linux_api/module.rs",
+      "line": 15,
+      "contract": "同名元信息构造函数与显式 OF probe/remove，不提供 Linux 动态模块加载。"
+    },
+    {
+      "name": "MODULE_DEVICE_TABLE",
+      "path": "libos/src/linux_api/module.rs",
+      "line": 32,
+      "contract": "同名元信息构造函数与显式 OF probe/remove，不提供 Linux 动态模块加载。"
+    },
+    {
+      "name": "MODULE_LICENSE",
+      "path": "libos/src/linux_api/module.rs",
+      "line": 21,
+      "contract": "同名元信息构造函数与显式 OF probe/remove，不提供 Linux 动态模块加载。"
+    },
+    {
+      "name": "PTR_ERR",
+      "path": "libos/src/linux_api/error.rs",
+      "line": 10,
+      "contract": "Rust Result/bool，不使用 C 错误指针 ABI；unlikely 不提供分支优化保证。"
+    },
+    {
+      "name": "SET_NETDEV_DEV",
+      "path": "libos/src/linux_api/netdevice.rs",
+      "line": 61,
+      "contract": "单所属线程、单发送队列；本地对象/统计，不提供 Linux qdisc、per-CPU 并发与 socket。"
+    },
+    {
+      "name": "dev_dbg",
+      "path": "libos/src/linux_api/printk.rs",
+      "line": 7,
+      "contract": "显式输出后端和实例独立限流；不是 Linux 全局 printk 配置。"
+    },
+    {
+      "name": "dev_err",
+      "path": "libos/src/linux_api/printk.rs",
+      "line": 10,
+      "contract": "显式输出后端和实例独立限流；不是 Linux 全局 printk 配置。"
+    },
+    {
+      "name": "dev_fetch_sw_netstats",
+      "path": "libos/src/linux_api/netdevice.rs",
+      "line": 112,
+      "contract": "单所属线程、单发送队列；本地对象/统计，不提供 Linux qdisc、per-CPU 并发与 socket。"
+    },
+    {
+      "name": "dev_kfree_skb_any",
+      "path": "libos/src/linux_api/skbuff.rs",
+      "line": 78,
+      "contract": "有界线性 skb；显式所有权和容量；仅完整 L2 交付，不支持分片/GSO/DSA。"
+    },
+    {
+      "name": "dev_sw_netstats_rx_add",
+      "path": "libos/src/linux_api/netdevice.rs",
+      "line": 101,
+      "contract": "单所属线程、单发送队列；本地对象/统计，不提供 Linux qdisc、per-CPU 并发与 socket。"
+    },
+    {
+      "name": "dev_sw_netstats_tx_add",
+      "path": "libos/src/linux_api/netdevice.rs",
+      "line": 105,
+      "contract": "单所属线程、单发送队列；本地对象/统计，不提供 Linux qdisc、per-CPU 并发与 socket。"
+    },
+    {
+      "name": "devm_alloc_etherdev",
+      "path": "libos/src/linux_api/netdevice.rs",
+      "line": 41,
+      "contract": "单所属线程、单发送队列；本地对象/统计，不提供 Linux qdisc、per-CPU 并发与 socket。"
+    },
+    {
+      "name": "devm_netdev_alloc_pcpu_stats",
+      "path": "libos/src/linux_api/netdevice.rs",
+      "line": 55,
+      "contract": "单所属线程、单发送队列；本地对象/统计，不提供 Linux qdisc、per-CPU 并发与 socket。"
+    },
+    {
+      "name": "devm_platform_ioremap_resource_byname",
+      "path": "libos/src/linux_api/platform.rs",
+      "line": 33,
+      "contract": "调用者提供通用资源/属性；映射由后端校验授权，返回对象 Drop 回收。"
+    },
+    {
+      "name": "eth_hw_addr_random",
+      "path": "libos/src/linux_api/netdevice.rs",
+      "line": 119,
+      "contract": "单所属线程、单发送队列；本地对象/统计，不提供 Linux qdisc、per-CPU 并发与 socket。"
+    },
+    {
+      "name": "eth_type_trans",
+      "path": "libos/src/linux_api/skbuff.rs",
+      "line": 60,
+      "contract": "有界线性 skb；显式所有权和容量；仅完整 L2 交付，不支持分片/GSO/DSA。"
+    },
+    {
+      "name": "free_irq",
+      "path": "libos/src/linux_api/interrupt.rs",
+      "line": 59,
+      "contract": "独占 IRQ、flags=0、EL0 串行回调；不支持 IRQF_SHARED 或硬中断上下文。"
+    },
+    {
+      "name": "litex_read32",
+      "path": "libos/src/linux_api/io.rs",
+      "line": 15,
+      "contract": "CSR32、小端、volatile 与屏障；映射必须存活，偏移/范围必须有效。"
+    },
+    {
+      "name": "litex_read8",
+      "path": "libos/src/linux_api/io.rs",
+      "line": 12,
+      "contract": "CSR32、小端、volatile 与屏障；映射必须存活，偏移/范围必须有效。"
+    },
+    {
+      "name": "litex_write16",
+      "path": "libos/src/linux_api/io.rs",
+      "line": 21,
+      "contract": "CSR32、小端、volatile 与屏障；映射必须存活，偏移/范围必须有效。"
+    },
+    {
+      "name": "litex_write8",
+      "path": "libos/src/linux_api/io.rs",
+      "line": 18,
+      "contract": "CSR32、小端、volatile 与屏障；映射必须存活，偏移/范围必须有效。"
+    },
+    {
+      "name": "memcpy_fromio",
+      "path": "libos/src/linux_api/io.rs",
+      "line": 24,
+      "contract": "CSR32、小端、volatile 与屏障；映射必须存活，偏移/范围必须有效。"
+    },
+    {
+      "name": "memcpy_toio",
+      "path": "libos/src/linux_api/io.rs",
+      "line": 27,
+      "contract": "CSR32、小端、volatile 与屏障；映射必须存活，偏移/范围必须有效。"
+    },
+    {
+      "name": "module_platform_driver",
+      "path": "libos/src/linux_api/module.rs",
+      "line": 64,
+      "contract": "同名元信息构造函数与显式 OF probe/remove，不提供 Linux 动态模块加载。"
+    },
+    {
+      "name": "net_ratelimit",
+      "path": "libos/src/linux_api/printk.rs",
+      "line": 37,
+      "contract": "显式输出后端和实例独立限流；不是 Linux 全局 printk 配置。"
+    },
+    {
+      "name": "netdev_alloc_skb_ip_align",
+      "path": "libos/src/linux_api/skbuff.rs",
+      "line": 32,
+      "contract": "有界线性 skb；显式所有权和容量；仅完整 L2 交付，不支持分片/GSO/DSA。"
+    },
+    {
+      "name": "netdev_err",
+      "path": "libos/src/linux_api/printk.rs",
+      "line": 13,
+      "contract": "显式输出后端和实例独立限流；不是 Linux 全局 printk 配置。"
+    },
+    {
+      "name": "netdev_info",
+      "path": "libos/src/linux_api/printk.rs",
+      "line": 16,
+      "contract": "显式输出后端和实例独立限流；不是 Linux 全局 printk 配置。"
+    },
+    {
+      "name": "netdev_priv",
+      "path": "libos/src/linux_api/netdevice.rs",
+      "line": 58,
+      "contract": "单所属线程、单发送队列；本地对象/统计，不提供 Linux qdisc、per-CPU 并发与 socket。"
+    },
+    {
+      "name": "netdev_stats_to_stats64",
+      "path": "libos/src/linux_api/netdevice.rs",
+      "line": 109,
+      "contract": "单所属线程、单发送队列；本地对象/统计，不提供 Linux qdisc、per-CPU 并发与 socket。"
+    },
+    {
+      "name": "netif_carrier_off",
+      "path": "libos/src/linux_api/netdevice.rs",
+      "line": 98,
+      "contract": "单所属线程、单发送队列；本地对象/统计，不提供 Linux qdisc、per-CPU 并发与 socket。"
+    },
+    {
+      "name": "netif_carrier_on",
+      "path": "libos/src/linux_api/netdevice.rs",
+      "line": 95,
+      "contract": "单所属线程、单发送队列；本地对象/统计，不提供 Linux qdisc、per-CPU 并发与 socket。"
+    },
+    {
+      "name": "netif_queue_stopped",
+      "path": "libos/src/linux_api/netdevice.rs",
+      "line": 83,
+      "contract": "单所属线程、单发送队列；本地对象/统计，不提供 Linux qdisc、per-CPU 并发与 socket。"
+    },
+    {
+      "name": "netif_rx",
+      "path": "libos/src/linux_api/skbuff.rs",
+      "line": 117,
+      "contract": "有界线性 skb；显式所有权和容量；仅完整 L2 交付，不支持分片/GSO/DSA。"
+    },
+    {
+      "name": "netif_start_queue",
+      "path": "libos/src/linux_api/netdevice.rs",
+      "line": 86,
+      "contract": "单所属线程、单发送队列；本地对象/统计，不提供 Linux qdisc、per-CPU 并发与 socket。"
+    },
+    {
+      "name": "netif_stop_queue",
+      "path": "libos/src/linux_api/netdevice.rs",
+      "line": 89,
+      "contract": "单所属线程、单发送队列；本地对象/统计，不提供 Linux qdisc、per-CPU 并发与 socket。"
+    },
+    {
+      "name": "netif_wake_queue",
+      "path": "libos/src/linux_api/netdevice.rs",
+      "line": 92,
+      "contract": "单所属线程、单发送队列；本地对象/统计，不提供 Linux qdisc、per-CPU 并发与 socket。"
+    },
+    {
+      "name": "of_get_ethdev_address",
+      "path": "libos/src/linux_api/platform.rs",
+      "line": 57,
+      "contract": "调用者提供通用资源/属性；映射由后端校验授权，返回对象 Drop 回收。"
+    },
+    {
+      "name": "of_property_read_u32",
+      "path": "libos/src/linux_api/platform.rs",
+      "line": 51,
+      "contract": "调用者提供通用资源/属性；映射由后端校验授权，返回对象 Drop 回收。"
+    },
+    {
+      "name": "platform_get_drvdata",
+      "path": "libos/src/linux_api/platform.rs",
+      "line": 48,
+      "contract": "调用者提供通用资源/属性；映射由后端校验授权，返回对象 Drop 回收。"
+    },
+    {
+      "name": "platform_get_irq",
+      "path": "libos/src/linux_api/platform.rs",
+      "line": 41,
+      "contract": "调用者提供通用资源/属性；映射由后端校验授权，返回对象 Drop 回收。"
+    },
+    {
+      "name": "platform_set_drvdata",
+      "path": "libos/src/linux_api/platform.rs",
+      "line": 45,
+      "contract": "调用者提供通用资源/属性；映射由后端校验授权，返回对象 Drop 回收。"
+    },
+    {
+      "name": "register_netdev",
+      "path": "libos/src/linux_api/netdevice.rs",
+      "line": 65,
+      "contract": "单所属线程、单发送队列；本地对象/统计，不提供 Linux qdisc、per-CPU 并发与 socket。"
+    },
+    {
+      "name": "request_irq",
+      "path": "libos/src/linux_api/interrupt.rs",
+      "line": 41,
+      "contract": "独占 IRQ、flags=0、EL0 串行回调；不支持 IRQF_SHARED 或硬中断上下文。"
+    },
+    {
+      "name": "skb_put",
+      "path": "libos/src/linux_api/skbuff.rs",
+      "line": 50,
+      "contract": "有界线性 skb；显式所有权和容量；仅完整 L2 交付，不支持分片/GSO/DSA。"
+    },
+    {
+      "name": "unlikely",
+      "path": "libos/src/linux_api/error.rs",
+      "line": 17,
+      "contract": "Rust Result/bool，不使用 C 错误指针 ABI；unlikely 不提供分支优化保证。"
+    },
+    {
+      "name": "unregister_netdev",
+      "path": "libos/src/linux_api/netdevice.rs",
+      "line": 73,
+      "contract": "单所属线程、单发送队列；本地对象/统计，不提供 Linux qdisc、per-CPU 并发与 socket。"
+    }
+  ]
+}

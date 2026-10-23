@@ -106,8 +106,8 @@ ACT 正确性另用 `scripts/run_act_release.py --provider portable --case 000 -
 ## 阅读与协作
 
 - [驱动协作入口与第一阶段产出](docs/驱动移植/README.md)
-- [LiteEth 原 Linux C 驱动的 EL0 移植与收发验收](docs/兼容性研究/LiteEth/移植实现与验收.md)
-- [LiteEth AI 定向翻译 Rust 驱动实验汇报](docs/兼容性研究/LiteEth/AI定向翻译实验汇报.md)
+- [LiteEth 原 Linux C 驱动的 EL0 移植与收发验收](docs/LiteEth/移植实现与验收.md)
+- [LiteEth AI 定向翻译 Rust 驱动实验汇报](docs/LiteEth/AI定向翻译实验汇报.md)
 - [目标侧接口与 UART / DMA 链路](docs/驱动移植/target-interfaces.md)
 - [首次会议提纲](docs/驱动移植/meeting.md)
 - [现有 Kernel 与 libOS 实现清单](docs/Kernel与LibOS模块实现清单.md)
@@ -115,3 +115,7 @@ ACT 正确性另用 `scripts/run_act_release.py --provider portable --case 000 -
 修改第一方源码时遵守 [AGENTS.md](AGENTS.md) 的中文注释和分层要求。第三方组件保留各自许可证；当前仓库尚无统一的第一方开源许可证，后续应由维护者明确授权方式。不要把可公开访问等同于已授予任意再分发许可。
 
 源码和文档直接维护在 `main` 分支。Fork 默认主线即可开始协作；生成的镜像、ELF 和临时运行日志不纳入版本管理。
+
+Linux 驱动同名 Rust 封装与复用边界见 [49 项接口清单](docs/LiteEth/Linux同名接口.md)；LiteEth 原生 Rust 版已接入该层。
+
+文档总入口：[文档索引](docs/文档索引.md)。逐项人工确认接口请填写 [接口语义确认表](docs/LiteEth/接口语义确认表.md) 的空白备注列。

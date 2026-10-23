@@ -21,6 +21,8 @@ mod apps; // 可执行实验和机器人应用；场景选择统一由apps::run�
 mod drivers; // PCI、DMA、USB、CDC ACM和SCServo等用户态驱动。
 #[cfg(feature = "user-fs")]
 mod fs; // virtio-blk之上的用户态只读ext4与大文件Frame缓存。
+#[cfg(feature = "linux-driver-api")]
+mod linux_api; // Linux 同名驱动接口及 Exokernel 后端，可供后续驱动复用。
 mod kernel_api; // Thread、Endpoint、Notification、Frame等系统调用安全封装。
 mod runtime; // 裸机heap、SVC入口、日志和计时器等基础运行时。
 

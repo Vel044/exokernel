@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""测试实际 Rust 状态机的协议、所有权和恶意设备边界；无 Linux 兼容层。"""
+"""测试实际 Rust 状态机的协议、所有权和恶意设备边界；使用公共同名 Rust 封装，不链接 C 兼容层。"""
 from pathlib import Path
 import os,subprocess
 root=Path(__file__).resolve().parents[2]

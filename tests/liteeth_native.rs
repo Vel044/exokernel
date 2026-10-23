@@ -1,6 +1,8 @@
 //! 直接测试实际参与 EL0 构建的 Rust 状态机；普通数组不替代 QEMU MMIO/IRQ 验证。
 #[path = "../libos/src/drivers/liteeth_core.rs"]
 mod driver;
+#[path = "../libos/src/linux_api/mod.rs"]
+mod linux_api;
 use driver::*;
 use std::{cell::RefCell, rc::Rc};
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -277,4 +279,9 @@ fn stop_reopen_keeps_tx_rotation_and_disables_both_event_sources() {
     d.enable();
     d.send(&[0; 60]).unwrap();
     assert_eq!(io.0.borrow().regs[TX_SLOT / 4], 1);
+    d.stop();
+    d.unregister().unwrap();
+    io.clear_ops();
+    assert_eq!(d.prepare_open(), Err(-22));
+    assert!(io.0.borrow().ops.is_empty());
 }

@@ -27,14 +27,16 @@ virtio-drivers = { version = "=0.13.0", default-features = false, features = ["a
 default = ["app-system-smoke"]
 # 仅供rust-analyzer加载所有第一方模块和可选依赖。正式构建脚本永远不会
 # 选择这个feature，因此它不会扩大实际可执行场景矩阵。
-ide = ["qemu-xhci", "user-fs", "dep:act-runtime", "dep:zune-jpeg"]
+ide = ["qemu-xhci", "user-fs", "dep:act-runtime", "dep:zune-jpeg", "linux-driver-api"]
 qemu-xhci = ["dep:crab-usb", "dep:dma-api", "dep:spin", "dep:log"]
 pi5-xhci = ["dep:crab-usb", "dep:dma-api", "dep:spin", "dep:log"]
 app-system-smoke = []
 app-process-smoke = []
 app-uart-echo = []
 app-liteeth-smoke = []
-app-liteeth-rust-smoke = []
+# 共享 Linux 同名 Rust 接口，后续驱动可独立启用，不依赖 LiteEth 场景。
+linux-driver-api = []
+app-liteeth-rust-smoke = ["linux-driver-api"]
 app-usb-echo = []
 app-uvc-smoke = ["user-fs"]
 app-scservo = []
