@@ -14,7 +14,7 @@
 | `liteeth_interrupt` | [liteeth::liteeth_interrupt](../../libos/src/drivers/liteeth.rs#L119) |
 | `liteeth_open` | [Driver::liteeth_open](../../libos/src/drivers/liteeth.rs#L140) |
 | `liteeth_stop` | [Driver::liteeth_stop](../../libos/src/drivers/liteeth.rs#L160) |
-| `liteeth_start_xmit` | [liteeth::liteeth_start_xmit](../../libos/src/drivers/liteeth.rs#L173) |
+| `liteeth_start_xmit` | [liteeth::liteeth_start_xmit](../../libos/src/drivers/liteeth.rs#L175) |
 | `liteeth_get_stats64` | [liteeth::liteeth_get_stats64](../../libos/src/drivers/liteeth.rs#L205) |
 | `liteeth_setup_slots` | [liteeth_setup_slots](../../libos/src/drivers/liteeth.rs#L215) |
 | `liteeth_probe` | [Driver::liteeth_probe](../../libos/src/drivers/liteeth.rs#L231) |
@@ -23,6 +23,8 @@
 `probe` 中按原 C 的顺序展开创建 netdev、初始化统计、取 IRQ、映射、设置槽位及注册。临时 `pdev.drvdata` 保存网卡对象，随后转移到 Driver；统计仍为单所属线程计数。MAC 地址读取与随机回退仍未接入，当前实验透传完整 L2 帧。
 
 `wait_irq`、`receive` 是目标侧新增的通知等待/上层取帧接口；`prepare_open`、`enable`、`stop_device_events` 是分层接入时的辅助步骤。它们不替代上述原函数名。当前原 C 对照的 Rust 桥也使用同名应用入口，但 C 文件和 C FFI 符号不变。
+
+Rust `liteeth_start_xmit` 按值接收 `sk_buff`：队列忙时以 `Busy(skb)` 归还报文，发送成功或超长丢弃时驱动调用 `dev_kfree_skb_any` 消费报文，对应 Linux `NETDEV_TX_BUSY` / `NETDEV_TX_OK` 的所有权规则。应用测试入口负责构造待发送 skb。
 
 ## 目录与使用
 
@@ -81,7 +83,7 @@ IRQ 上下文由 `&mut device` 在派发时传入，而不是保存 `void* dev_i
 | `dev_dbg` | [printk.rs](../../libos/src/linux_api/printk.rs#L7) |
 | `dev_err` | [printk.rs](../../libos/src/linux_api/printk.rs#L10) |
 | `dev_fetch_sw_netstats` | [netdevice.rs](../../libos/src/linux_api/netdevice.rs#L112) |
-| `dev_kfree_skb_any` | [skbuff.rs](../../libos/src/linux_api/skbuff.rs#L78) |
+| `dev_kfree_skb_any` | [skbuff.rs](../../libos/src/linux_api/skbuff.rs#L108) |
 | `dev_sw_netstats_rx_add` | [netdevice.rs](../../libos/src/linux_api/netdevice.rs#L101) |
 | `dev_sw_netstats_tx_add` | [netdevice.rs](../../libos/src/linux_api/netdevice.rs#L105) |
 | `devm_alloc_etherdev` | [netdevice.rs](../../libos/src/linux_api/netdevice.rs#L41) |

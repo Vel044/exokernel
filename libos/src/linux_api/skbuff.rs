@@ -21,6 +21,13 @@ pub struct sk_buff<const N: usize> {
     /// 以太网协议号以主机整数表示；不承诺 C __be16 ABI。
     pub protocol: u16,
 }
+/// Rust 版 ndo_start_xmit 的结果；Busy 必须把未消费的 skb 还给调用方。
+pub enum NetdevTxOutcome<const N: usize> {
+    /// 对应 NETDEV_TX_OK；驱动已经消费或丢弃 skb。
+    Consumed,
+    /// 对应 NETDEV_TX_BUSY；调用方仍拥有 skb，可等待资源后重试。
+    Busy(sk_buff<N>),
+}
 impl<const N: usize> sk_buff<N> {
     pub fn frame(&self) -> &[u8] {
         &self.storage.bytes[..self.length]
@@ -28,6 +35,24 @@ impl<const N: usize> sk_buff<N> {
     pub fn data(&self) -> &[u8] {
         &self.storage.bytes[self.pulled..self.length]
     }
+}
+/// 测试/上层网络代码构造待发送 skb；不是 Linux 驱动内的发送分配步骤。
+pub fn skb_from_bytes<const N: usize>(bytes: &[u8]) -> Result<sk_buff<N>, i32> {
+    if bytes.len() > N {
+        return Err(EINVAL);
+    }
+    let mut skb = sk_buff {
+        storage: Storage {
+            _headroom: [0; 2],
+            bytes: [0; N],
+        },
+        length: bytes.len(),
+        capacity: N,
+        pulled: 0,
+        protocol: 0,
+    };
+    skb.storage.bytes[..bytes.len()].copy_from_slice(bytes);
+    Ok(skb)
 }
 pub fn netdev_alloc_skb_ip_align<P, const N: usize>(
     _: &net_device<P>,

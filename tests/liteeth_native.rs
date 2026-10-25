@@ -4,6 +4,7 @@ mod driver;
 #[path = "../libos/src/linux_api/mod.rs"]
 mod linux_api;
 use driver::*;
+use linux_api::skbuff::{skb_from_bytes, NetdevTxOutcome};
 use std::{cell::RefCell, rc::Rc};
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Op {
@@ -93,6 +94,12 @@ fn closed() -> (liteeth<Model>, Model) {
     let d = liteeth::new(io.clone(), layout, 8192).unwrap();
     (d, io)
 }
+fn tx(d: &mut liteeth<Model>, bytes: &[u8]) -> Result<bool, i32> {
+    match d.liteeth_start_xmit(skb_from_bytes::<MAX_TX_SKB_SIZE>(bytes)?)? {
+        NetdevTxOutcome::Consumed => Ok(true),
+        NetdevTxOutcome::Busy(_) => Ok(false),
+    }
+}
 fn opened() -> (liteeth<Model>, Model) {
     let (mut d, io) = closed();
     d.prepare_open().unwrap();
@@ -145,12 +152,12 @@ fn open_clears_events_before_enable_and_rejects_double_open() {
 #[test]
 fn closed_and_short_tx_do_not_touch_hardware() {
     let (mut d, io) = closed();
-    assert_eq!(d.liteeth_start_xmit(&[1; 60]), Err(-22));
+    assert_eq!(tx(&mut d, &[1; 60]), Err(-22));
     assert!(io.0.borrow().ops.is_empty());
     d.prepare_open().unwrap();
     d.enable();
     io.clear_ops();
-    assert_eq!(d.liteeth_start_xmit(&[1; 13]), Err(-22));
+    assert_eq!(tx(&mut d, &[1; 13]), Err(-22));
     assert!(io.0.borrow().ops.is_empty());
 }
 #[test]
@@ -160,7 +167,7 @@ fn tx_copies_before_register_commit_and_rotates_slots() {
         io.tx_done();
         d.liteeth_interrupt();
         io.clear_ops();
-        assert_eq!(d.liteeth_start_xmit(&[7; 60]), Ok(true));
+        assert_eq!(tx(&mut d, &[7; 60]), Ok(true));
         assert_eq!(
             io.0.borrow().ops,
             vec![
@@ -182,21 +189,32 @@ fn tx_copies_before_register_commit_and_rotates_slots() {
 fn busy_keeps_packet_slot_and_stats_until_completion() {
     let (mut d, io) = opened();
     io.0.borrow_mut().regs[LITEETH_READER_READY / 4] = 0;
-    assert_eq!(d.liteeth_start_xmit(&[8; 60]), Ok(false));
+    let busy = d
+        .liteeth_start_xmit(skb_from_bytes::<MAX_TX_SKB_SIZE>(&[8; 60]).unwrap())
+        .unwrap();
+    let NetdevTxOutcome::Busy(skb) = busy else {
+        panic!("expected BUSY")
+    };
+    assert_eq!(skb.frame(), &[8; 60]);
     assert_eq!(d.liteeth_get_stats64(), rtnl_link_stats64::default());
     io.0.borrow_mut().regs[LITEETH_READER_READY / 4] = 1;
     io.clear_ops();
-    assert_eq!(d.liteeth_start_xmit(&[8; 60]), Ok(false));
+    let NetdevTxOutcome::Busy(skb) = d.liteeth_start_xmit(skb).unwrap() else {
+        panic!("expected BUSY until completion IRQ")
+    };
     assert!(io.0.borrow().ops.is_empty());
     io.tx_done();
     d.liteeth_interrupt();
-    assert_eq!(d.liteeth_start_xmit(&[8; 60]), Ok(true));
+    assert!(matches!(
+        d.liteeth_start_xmit(skb).unwrap(),
+        NetdevTxOutcome::Consumed
+    ));
     assert_eq!(io.0.borrow().regs[LITEETH_READER_SLOT / 4], 0);
 }
 #[test]
 fn oversize_is_consumed_and_counted_without_tx() {
     let (mut d, io) = opened();
-    assert_eq!(d.liteeth_start_xmit(&[0; 2049]), Ok(true));
+    assert_eq!(tx(&mut d, &[0; 2049]), Ok(true));
     assert_eq!(io.0.borrow().ops, vec![Op::Read(LITEETH_READER_READY)]);
     let s = d.liteeth_get_stats64();
     assert_eq!((s.tx_packets, s.tx_errors, s.tx_dropped), (0, 1, 1));
@@ -276,7 +294,7 @@ fn full_delivery_slot_keeps_first_frame_and_records_drop() {
 #[test]
 fn stop_reopen_keeps_tx_rotation_and_disables_both_event_sources() {
     let (mut d, io) = opened();
-    d.liteeth_start_xmit(&[0; 60]).unwrap();
+    assert!(tx(&mut d, &[0; 60]).unwrap());
     io.tx_done();
     d.liteeth_interrupt();
     io.clear_ops();
@@ -288,10 +306,10 @@ fn stop_reopen_keeps_tx_rotation_and_disables_both_event_sources() {
             Op::Write(LITEETH_READER_EV_ENABLE, 0)
         ]
     );
-    assert_eq!(d.liteeth_start_xmit(&[0; 60]), Err(-22));
+    assert_eq!(tx(&mut d, &[0; 60]), Err(-22));
     d.prepare_open().unwrap();
     d.enable();
-    d.liteeth_start_xmit(&[0; 60]).unwrap();
+    assert!(tx(&mut d, &[0; 60]).unwrap());
     assert_eq!(io.0.borrow().regs[LITEETH_READER_SLOT / 4], 1);
     d.stop_device_events();
     d.unregister().unwrap();

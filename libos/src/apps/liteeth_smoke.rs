@@ -4,6 +4,10 @@
 use crate::drivers::linux_liteeth::Driver;
 #[cfg(feature = "app-liteeth-rust-smoke")]
 use crate::drivers::liteeth::Driver;
+#[cfg(feature = "app-liteeth-rust-smoke")]
+use crate::drivers::liteeth::MAX_TX_SKB_SIZE;
+#[cfg(feature = "app-liteeth-rust-smoke")]
+use crate::linux_api::skbuff::{skb_from_bytes, NetdevTxOutcome};
 use crate::{drivers::platform::DeviceInfo, runtime};
 fn fail(stage: &[u8], error: i32) -> ! {
     runtime::puts(b"[liteeth] FAIL ");
@@ -11,6 +15,44 @@ fn fail(stage: &[u8], error: i32) -> ! {
     runtime::hex(error as u64);
     runtime::puts(b"\r\n");
     runtime::exit(0x702)
+}
+#[cfg(feature = "app-liteeth-smoke")]
+fn closed_tx_accepted(driver: &mut Driver) -> bool {
+    driver.liteeth_start_xmit(&[0; 60]).is_ok()
+}
+#[cfg(feature = "app-liteeth-rust-smoke")]
+fn closed_tx_accepted(driver: &mut Driver) -> bool {
+    let skb = skb_from_bytes::<MAX_TX_SKB_SIZE>(&[0; 60]).unwrap();
+    driver.liteeth_start_xmit(skb).is_ok()
+}
+#[cfg(feature = "app-liteeth-smoke")]
+fn transmit(driver: &mut Driver, frame: &[u8], stage: &[u8]) {
+    while !driver
+        .liteeth_start_xmit(frame)
+        .unwrap_or_else(|e| fail(stage, e))
+    {
+        driver
+            .wait_irq()
+            .unwrap_or_else(|e| fail(b"TX retry IRQ", e));
+    }
+}
+#[cfg(feature = "app-liteeth-rust-smoke")]
+fn transmit(driver: &mut Driver, frame: &[u8], stage: &[u8]) {
+    let mut skb = skb_from_bytes::<MAX_TX_SKB_SIZE>(frame).unwrap_or_else(|e| fail(stage, e));
+    loop {
+        match driver
+            .liteeth_start_xmit(skb)
+            .unwrap_or_else(|e| fail(stage, e))
+        {
+            NetdevTxOutcome::Consumed => return,
+            NetdevTxOutcome::Busy(returned_skb) => {
+                skb = returned_skb;
+                driver
+                    .wait_irq()
+                    .unwrap_or_else(|e| fail(b"TX retry IRQ", e));
+            }
+        }
+    }
 }
 pub fn run(info: &DeviceInfo) -> ! {
     #[cfg(feature = "app-liteeth-smoke")]
@@ -36,7 +78,7 @@ pub fn run(info: &DeviceInfo) -> ! {
     if Driver::liteeth_probe(resource).is_ok() {
         fail(b"duplicate attach accepted", -1);
     }
-    if driver.liteeth_start_xmit(&[0; 60]).is_ok() {
+    if closed_tx_accepted(&mut driver) {
         fail(b"closed TX accepted", -1);
     }
     driver.liteeth_open().unwrap_or_else(|e| fail(b"open", e));
@@ -53,14 +95,7 @@ pub fn run(info: &DeviceInfo) -> ! {
         if n == 0 {
             continue;
         }
-        while !driver
-            .liteeth_start_xmit(&frame[..n])
-            .unwrap_or_else(|e| fail(b"TX", e))
-        {
-            driver
-                .wait_irq()
-                .unwrap_or_else(|e| fail(b"TX retry IRQ", e));
-        }
+        transmit(&mut driver, &frame[..n], b"TX");
         echoed += 1;
         bytes += n as u64;
         if echoed == 16 {
@@ -68,14 +103,7 @@ pub fn run(info: &DeviceInfo) -> ! {
         }
     }
     let oversized = [0u8; 2049];
-    while !driver
-        .liteeth_start_xmit(&oversized)
-        .unwrap_or_else(|e| fail(b"oversize", e))
-    {
-        driver
-            .wait_irq()
-            .unwrap_or_else(|e| fail(b"oversize retry", e));
-    }
+    transmit(&mut driver, &oversized, b"oversize");
     let stats = driver
         .liteeth_get_stats64()
         .unwrap_or_else(|e| fail(b"stats", e));
@@ -90,7 +118,7 @@ pub fn run(info: &DeviceInfo) -> ! {
         fail(b"stats mismatch", -1);
     }
     driver.liteeth_stop().unwrap_or_else(|e| fail(b"stop", e));
-    if driver.liteeth_start_xmit(&[0; 60]).is_ok() {
+    if closed_tx_accepted(&mut driver) {
         fail(b"stopped TX accepted", -1);
     }
     // 重开验证 request_irq/free_irq 及 Notification 旧 badge 不破坏生命周期。
@@ -102,14 +130,7 @@ pub fn run(info: &DeviceInfo) -> ! {
         if n == 0 {
             continue;
         }
-        while !driver
-            .liteeth_start_xmit(&frame[..n])
-            .unwrap_or_else(|e| fail(b"reopen TX", e))
-        {
-            driver
-                .wait_irq()
-                .unwrap_or_else(|e| fail(b"reopen retry", e));
-        }
+        transmit(&mut driver, &frame[..n], b"reopen TX");
         bytes += n as u64;
         break;
     }

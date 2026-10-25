@@ -73,9 +73,9 @@
       "source_function": "liteeth_start_xmit",
       "source_line": 154,
       "target": "liteeth::liteeth_start_xmit",
-      "invariant": "READY/队列检查 → 容量判断 → SRAM copy → SLOT/LENGTH/START → 统计和轮转",
+      "invariant": "队列/READY 检查 → BUSY 原样归还 skb；OK 路径完成或丢弃并消费 skb → SRAM copy → SLOT/LENGTH/START → 统计和轮转",
       "target_path": "libos/src/drivers/liteeth.rs",
-      "target_line": 173
+      "target_line": 175
     },
     {
       "source_function": "liteeth_get_stats64",
@@ -227,9 +227,9 @@
       "target": "libos/src/linux_api/skbuff.rs::dev_kfree_skb_any",
       "reason": "有界线性 skb；显式所有权和容量；仅完整 L2 交付，不支持分片/GSO/DSA。",
       "initial_experiment": {
-        "action": "eliminate",
-        "target": "有界帧数组和借用切片",
-        "reason": "本次仅线性 L2 帧；取消每包堆分配，BUSY 保留调用者报文所有权"
+        "action": "same_name_rust_wrapper",
+        "target": "拥有所有权的线性 sk_buff；BUSY 原样归还，OK 显式消费",
+        "reason": "保留 Linux NETDEV_TX_BUSY/OK 的 skb 所有权规则；不做每包堆分配"
       }
     },
     {

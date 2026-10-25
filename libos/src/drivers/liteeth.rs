@@ -61,6 +61,8 @@ pub const LITEETH_MDIO_W: usize = 0x04;
 pub const LITEETH_MDIO_R: usize = 0x0C;
 pub const DRV_NAME: &str = "liteeth";
 pub const MAX_FRAME: usize = 2048;
+// TX 侧的固定 skb 容量多留一个字节，用于保留并检测超过设备槽容量的报文。
+pub const MAX_TX_SKB_SIZE: usize = MAX_FRAME + 1;
 
 // 对应原 C 的 struct liteeth；base 持有寄存器和设备 SRAM 两段映射。
 #[allow(non_camel_case_types)]
@@ -169,36 +171,43 @@ impl Driver {
 }
 
 impl<I: Io> liteeth<I> {
-    // 发送一帧；返回 false 表示 BUSY，调用者保留原帧。
-    pub fn liteeth_start_xmit(&mut self, skb: &[u8]) -> Result<bool, i32> {
+    // 对应 ndo_start_xmit：BUSY 归还 skb；OK 时驱动消费或丢弃 skb。
+    pub fn liteeth_start_xmit<const N: usize>(
+        &mut self,
+        skb: sk_buff<N>,
+    ) -> Result<NetdevTxOutcome<N>, i32> {
+        let data = skb.data();
+        let len = data.len();
         // 仅已打开的网卡接受完整以太网帧。
-        if !self.opened || skb.len() < 14 {
+        if !self.opened || len < 14 {
             return Err(-22);
         }
         // BUSY 时保留原帧和槽号；收到 TX 事件后再重试。
         if netif_queue_stopped(&self.netdev) {
-            return Ok(false);
+            return Ok(NetdevTxOutcome::Busy(skb));
         }
         if litex_read8(&self.base, LITEETH_READER_READY) == 0 {
             netif_stop_queue(&mut self.netdev);
-            return Ok(false);
+            return Ok(NetdevTxOutcome::Busy(skb));
         }
         // 超长帧按原 C 语义消费并丢弃，不提交硬件。
-        if skb.len() > self.slot_size {
+        if len > self.slot_size {
             self.netdev.stats.tx_errors += 1;
             self.netdev.stats.tx_dropped += 1;
-            return Ok(true);
+            dev_kfree_skb_any(skb);
+            return Ok(NetdevTxOutcome::Consumed);
         }
         // 先复制数据到设备 SRAM，再写槽号、长度和 START。
         let txbuffer = self.tx_base + self.tx_slot * self.slot_size;
-        memcpy_toio(&self.base, txbuffer, skb);
+        memcpy_toio(&self.base, txbuffer, data);
         litex_write8(&self.base, LITEETH_READER_SLOT, self.tx_slot as u8);
-        litex_write16(&self.base, LITEETH_READER_LENGTH, skb.len() as u16);
+        litex_write16(&self.base, LITEETH_READER_LENGTH, len as u16);
         litex_write8(&self.base, LITEETH_READER_START, 1);
         // 累计发送统计，切换到下一个发送槽。
-        dev_sw_netstats_tx_add(&mut self.netdev, 1, skb.len());
+        dev_sw_netstats_tx_add(&mut self.netdev, 1, len);
         self.tx_slot = (self.tx_slot + 1) % self.num_tx_slots;
-        Ok(true)
+        dev_kfree_skb_any(skb);
+        Ok(NetdevTxOutcome::Consumed)
     }
 
     // 汇总软件统计。
@@ -388,7 +397,10 @@ use target::{fatal, Claim, Mmio, BUFFER_VA, MAC_VA};
 #[cfg(feature = "linux-driver-api")]
 impl Driver {
     // 应用调用转发到上方同名的设备实现。
-    pub fn liteeth_start_xmit(&mut self, skb: &[u8]) -> Result<bool, i32> {
+    pub fn liteeth_start_xmit<const N: usize>(
+        &mut self,
+        skb: sk_buff<N>,
+    ) -> Result<NetdevTxOutcome<N>, i32> {
         self.r#priv.liteeth_start_xmit(skb)
     }
 
