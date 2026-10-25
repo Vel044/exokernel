@@ -28,10 +28,11 @@
     "AddressSanitizer",
     "UndefinedBehaviorSanitizer"
   ],
-  "c_elf_bytes": 152472,
-  "rust_elf_bytes": 147832,
+  "c_elf_bytes": 152480,
+  "rust_elf_bytes": 147448,
   "rust_c_ffi_symbols": [],
   "scope": "单设备、单所属 EL0 线程；QEMU LiteEth 模型；L2 收发、超长 TX 丢弃、失败回滚、启停回收；不含真实 FPGA/IP/socket/形式化证明",
-  "evidence_path": "target/liteeth-comparison/20261023-174658",
-  "implementation": "原生 Rust LiteEth + libos/src/linux_api 同名公共封装"
+  "evidence_path": "target/liteeth-comparison/20261025-091153",
+  "preserved_driver_functions": 9,
+  "implementation": "原生 Rust LiteEth：9 个原驱动函数和 49 个外部接口均保留原名"
 }

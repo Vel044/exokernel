@@ -76,16 +76,21 @@ impl Io for Model {
 }
 fn closed() -> (Device<Model>, Model) {
     let io = Model::new();
-    let d = Device::new(
-        io.clone(),
-        Layout {
-            rx_slots: 2,
-            tx_slots: 2,
-            slot_size: 2048,
-        },
-        8192,
-    )
-    .unwrap();
+    let platform = linux_api::platform::PlatformDevice::<()> {
+        name: "liteeth-test",
+        compatible: "litex,liteeth",
+        resources: &[],
+        irqs: &[],
+        properties: &[
+            ("litex,rx-slots", 2),
+            ("litex,tx-slots", 2),
+            ("litex,slot-size", 2048),
+        ],
+        address: None,
+        drvdata: None,
+    };
+    let layout = liteeth_setup_slots(&platform, 8192).unwrap();
+    let d = Device::new(io.clone(), layout, 8192).unwrap();
     (d, io)
 }
 fn opened() -> (Device<Model>, Model) {
@@ -140,12 +145,12 @@ fn open_clears_events_before_enable_and_rejects_double_open() {
 #[test]
 fn closed_and_short_tx_do_not_touch_hardware() {
     let (mut d, io) = closed();
-    assert_eq!(d.send(&[1; 60]), Err(-22));
+    assert_eq!(d.liteeth_start_xmit(&[1; 60]), Err(-22));
     assert!(io.0.borrow().ops.is_empty());
     d.prepare_open().unwrap();
     d.enable();
     io.clear_ops();
-    assert_eq!(d.send(&[1; 13]), Err(-22));
+    assert_eq!(d.liteeth_start_xmit(&[1; 13]), Err(-22));
     assert!(io.0.borrow().ops.is_empty());
 }
 #[test]
@@ -153,9 +158,9 @@ fn tx_copies_before_register_commit_and_rotates_slots() {
     let (mut d, io) = opened();
     for slot in [0, 1, 0] {
         io.tx_done();
-        d.handle_irq();
+        d.liteeth_interrupt();
         io.clear_ops();
-        assert_eq!(d.send(&[7; 60]), Ok(true));
+        assert_eq!(d.liteeth_start_xmit(&[7; 60]), Ok(true));
         assert_eq!(
             io.0.borrow().ops,
             vec![
@@ -171,29 +176,29 @@ fn tx_copies_before_register_commit_and_rotates_slots() {
             &[7; 60]
         );
     }
-    assert_eq!(d.stats().tx_packets, 3);
+    assert_eq!(d.liteeth_get_stats64().tx_packets, 3);
 }
 #[test]
 fn busy_keeps_packet_slot_and_stats_until_completion() {
     let (mut d, io) = opened();
     io.0.borrow_mut().regs[TX_READY / 4] = 0;
-    assert_eq!(d.send(&[8; 60]), Ok(false));
-    assert_eq!(d.stats(), Stats::default());
+    assert_eq!(d.liteeth_start_xmit(&[8; 60]), Ok(false));
+    assert_eq!(d.liteeth_get_stats64(), Stats::default());
     io.0.borrow_mut().regs[TX_READY / 4] = 1;
     io.clear_ops();
-    assert_eq!(d.send(&[8; 60]), Ok(false));
+    assert_eq!(d.liteeth_start_xmit(&[8; 60]), Ok(false));
     assert!(io.0.borrow().ops.is_empty());
     io.tx_done();
-    d.handle_irq();
-    assert_eq!(d.send(&[8; 60]), Ok(true));
+    d.liteeth_interrupt();
+    assert_eq!(d.liteeth_start_xmit(&[8; 60]), Ok(true));
     assert_eq!(io.0.borrow().regs[TX_SLOT / 4], 0);
 }
 #[test]
 fn oversize_is_consumed_and_counted_without_tx() {
     let (mut d, io) = opened();
-    assert_eq!(d.send(&[0; 2049]), Ok(true));
+    assert_eq!(d.liteeth_start_xmit(&[0; 2049]), Ok(true));
     assert_eq!(io.0.borrow().ops, vec![Op::Read(TX_READY)]);
-    let s = d.stats();
+    let s = d.liteeth_get_stats64();
     assert_eq!((s.tx_packets, s.tx_errors, s.tx_dropped), (0, 1, 1));
 }
 #[test]
@@ -201,7 +206,7 @@ fn irq_handles_tx_then_copies_rx_before_w1c() {
     let (mut d, io) = opened();
     io.tx_done();
     io.rx(1, 60, 9);
-    d.handle_irq();
+    d.liteeth_interrupt();
     assert_eq!(
         io.0.borrow().ops,
         vec![
@@ -217,7 +222,7 @@ fn irq_handles_tx_then_copies_rx_before_w1c() {
     let mut out = [0; 60];
     assert_eq!(d.receive(&mut out), Ok(60));
     assert_eq!(out, [9; 60]);
-    assert_eq!(d.stats().rx_bytes, 60);
+    assert_eq!(d.liteeth_get_stats64().rx_bytes, 60);
 }
 #[test]
 fn invalid_device_slot_or_length_is_dropped_without_sram_access() {
@@ -232,17 +237,23 @@ fn invalid_device_slot_or_length_is_dropped_without_sram_access() {
     ] {
         io.clear_ops();
         io.rx(slot, n, 0);
-        d.handle_irq();
+        d.liteeth_interrupt();
         assert!(!io.0.borrow().ops.iter().any(|o| matches!(o, Op::From(..))));
         assert_eq!(io.0.borrow().regs[RX_PENDING / 4], 0);
     }
-    assert_eq!((d.stats().rx_errors, d.stats().rx_dropped), (6, 6));
+    assert_eq!(
+        (
+            d.liteeth_get_stats64().rx_errors,
+            d.liteeth_get_stats64().rx_dropped
+        ),
+        (6, 6)
+    );
 }
 #[test]
 fn small_output_preserves_frame_for_retry() {
     let (mut d, io) = opened();
     io.rx(0, 60, 11);
-    d.handle_irq();
+    d.liteeth_interrupt();
     assert_eq!(d.receive(&mut [0; 59]), Err(-22));
     let mut out = [0; 60];
     assert_eq!(d.receive(&mut out), Ok(60));
@@ -253,33 +264,33 @@ fn small_output_preserves_frame_for_retry() {
 fn full_delivery_slot_keeps_first_frame_and_records_drop() {
     let (mut d, io) = opened();
     io.rx(0, 60, 12);
-    d.handle_irq();
+    d.liteeth_interrupt();
     io.rx(1, 60, 13);
-    d.handle_irq();
+    d.liteeth_interrupt();
     let mut out = [0; 60];
     d.receive(&mut out).unwrap();
     assert_eq!(out, [12; 60]);
     assert_eq!(d.delivery_drops, 1);
-    assert_eq!(d.stats().rx_packets, 2);
+    assert_eq!(d.liteeth_get_stats64().rx_packets, 2);
 }
 #[test]
 fn stop_reopen_keeps_tx_rotation_and_disables_both_event_sources() {
     let (mut d, io) = opened();
-    d.send(&[0; 60]).unwrap();
+    d.liteeth_start_xmit(&[0; 60]).unwrap();
     io.tx_done();
-    d.handle_irq();
+    d.liteeth_interrupt();
     io.clear_ops();
-    d.stop();
+    d.stop_device_events();
     assert_eq!(
         io.0.borrow().ops,
         vec![Op::Write(RX_ENABLE, 0), Op::Write(TX_ENABLE, 0)]
     );
-    assert_eq!(d.send(&[0; 60]), Err(-22));
+    assert_eq!(d.liteeth_start_xmit(&[0; 60]), Err(-22));
     d.prepare_open().unwrap();
     d.enable();
-    d.send(&[0; 60]).unwrap();
+    d.liteeth_start_xmit(&[0; 60]).unwrap();
     assert_eq!(io.0.borrow().regs[TX_SLOT / 4], 1);
-    d.stop();
+    d.stop_device_events();
     d.unregister().unwrap();
     io.clear_ops();
     assert_eq!(d.prepare_open(), Err(-22));

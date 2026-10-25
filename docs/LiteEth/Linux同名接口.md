@@ -4,6 +4,24 @@
 
 这是 Rust 源码迁移接口：名字保留，参数使用有生命周期的引用、Result、拥有值和显式后端。原 C 文件不能直接调用它；原 C 对照继续使用 `drivers/linux_liteeth/`，不修改 vendor 原文件。
 
+## 原驱动函数也保留同名
+
+不仅外部依赖保留同名，原 `litex_liteeth.c` 的 9 个函数在 Rust 中也保持原名。下面链接指向实际逻辑；Driver 的发送/统计同名入口只是转发，不再使用 send/stats 代替原函数名称。
+
+| 原 C 函数 | Rust 同名实现 |
+| --- | --- |
+| `liteeth_rx` | [Device::liteeth_rx](../../libos/src/drivers/liteeth_core.rs#L171) |
+| `liteeth_interrupt` | [Device::liteeth_interrupt](../../libos/src/drivers/liteeth_core.rs#L159) |
+| `liteeth_open` | [Driver::liteeth_open](../../libos/src/drivers/liteeth.rs#L139) |
+| `liteeth_stop` | [Driver::liteeth_stop](../../libos/src/drivers/liteeth.rs#L180) |
+| `liteeth_start_xmit` | [Device::liteeth_start_xmit](../../libos/src/drivers/liteeth_core.rs#L132) |
+| `liteeth_get_stats64` | [Device::liteeth_get_stats64](../../libos/src/drivers/liteeth_core.rs#L206) |
+| `liteeth_setup_slots` | [liteeth_setup_slots](../../libos/src/drivers/liteeth_core.rs#L58) |
+| `liteeth_probe` | [Driver::liteeth_probe](../../libos/src/drivers/liteeth.rs#L80) |
+| `liteeth_remove` | [Driver::liteeth_remove](../../libos/src/drivers/liteeth.rs#L190) |
+
+`wait_irq`、`receive` 是目标侧新增的通知等待/上层取帧接口；`prepare_open`、`enable`、`stop_device_events` 是分层接入时的辅助步骤。它们不替代上述原函数名。当前原 C 对照的 Rust 桥也使用同名应用入口，但 C 文件和 C FFI 符号不变。
+
 ## 目录与使用
 
 - `io.rs`：LiteX CSR、设备缓冲复制，以及受检查的 volatile/屏障实现。
@@ -26,10 +44,10 @@ LiteEth 设备逻辑
     → 公共线性 skb、队列、链路、统计（全部 EL0）
   devm_platform_ioremap_resource_byname
     → ExoMapper → MAP_MMIO，Mapping::drop → UNMAP_MMIO
-  request_irq(registration, intid, Device::handle_irq, 0, "liteeth")
+  request_irq(registration, intid, Device::liteeth_interrupt, 0, "liteeth")
     → 保存 EL0 函数指针 → ExoIrq → IRQ_BIND
   wait_and_dispatch(&mut device)
-    → NOTIFICATION_WAIT → handler(device) → IRQ_ACK
+    → NOTIFICATION_WAIT → liteeth_interrupt(device) → IRQ_ACK
   free_irq → IRQ_UNBIND → 清除回调；通知最后 DESTROY
 ```
 
@@ -110,6 +128,6 @@ python3 tools/liteeth/compare.py --qemu /path/to/qemu-system-aarch64
 
 第一项核查 49 个名称并运行 13 项独立公共接口测试，覆盖双设备隔离、skb 容量与 IP 对齐、协议识别、队列满/重试、IRQ 回调/ACK 顺序、绑定/解绑失败、映射拥有者回收、OF 匹配及退出。第二项继续运行原 C ASan/UBSan、原 11 项 Rust 状态机与 ARM64 QEMU 两版本对照。公共模块没有新增 kernel syscall，也没有引入 DMA。
 
-最新本机验收：`target/liteeth-comparison/20261023-174658/`。49 项名称核查、13 项公共接口测试、11 项设备状态机测试、C ASan/UBSan 及 ARM64 QEMU C/Rust 对照全部通过。两版 17 帧共 10,752 字节逐字节一致，统计/slot/寄存器提交及生命周期一致；Rust 无 C FFI 符号。此记录不代表真实硬件、完整网络栈或所有异常的形式化等价。
+最新本机验收：`target/liteeth-comparison/20261025-091153/`。9 个原驱动函数及 49 项外部接口名称核查、13 项公共接口测试、11 项设备状态机测试、C ASan/UBSan 及 ARM64 QEMU C/Rust 对照全部通过。两版 17 帧共 10,752 字节逐字节一致，统计/slot/寄存器提交及生命周期一致；Rust 无 C FFI 符号。此记录不代表真实硬件、完整网络栈或所有异常的形式化等价。
 
 需要逐项确认和填写意见时使用 [接口语义确认表](接口语义确认表.md)，其中“你的备注”列保持空白。

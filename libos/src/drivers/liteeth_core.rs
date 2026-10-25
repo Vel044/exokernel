@@ -2,10 +2,16 @@
 //! 根据 Linux 6.12.75 litex_liteeth.c 定向重写的设备状态机。
 //! 保留 CSR/SRAM 协议、slot 轮转、忙时重试和事件确认顺序；通用行为调用 linux_api 同名接口。
 //! 本模块只操作设备和有界帧，MMIO 映射、Notification、ACK 由 liteeth.rs 提供。
+//! 原驱动函数名保留：liteeth_rx、liteeth_interrupt、liteeth_start_xmit、liteeth_get_stats64。
 //! 源码对应关系与主动收紧的边界见 docs/LiteEth/翻译契约.json。
 
 pub use crate::linux_api::{io::Io, netdevice::RtnlLinkStats64 as Stats};
-use crate::linux_api::{io::*, netdevice::*, skbuff::*};
+use crate::linux_api::{
+    io::*,
+    netdevice::*,
+    platform::{of_property_read_u32, PlatformDevice},
+    skbuff::*,
+};
 
 pub const RX_SLOT: usize = 0x00;
 pub const RX_LENGTH: usize = 0x04;
@@ -47,6 +53,20 @@ impl Layout {
         Ok(self)
     }
 }
+/// 对应原 liteeth_setup_slots：从已解析属性取得槽布局，并验证资源容量。
+/// 原驱动 2/2/2048 默认值由 dtb::discover 在进入这里之前补齐；错误不能静默扩大资源。
+pub fn liteeth_setup_slots<P>(
+    platform: &PlatformDevice<'_, P>,
+    buffer_size: usize,
+) -> Result<Layout, i32> {
+    Layout {
+        rx_slots: of_property_read_u32(platform, "litex,rx-slots")? as usize,
+        tx_slots: of_property_read_u32(platform, "litex,tx-slots")? as usize,
+        slot_size: of_property_read_u32(platform, "litex,slot-size")? as usize,
+    }
+    .validate(buffer_size)
+}
+
 /// 单所属线程的驱动状态；不含全局 C 对象、回调指针或 Linux 队列。
 pub struct Device<I: Io> {
     /// MMIO 访问对象，真实后端同时拥有两个映射。
@@ -100,7 +120,7 @@ impl<I: Io> Device<I> {
         netif_start_queue(&mut self.netdev);
     }
     /// 对照 liteeth_stop：先停队列和关设备事件，再由上层解绑 GIC 路由。
-    pub fn stop(&mut self) {
+    pub fn stop_device_events(&mut self) {
         netif_stop_queue(&mut self.netdev);
         netif_carrier_off(&mut self.netdev);
         litex_write8(&self.io, RX_ENABLE, 0);
@@ -109,7 +129,7 @@ impl<I: Io> Device<I> {
     }
     /// 对照 liteeth_start_xmit。true 包含原驱动的“超长帧已消费但丢弃”语义。
     /// BUSY 返回 false，不保存 bytes 借用，不改 slot 和发送统计，调用者持有原帧。
-    pub fn send(&mut self, bytes: &[u8]) -> Result<bool, i32> {
+    pub fn liteeth_start_xmit(&mut self, bytes: &[u8]) -> Result<bool, i32> {
         if !self.opened || bytes.len() < 14 {
             return Err(-22);
         }
@@ -136,7 +156,7 @@ impl<I: Io> Device<I> {
     }
     /// 对照 liteeth_interrupt：TX pending → 唤醒发送 → W1C；再 RX → 复制 → W1C。
     /// 与 xHCI 不同，本设备没有 Event Ring；这里处理的是 LiteEth pending 和 SRAM。
-    pub fn handle_irq(&mut self) {
+    pub fn liteeth_interrupt(&mut self) {
         let tx = litex_read8(&self.io, TX_PENDING);
         if tx != 0 {
             netif_wake_queue(&mut self.netdev);
@@ -144,11 +164,11 @@ impl<I: Io> Device<I> {
         }
         let rx = litex_read8(&self.io, RX_PENDING);
         if rx != 0 {
-            self.receive_slot();
+            self.liteeth_rx();
             litex_write8(&self.io, RX_PENDING, rx);
         }
     }
-    fn receive_slot(&mut self) {
+    pub(crate) fn liteeth_rx(&mut self) {
         let slot = litex_read8(&self.io, RX_SLOT) as usize;
         let length = litex_read32(&self.io, RX_LENGTH) as usize;
         // 原 C 只检查长度 0/2048；Rust 显式验证 slot、容量及 L2 头，禁止越界读取。
@@ -183,7 +203,7 @@ impl<I: Io> Device<I> {
     pub fn receive(&mut self, out: &mut [u8]) -> Result<usize, i32> {
         self.receive_queue.receive(out)
     }
-    pub fn stats(&self) -> Stats {
+    pub fn liteeth_get_stats64(&self) -> Stats {
         let mut result = Stats::default();
         netdev_stats_to_stats64(&mut result, &self.netdev.stats);
         dev_fetch_sw_netstats(&mut result, &self.netdev.tstats);

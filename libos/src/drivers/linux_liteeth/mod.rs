@@ -89,7 +89,7 @@ fn checked(result: i32) -> Result<(), i32> {
     }
 }
 impl Driver {
-    pub fn attach(info: LiteEthInfo) -> Result<Self, i32> {
+    pub fn liteeth_probe(info: LiteEthInfo) -> Result<Self, i32> {
         if CLAIMED
             .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
             .is_err()
@@ -133,10 +133,10 @@ impl Driver {
             _owner: PhantomData,
         })
     }
-    pub fn open(&mut self) -> Result<(), i32> {
+    pub fn liteeth_open(&mut self) -> Result<(), i32> {
         unsafe { checked(exo_liteeth_open()) }
     }
-    pub fn send(&mut self, frame: &[u8]) -> Result<bool, i32> {
+    pub fn liteeth_start_xmit(&mut self, frame: &[u8]) -> Result<bool, i32> {
         // C 同步复制报文，不保存 Rust 借用；BUSY 时保留调用者所有权以便重试。
         match unsafe { exo_liteeth_send(frame.as_ptr(), frame.len()) } {
             0 => Ok(true),
@@ -172,17 +172,17 @@ impl Driver {
             n
         }
     }
-    pub fn stats(&mut self) -> Result<Stats, i32> {
+    pub fn liteeth_get_stats64(&mut self) -> Result<Stats, i32> {
         let mut s = Stats::default();
         unsafe {
             checked(exo_liteeth_stats(&mut s))?;
         }
         Ok(s)
     }
-    pub fn close(&mut self) -> Result<(), i32> {
+    pub fn liteeth_stop(&mut self) -> Result<(), i32> {
         unsafe { checked(exo_liteeth_close()) }
     }
-    pub fn detach(self) -> Result<(), i32> {
+    pub fn liteeth_remove(self) -> Result<(), i32> {
         unsafe {
             checked(exo_liteeth_detach())?;
         }
