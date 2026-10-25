@@ -201,6 +201,7 @@ void memcpy_toio(volatile void *dst, const void *src, size_t len) {
         d[i] = s[i];
     lx_io_barrier();
 }
+
 struct sk_buff *netdev_alloc_skb_ip_align(struct net_device *n, size_t size) {
     if (!size || size > 65536)
         return NULL;
@@ -216,6 +217,7 @@ struct sk_buff *netdev_alloc_skb_ip_align(struct net_device *n, size_t size) {
     s->capacity = size;
     return s;
 }
+
 u8 *skb_put(struct sk_buff *s, size_t size) {
     if (size > s->capacity - s->len) {
         exo_lx_fault();

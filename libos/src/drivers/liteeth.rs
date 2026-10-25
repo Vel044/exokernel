@@ -3,7 +3,7 @@
 //! 不链接 Linux C 驱动或 C/Rust FFI；Linux 同名 Rust 封装由 linux_api 复用。
 //! liteeth_core 保留设备协议；本层独占 MMIO 映射、同名资源接口与 IRQ 生命周期。
 use super::{
-    liteeth_core::{liteeth_setup_slots, Device, Io},
+    liteeth_core::{liteeth, liteeth_setup_slots, Io, DRV_NAME},
     platform::LiteEthInfo,
 };
 use crate::{
@@ -11,8 +11,8 @@ use crate::{
         exo::{ExoIrq, ExoMapper, Mapping},
         interrupt::{free_irq, request_irq, IrqRegistration},
         platform::{
-            devm_platform_ioremap_resource_byname, platform_get_drvdata, platform_get_irq,
-            platform_set_drvdata, NamedResource, PlatformDevice,
+            devm_platform_ioremap_resource_byname, platform_device, platform_get_drvdata,
+            platform_get_irq, platform_set_drvdata, NamedResource,
         },
     },
     runtime,
@@ -46,32 +46,32 @@ fn fatal() -> ! {
 /// 两段映射的拥有者；字段顺序不影响解绑，因为 Driver::drop 总是先 liteeth_stop。
 struct Mmio {
     /// CSR VA：32 位总线事务，低 8/16 位存放逻辑值。
-    registers: Mapping,
+    base: Mapping,
     /// 设备 SRAM VA：CPU volatile 复制，无 DMA 分配及缓存一致性操作。
-    buffer: Mapping,
+    buf_base: Mapping,
 }
 impl Io for Mmio {
     fn read(&self, offset: usize) -> u32 {
-        self.registers.region().read32(offset)
+        self.base.region().read32(offset)
     }
     fn write(&self, offset: usize, value: u32) {
-        self.registers.region().write32(offset, value);
+        self.base.region().write32(offset, value);
     }
     fn copy_from(&self, offset: usize, out: &mut [u8]) {
-        self.buffer.region().copy_from(offset, out);
+        self.buf_base.region().copy_from(offset, out);
     }
     fn copy_to(&self, offset: usize, bytes: &[u8]) {
-        self.buffer.region().copy_to(offset, bytes);
+        self.buf_base.region().copy_to(offset, bytes);
     }
 }
 /// 单线程独占设备，裸指针标记禁止 Send/Sync；没有 Linux 全局对象或异步 C 回调。
 pub struct Driver {
     /// 设备状态机和 MMIO 映射，解绑后才随对象释放。
-    device: Device<Mmio>,
+    r#priv: liteeth<Mmio>,
     /// 注册层持有 Notification 和函数指针；没有 pending 时 WAIT 阻塞当前线程。
-    irq: IrqRegistration<Device<Mmio>, ExoIrq>,
+    irq_registration: IrqRegistration<liteeth<Mmio>, ExoIrq>,
     /// DTB 给出的 GIC INTID，绑定仍由 EL1 grant 审核。
-    intid: u32,
+    irq: u32,
     /// 最后释放固定 VA 所有权，失败回滚由字段 Drop 自动完成。
     _claim: Claim,
     _owner: PhantomData<*mut ()>,
@@ -98,8 +98,8 @@ impl Driver {
             ("litex,slot-size", info.slot_size),
         ];
         let irqs = [info.mac.intid];
-        let mut platform = PlatformDevice {
-            name: "liteeth",
+        let mut pdev = platform_device {
+            name: DRV_NAME,
             compatible: "litex,liteeth",
             resources: &resources,
             irqs: &irqs,
@@ -107,27 +107,25 @@ impl Driver {
             address: Some(info.address),
             drvdata: None,
         };
-        platform_set_drvdata(&mut platform, info);
-        let info = *platform_get_drvdata(&platform)?;
-        let layout = liteeth_setup_slots(
-            &platform,
-            usize::try_from(info.buffer.size).map_err(|_| -22)?,
-        )?;
-        let intid = platform_get_irq(&platform, 0)?;
-        if info.mac.size < 0x44 || intid < 32 || info.mac.size > 4096 || info.buffer.size > 65536 {
+        platform_set_drvdata(&mut pdev, info);
+        let info = *platform_get_drvdata(&pdev)?;
+        let layout =
+            liteeth_setup_slots(&pdev, usize::try_from(info.buffer.size).map_err(|_| -22)?)?;
+        let irq = platform_get_irq(&pdev, 0)?;
+        if info.mac.size < 0x44 || irq < 32 || info.mac.size > 4096 || info.buffer.size > 65536 {
             return Err(-22);
         }
         let claim = Claim::take()?;
-        let irq = IrqRegistration::new(ExoIrq::new()?);
-        let io = Mmio {
-            registers: devm_platform_ioremap_resource_byname(&platform, "mac", &ExoMapper)?,
-            buffer: devm_platform_ioremap_resource_byname(&platform, "buffer", &ExoMapper)?,
+        let irq_registration = IrqRegistration::new(ExoIrq::new()?);
+        let base = Mmio {
+            base: devm_platform_ioremap_resource_byname(&pdev, "mac", &ExoMapper)?,
+            buf_base: devm_platform_ioremap_resource_byname(&pdev, "buffer", &ExoMapper)?,
         };
-        let device = Device::new(io, layout, info.buffer.size as usize)?;
+        let r#priv = liteeth::new(base, layout, info.buffer.size as usize)?;
         Ok(Self {
-            device,
+            r#priv,
+            irq_registration,
             irq,
-            intid,
             _claim: claim,
             _owner: PhantomData,
         })
@@ -137,59 +135,59 @@ impl Driver {
     /// 而把 DTB 解析得到、仍须 EL1 授权的 GIC INTID 接到本 Driver 的 Notification。
     /// 原 Linux irq 是 IRQ domain 映射后的逻辑号，不能普遍当作 GIC INTID 直接照搬。
     pub fn liteeth_open(&mut self) -> Result<(), i32> {
-        if self.irq.is_bound() {
+        if self.irq_registration.is_bound() {
             return Err(-16);
         }
-        self.device.prepare_open()?;
+        self.r#priv.prepare_open()?;
         // EL0 参数：INTID、attach 时创建的通知 handle、badge=1、当前目标 CPU。
         // 经 runtime 发 SYS_IRQ_BIND；EL1 校验 IRQ grant、通知归属和重复绑定，
         // 保存 INTID→通知/badge 的路由并开放 GIC SPI；失败时不继续开放设备事件。
         request_irq(
-            &mut self.irq,
-            self.intid,
-            Device::liteeth_interrupt,
+            &mut self.irq_registration,
+            self.irq,
+            liteeth::liteeth_interrupt,
             0,
-            "liteeth",
+            DRV_NAME,
         )?;
         // 与 Linux 的 request_irq 一样，内核侧接入不负责开启网卡自身的事件位。
         // 因此必须再写 LiteEth RX/TX EV_ENABLE；两者分别控制 GIC 路由与设备中断源。
-        self.device.enable();
+        self.r#priv.enable();
         Ok(())
     }
     /// 应用入口只转发到 liteeth_core 中同名的实际发送实现。
-    pub fn liteeth_start_xmit(&mut self, bytes: &[u8]) -> Result<bool, i32> {
-        self.device.liteeth_start_xmit(bytes)
+    pub fn liteeth_start_xmit(&mut self, skb: &[u8]) -> Result<bool, i32> {
+        self.r#priv.liteeth_start_xmit(skb)
     }
-    /// 目标侧新增的通知等待适配；原回调名字仍为 Device::liteeth_interrupt。
+    /// 目标侧新增的通知等待适配；原回调名字仍为 liteeth::liteeth_interrupt。
     /// 替代 Linux IRQ 核心调用 liteeth_interrupt(irq, dev_id) 的接入过程。
     /// 本函数在所属 EL0 线程运行；self 直接持有设备状态，不需要 C 的 dev_id cookie。
     pub fn wait_irq(&mut self) -> Result<(), i32> {
         // 注册层保存函数指针；WAIT 返回后在 EL0 调用，再执行 ACK。
-        self.irq.wait_and_dispatch(&mut self.device)
+        self.irq_registration.wait_and_dispatch(&mut self.r#priv)
     }
     pub fn receive(&mut self, out: &mut [u8]) -> usize {
-        self.device.receive(out).unwrap_or_else(|_| fatal())
+        self.r#priv.receive(out).unwrap_or_else(|_| fatal())
     }
     /// 应用入口只转发到 liteeth_core 中同名的实际统计实现。
-    pub fn liteeth_get_stats64(&self) -> Result<super::liteeth_core::Stats, i32> {
-        Ok(self.device.liteeth_get_stats64())
+    pub fn liteeth_get_stats64(&self) -> Result<super::liteeth_core::rtnl_link_stats64, i32> {
+        Ok(self.r#priv.liteeth_get_stats64())
     }
     /// 对照 liteeth_stop 的关闭设备事件→free_irq 顺序。
     /// Linux free_irq 会撤销回调并等待在途处理完成；这里靠单所属线程串行调用，
     /// 保证进入 liteeth_stop 时没有另一个 EL0 liteeth_interrupt 同时执行，不是通用多核回调同步。
     pub fn liteeth_stop(&mut self) -> Result<(), i32> {
-        if self.irq.is_bound() {
-            self.device.stop_device_events();
+        if self.irq_registration.is_bound() {
+            self.r#priv.stop_device_events();
             // SYS_IRQ_UNBIND：EL1 禁用 SPI 并移除当前任务的绑定，成功返回后清除注册层 binding。
             // 本步不释放 MMIO 或 Notification；之后 Driver 的字段 Drop 才分别回收。
             // 解绑失败则保持 binding，禁止把仍可能关联中断的资源当作已安全回收。
-            free_irq(&mut self.irq)?;
+            free_irq(&mut self.irq_registration)?;
         }
         Ok(())
     }
     pub fn liteeth_remove(mut self) -> Result<(), i32> {
         self.liteeth_stop()?;
-        self.device.unregister()
+        self.r#priv.unregister()
     }
 }
 impl Drop for Driver {

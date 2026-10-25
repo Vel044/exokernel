@@ -33,7 +33,7 @@ fn network_instances_keep_private_queue_link_and_stats_independent() {
     dev_sw_netstats_rx_add(&mut a, 60);
     dev_sw_netstats_tx_add(&mut a, 2, 120);
     a.stats.rx_errors = 3;
-    let mut stats = RtnlLinkStats64::default();
+    let mut stats = rtnl_link_stats64::default();
     netdev_stats_to_stats64(&mut stats, &a.stats);
     dev_fetch_sw_netstats(&mut stats, &a.tstats);
     assert_eq!(
@@ -46,7 +46,7 @@ fn network_instances_keep_private_queue_link_and_stats_independent() {
         ),
         (1, 60, 2, 120, 3)
     );
-    assert_eq!(b.stats, RtnlLinkStats64::default());
+    assert_eq!(b.stats, rtnl_link_stats64::default());
     assert_eq!(b.tstats.rx_packets, 0);
     unregister_netdev(&mut a).unwrap();
     assert_eq!(unregister_netdev(&mut a), Err(EINVAL));
@@ -54,7 +54,7 @@ fn network_instances_keep_private_queue_link_and_stats_independent() {
     eth_hw_addr_random(&mut a, [255; 6]);
     assert_eq!(a.address[0] & 3, 2);
 }
-fn packet<const N: usize>(bytes: &[u8]) -> SkBuff<N> {
+fn packet<const N: usize>(bytes: &[u8]) -> sk_buff<N> {
     let dev = devm_alloc_etherdev("unrelated", ());
     let mut skb = netdev_alloc_skb_ip_align(&dev, bytes.len()).unwrap();
     skb_put(&mut skb, bytes.len())
@@ -254,7 +254,7 @@ fn platform_resources_properties_private_data_and_mac_are_generic() {
         size: 4096,
         user_va: 0x8000,
     }];
-    let mut p = PlatformDevice {
+    let mut p = platform_device {
         name: "different",
         compatible: "vendor,other",
         resources: &resources,
@@ -351,7 +351,7 @@ fn errors_logging_rate_limits_and_metadata_keep_meaning() {
 #[test]
 fn platform_driver_match_probe_remove_runs_once_and_rejects_unknown_bus() {
     type Counter = Rc<RefCell<usize>>;
-    fn probe(p: &PlatformDevice<'_, Counter>) -> Result<Counter, i32> {
+    fn probe(p: &platform_device<'_, Counter>) -> Result<Counter, i32> {
         let c = platform_get_drvdata(p)?.clone();
         *c.borrow_mut() += 1;
         Ok(c)
@@ -360,15 +360,15 @@ fn platform_driver_match_probe_remove_runs_once_and_rejects_unknown_bus() {
         *c.borrow_mut() -= 1;
         Ok(())
     }
-    fn driver(kind: &'static str) -> PlatformDriver<Counter, Counter> {
-        PlatformDriver {
+    fn driver(kind: &'static str) -> platform_driver<Counter, Counter> {
+        platform_driver {
             table: MODULE_DEVICE_TABLE(kind, &["vendor,a", "vendor,b"]),
             probe,
             remove,
         }
     }
     let count = Rc::new(RefCell::new(0));
-    let mut p = PlatformDevice {
+    let mut p = platform_device {
         name: "other",
         compatible: "vendor,a",
         resources: &[],

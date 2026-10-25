@@ -24,3 +24,5 @@ python3 tools/liteeth/compare.py --qemu /path/to/qemu-liteeth-build/qemu-system-
 `test_linux_api.py` 核查 49 个名称并运行公共层的 13 项复用/所有权测试；`compare.py` 已包含此项。公共实现位于 `libos/src/linux_api/`，启用 feature 为 `linux-driver-api`，不依赖 C 兼容层。[实现位置与支持范围](../../docs/LiteEth/Linux同名接口.md)。
 
 原 C 的 9 个驱动函数在 Rust 中全部保留同名；`test_native.py` 同时核查命名契约并运行原有 11 项设备测试。具体对应见 [原驱动函数表](../../docs/LiteEth/Linux同名接口.md#原驱动函数也保留同名)。
+
+命名保持还覆盖原 20 个寄存器常量、DRV_NAME 和对应结构体/字段；WRITER/READER 不替换成 RX/TX 缩写。`test_native.py` 会验证名称和值，`priv` 在 Rust 中使用原始标识符 `r#priv`。

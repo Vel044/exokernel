@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //! 保留模块宏的同名元信息构造和显式 platform 绑定，不实现 Linux 动态模块加载器。
-use super::{error::ENXIO, platform::PlatformDevice};
+use super::{error::ENXIO, platform::platform_device};
 pub struct Metadata {
     /// 编译进程序的来源信息，不取得硬件资源或执行系统调用。
     pub key: &'static str,
@@ -35,10 +35,10 @@ pub const fn MODULE_DEVICE_TABLE(
 ) -> DeviceTable {
     DeviceTable { kind, compatibles }
 }
-pub struct PlatformDriver<P, D> {
+pub struct platform_driver<P, D> {
     /// 编译期匹配表以及设备初始化/退出函数指针，D 拥有已取得的资源。
     pub table: DeviceTable,
-    pub probe: fn(&PlatformDevice<'_, P>) -> Result<D, i32>,
+    pub probe: fn(&platform_device<'_, P>) -> Result<D, i32>,
     pub remove: fn(D) -> Result<(), i32>,
 }
 pub struct PlatformBinding<D> {
@@ -62,8 +62,8 @@ impl<D> Drop for PlatformBinding<D> {
     }
 }
 pub fn module_platform_driver<P, D>(
-    driver: PlatformDriver<P, D>,
-    device: &PlatformDevice<'_, P>,
+    driver: platform_driver<P, D>,
+    device: &platform_device<'_, P>,
 ) -> Result<PlatformBinding<D>, i32> {
     if driver.table.kind != "of" {
         return Err(super::error::EOPNOTSUPP);

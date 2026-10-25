@@ -10,15 +10,15 @@
 
 | 原 C 函数 | Rust 同名实现 |
 | --- | --- |
-| `liteeth_rx` | [Device::liteeth_rx](../../libos/src/drivers/liteeth_core.rs#L171) |
-| `liteeth_interrupt` | [Device::liteeth_interrupt](../../libos/src/drivers/liteeth_core.rs#L159) |
-| `liteeth_open` | [Driver::liteeth_open](../../libos/src/drivers/liteeth.rs#L139) |
-| `liteeth_stop` | [Driver::liteeth_stop](../../libos/src/drivers/liteeth.rs#L180) |
-| `liteeth_start_xmit` | [Device::liteeth_start_xmit](../../libos/src/drivers/liteeth_core.rs#L132) |
-| `liteeth_get_stats64` | [Device::liteeth_get_stats64](../../libos/src/drivers/liteeth_core.rs#L206) |
-| `liteeth_setup_slots` | [liteeth_setup_slots](../../libos/src/drivers/liteeth_core.rs#L58) |
+| `liteeth_rx` | [liteeth::liteeth_rx](../../libos/src/drivers/liteeth_core.rs#L207) |
+| `liteeth_interrupt` | [liteeth::liteeth_interrupt](../../libos/src/drivers/liteeth_core.rs#L195) |
+| `liteeth_open` | [Driver::liteeth_open](../../libos/src/drivers/liteeth.rs#L137) |
+| `liteeth_stop` | [Driver::liteeth_stop](../../libos/src/drivers/liteeth.rs#L178) |
+| `liteeth_start_xmit` | [liteeth::liteeth_start_xmit](../../libos/src/drivers/liteeth_core.rs#L168) |
+| `liteeth_get_stats64` | [liteeth::liteeth_get_stats64](../../libos/src/drivers/liteeth_core.rs#L235) |
+| `liteeth_setup_slots` | [liteeth_setup_slots](../../libos/src/drivers/liteeth_core.rs#L80) |
 | `liteeth_probe` | [Driver::liteeth_probe](../../libos/src/drivers/liteeth.rs#L80) |
-| `liteeth_remove` | [Driver::liteeth_remove](../../libos/src/drivers/liteeth.rs#L190) |
+| `liteeth_remove` | [Driver::liteeth_remove](../../libos/src/drivers/liteeth.rs#L188) |
 
 `wait_irq`、`receive` 是目标侧新增的通知等待/上层取帧接口；`prepare_open`、`enable`、`stop_device_events` 是分层接入时的辅助步骤。它们不替代上述原函数名。当前原 C 对照的 Rust 桥也使用同名应用入口，但 C 文件和 C FFI 符号不变。
 
@@ -44,7 +44,7 @@ LiteEth 设备逻辑
     → 公共线性 skb、队列、链路、统计（全部 EL0）
   devm_platform_ioremap_resource_byname
     → ExoMapper → MAP_MMIO，Mapping::drop → UNMAP_MMIO
-  request_irq(registration, intid, Device::liteeth_interrupt, 0, "liteeth")
+  request_irq(registration, intid, liteeth::liteeth_interrupt, 0, "liteeth")
     → 保存 EL0 函数指针 → ExoIrq → IRQ_BIND
   wait_and_dispatch(&mut device)
     → NOTIFICATION_WAIT → liteeth_interrupt(device) → IRQ_ACK
@@ -56,7 +56,7 @@ IRQ 上下文由 `&mut device` 在派发时传入，而不是保存 `void* dev_i
 ## 与完整 Linux 的边界
 
 1. 单所属线程；软件统计的同名接口使用单线程计数，不是 Linux per-CPU/softirq/RCU。完整并发语义没有实现。
-2. `SkBuff<N>` 按值拥有有界内联存储，`netdev_alloc_skb_ip_align` 不做堆分配。`skb_put` 不得超过请求容量；交付保留完整 L2 帧，容量及队列深度由调用者指定。
+2. `sk_buff<N>` 按值拥有有界内联存储，`netdev_alloc_skb_ip_align` 不做堆分配。`skb_put` 不得超过请求容量；交付保留完整 L2 帧，容量及队列深度由调用者指定。
 3. `eth_type_trans` 仅实现 Ethernet II/LLC/原始 802.3 协议判断和头部视图移动；不保存完整 Linux 的 dev/pkt_type/DSA 元数据，也不启动 IP 栈。
 4. `register_netdev` 保存本地对象注册状态；`unregister_netdev` 要求调用者已 stop/free_irq，不会自动执行 Linux 网络核心的全部注销流程。模块元信息有实际数据，OF 绑定有匹配/probe/remove，不是空成功桩。
 5. `platform_get_irq` 接受后端约定的 IRQ 编号。Exokernel 后端要求已授权的 GIC INTID；不能把其他 Linux IRQ domain 中的逻辑号直接复制过来。
@@ -131,3 +131,13 @@ python3 tools/liteeth/compare.py --qemu /path/to/qemu-system-aarch64
 最新本机验收：`target/liteeth-comparison/20261025-091153/`。9 个原驱动函数及 49 项外部接口名称核查、13 项公共接口测试、11 项设备状态机测试、C ASan/UBSan 及 ARM64 QEMU C/Rust 对照全部通过。两版 17 帧共 10,752 字节逐字节一致，统计/slot/寄存器提交及生命周期一致；Rust 无 C FFI 符号。此记录不代表真实硬件、完整网络栈或所有异常的形式化等价。
 
 需要逐项确认和填写意见时使用 [接口语义确认表](接口语义确认表.md)，其中“你的备注”列保持空白。
+
+## 原标识符保持规则
+
+寄存器的 WRITER/READER 是硬件原名：WRITER 对应接收、READER 对应发送，翻译时不改成 RX/TX 别名。原文件的 20 个 LITEETH 寄存器常量及 DRV_NAME 均保留原名原值，包括当前路径未使用的定义。
+
+原私有类型保留为 `struct liteeth`，对应字段使用 `base`、`netdev`、`slot_size`、`num_rx_slots`、`num_tx_slots`、`rx_slot`、`tx_slot`、`rx_base`、`tx_base`。Linux 对应类型使用 `net_device`、`sk_buff`、`rtnl_link_stats64`、`pcpu_sw_netstats`、`platform_device`、`platform_driver`，不再为了 Rust 命名风格改成另一套名称。
+
+C 的 `priv` 是 Rust 保留字，因此写作 `r#priv`，逻辑名称仍为 priv。`Layout`、`Driver`、`Mapping`、`IrqRegistration` 等是目标侧新增的配置/资源拥有者，不是给原 C 类型改名。RX/TX 基址在当前 Io 后端中用设备 SRAM 窗口内偏移表示，不冒充 PA 或 DMA 地址。结构与 C ABI 不承诺相同。
+
+`test_native.py` 同时检查原函数、寄存器名称/偏移、DRV_NAME 和对应类型名，防止后续再次擅自缩写。

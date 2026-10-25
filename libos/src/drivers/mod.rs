@@ -53,7 +53,7 @@ pub(crate) mod virtio_blk;
 #[cfg(any(feature = "qemu-xhci", feature = "pi5-xhci"))]
 pub(crate) mod xhci;
 
-#[cfg(feature = "app-liteeth-rust-smoke")]
+#[cfg(any(feature = "ide", feature = "app-liteeth-rust-smoke"))]
 pub(crate) mod liteeth;
-#[cfg(feature = "app-liteeth-rust-smoke")]
+#[cfg(any(feature = "ide", feature = "app-liteeth-rust-smoke"))]
 pub(crate) mod liteeth_core;

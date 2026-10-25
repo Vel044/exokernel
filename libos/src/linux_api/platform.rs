@@ -3,7 +3,7 @@
 //! 实际映射由 Mapper 后端校验并建立，返回值拥有映射，Drop 负责 devm 式回收。
 use super::{
     error::{EINVAL, ENXIO},
-    netdevice::NetDevice,
+    netdevice::net_device,
 };
 #[derive(Clone, Copy)]
 pub struct NamedResource {
@@ -14,7 +14,7 @@ pub struct NamedResource {
     pub size: u64,
     pub user_va: u64,
 }
-pub struct PlatformDevice<'a, P = ()> {
+pub struct platform_device<'a, P = ()> {
     /// 本地设备名与 compatible，用于明确匹配，不实现 Linux 总线自动扫描。
     pub name: &'static str,
     pub compatible: &'a str,
@@ -31,32 +31,32 @@ pub trait Mapper {
     fn map(&self, resource: NamedResource) -> Result<Self::Mapping, i32>;
 }
 pub fn devm_platform_ioremap_resource_byname<P, M: Mapper>(
-    dev: &PlatformDevice<'_, P>,
+    dev: &platform_device<'_, P>,
     name: &str,
     mapper: &M,
 ) -> Result<M::Mapping, i32> {
     let resource = dev.resources.iter().find(|r| r.name == name).ok_or(ENXIO)?;
     mapper.map(*resource)
 }
-pub fn platform_get_irq<P>(dev: &PlatformDevice<'_, P>, index: usize) -> Result<u32, i32> {
+pub fn platform_get_irq<P>(dev: &platform_device<'_, P>, index: usize) -> Result<u32, i32> {
     dev.irqs.get(index).copied().ok_or(ENXIO)
 }
 /// 与 Linux setter 一样允许替换；Rust 自动释放被替换的拥有值。
-pub fn platform_set_drvdata<P>(dev: &mut PlatformDevice<'_, P>, value: P) {
+pub fn platform_set_drvdata<P>(dev: &mut platform_device<'_, P>, value: P) {
     dev.drvdata = Some(value);
 }
-pub fn platform_get_drvdata<'a, P>(dev: &'a PlatformDevice<'_, P>) -> Result<&'a P, i32> {
+pub fn platform_get_drvdata<'a, P>(dev: &'a platform_device<'_, P>) -> Result<&'a P, i32> {
     dev.drvdata.as_ref().ok_or(ENXIO)
 }
-pub fn of_property_read_u32<P>(dev: &PlatformDevice<'_, P>, name: &str) -> Result<u32, i32> {
+pub fn of_property_read_u32<P>(dev: &platform_device<'_, P>, name: &str) -> Result<u32, i32> {
     dev.properties
         .iter()
         .find_map(|(key, value)| (*key == name).then_some(*value))
         .ok_or(ENXIO)
 }
 pub fn of_get_ethdev_address<P, N>(
-    dev: &PlatformDevice<'_, P>,
-    net: &mut NetDevice<N>,
+    dev: &platform_device<'_, P>,
+    net: &mut net_device<N>,
 ) -> Result<(), i32> {
     let address = dev.address.ok_or(ENXIO)?;
     if address == [0; 6] || address[0] & 1 != 0 {

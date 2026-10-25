@@ -22,7 +22,7 @@ struct Model(Rc<RefCell<State>>);
 impl Model {
     fn new() -> Self {
         let mut regs = [0; 64];
-        regs[TX_READY / 4] = 1;
+        regs[LITEETH_READER_READY / 4] = 1;
         Self(Rc::new(RefCell::new(State {
             regs,
             buffer: vec![0; 8192],
@@ -31,15 +31,15 @@ impl Model {
     }
     fn tx_done(&self) {
         let mut s = self.0.borrow_mut();
-        s.regs[TX_READY / 4] = 1;
-        s.regs[TX_PENDING / 4] = 1;
+        s.regs[LITEETH_READER_READY / 4] = 1;
+        s.regs[LITEETH_READER_EV_PENDING / 4] = 1;
     }
     fn rx(&self, slot: u32, length: u32, fill: u8) {
         let mut s = self.0.borrow_mut();
         s.buffer.fill(fill);
-        s.regs[RX_SLOT / 4] = slot;
-        s.regs[RX_LENGTH / 4] = length;
-        s.regs[RX_PENDING / 4] = 1;
+        s.regs[LITEETH_WRITER_SLOT / 4] = slot;
+        s.regs[LITEETH_WRITER_LENGTH / 4] = length;
+        s.regs[LITEETH_WRITER_EV_PENDING / 4] = 1;
     }
     fn clear_ops(&self) {
         self.0.borrow_mut().ops.clear();
@@ -54,13 +54,13 @@ impl Io for Model {
     fn write(&self, o: usize, v: u32) {
         let mut s = self.0.borrow_mut();
         s.ops.push(Op::Write(o, v));
-        if o == RX_PENDING || o == TX_PENDING {
+        if o == LITEETH_WRITER_EV_PENDING || o == LITEETH_READER_EV_PENDING {
             s.regs[o / 4] &= !v;
         } else {
             s.regs[o / 4] = v;
         }
-        if o == TX_START {
-            s.regs[TX_READY / 4] = 0;
+        if o == LITEETH_READER_START {
+            s.regs[LITEETH_READER_READY / 4] = 0;
         }
     }
     fn copy_from(&self, o: usize, b: &mut [u8]) {
@@ -74,9 +74,9 @@ impl Io for Model {
         s.buffer[o..o + b.len()].copy_from_slice(b);
     }
 }
-fn closed() -> (Device<Model>, Model) {
+fn closed() -> (liteeth<Model>, Model) {
     let io = Model::new();
-    let platform = linux_api::platform::PlatformDevice::<()> {
+    let platform = linux_api::platform::platform_device::<()> {
         name: "liteeth-test",
         compatible: "litex,liteeth",
         resources: &[],
@@ -90,10 +90,10 @@ fn closed() -> (Device<Model>, Model) {
         drvdata: None,
     };
     let layout = liteeth_setup_slots(&platform, 8192).unwrap();
-    let d = Device::new(io.clone(), layout, 8192).unwrap();
+    let d = liteeth::new(io.clone(), layout, 8192).unwrap();
     (d, io)
 }
-fn opened() -> (Device<Model>, Model) {
+fn opened() -> (liteeth<Model>, Model) {
     let (mut d, io) = closed();
     d.prepare_open().unwrap();
     d.enable();
@@ -111,11 +111,11 @@ fn rejects_invalid_layout_before_access() {
         (2, 2, 2048, 8191),
     ] {
         let io = Model::new();
-        assert!(Device::new(
+        assert!(liteeth::new(
             io.clone(),
             Layout {
-                rx_slots: rx,
-                tx_slots: tx,
+                num_rx_slots: rx,
+                num_tx_slots: tx,
                 slot_size: size
             },
             span
@@ -132,10 +132,10 @@ fn open_clears_events_before_enable_and_rejects_double_open() {
     assert_eq!(
         io.0.borrow().ops,
         vec![
-            Op::Write(RX_PENDING, 1),
-            Op::Write(TX_PENDING, 1),
-            Op::Write(RX_ENABLE, 1),
-            Op::Write(TX_ENABLE, 1)
+            Op::Write(LITEETH_WRITER_EV_PENDING, 1),
+            Op::Write(LITEETH_READER_EV_PENDING, 1),
+            Op::Write(LITEETH_WRITER_EV_ENABLE, 1),
+            Op::Write(LITEETH_READER_EV_ENABLE, 1)
         ]
     );
     io.clear_ops();
@@ -164,11 +164,11 @@ fn tx_copies_before_register_commit_and_rotates_slots() {
         assert_eq!(
             io.0.borrow().ops,
             vec![
-                Op::Read(TX_READY),
+                Op::Read(LITEETH_READER_READY),
                 Op::To(4096 + slot * 2048, 60),
-                Op::Write(TX_SLOT, slot as u32),
-                Op::Write(TX_LENGTH, 60),
-                Op::Write(TX_START, 1)
+                Op::Write(LITEETH_READER_SLOT, slot as u32),
+                Op::Write(LITEETH_READER_LENGTH, 60),
+                Op::Write(LITEETH_READER_START, 1)
             ]
         );
         assert_eq!(
@@ -181,23 +181,23 @@ fn tx_copies_before_register_commit_and_rotates_slots() {
 #[test]
 fn busy_keeps_packet_slot_and_stats_until_completion() {
     let (mut d, io) = opened();
-    io.0.borrow_mut().regs[TX_READY / 4] = 0;
+    io.0.borrow_mut().regs[LITEETH_READER_READY / 4] = 0;
     assert_eq!(d.liteeth_start_xmit(&[8; 60]), Ok(false));
-    assert_eq!(d.liteeth_get_stats64(), Stats::default());
-    io.0.borrow_mut().regs[TX_READY / 4] = 1;
+    assert_eq!(d.liteeth_get_stats64(), rtnl_link_stats64::default());
+    io.0.borrow_mut().regs[LITEETH_READER_READY / 4] = 1;
     io.clear_ops();
     assert_eq!(d.liteeth_start_xmit(&[8; 60]), Ok(false));
     assert!(io.0.borrow().ops.is_empty());
     io.tx_done();
     d.liteeth_interrupt();
     assert_eq!(d.liteeth_start_xmit(&[8; 60]), Ok(true));
-    assert_eq!(io.0.borrow().regs[TX_SLOT / 4], 0);
+    assert_eq!(io.0.borrow().regs[LITEETH_READER_SLOT / 4], 0);
 }
 #[test]
 fn oversize_is_consumed_and_counted_without_tx() {
     let (mut d, io) = opened();
     assert_eq!(d.liteeth_start_xmit(&[0; 2049]), Ok(true));
-    assert_eq!(io.0.borrow().ops, vec![Op::Read(TX_READY)]);
+    assert_eq!(io.0.borrow().ops, vec![Op::Read(LITEETH_READER_READY)]);
     let s = d.liteeth_get_stats64();
     assert_eq!((s.tx_packets, s.tx_errors, s.tx_dropped), (0, 1, 1));
 }
@@ -210,13 +210,13 @@ fn irq_handles_tx_then_copies_rx_before_w1c() {
     assert_eq!(
         io.0.borrow().ops,
         vec![
-            Op::Read(TX_PENDING),
-            Op::Write(TX_PENDING, 1),
-            Op::Read(RX_PENDING),
-            Op::Read(RX_SLOT),
-            Op::Read(RX_LENGTH),
+            Op::Read(LITEETH_READER_EV_PENDING),
+            Op::Write(LITEETH_READER_EV_PENDING, 1),
+            Op::Read(LITEETH_WRITER_EV_PENDING),
+            Op::Read(LITEETH_WRITER_SLOT),
+            Op::Read(LITEETH_WRITER_LENGTH),
             Op::From(2048, 60),
-            Op::Write(RX_PENDING, 1)
+            Op::Write(LITEETH_WRITER_EV_PENDING, 1)
         ]
     );
     let mut out = [0; 60];
@@ -239,7 +239,7 @@ fn invalid_device_slot_or_length_is_dropped_without_sram_access() {
         io.rx(slot, n, 0);
         d.liteeth_interrupt();
         assert!(!io.0.borrow().ops.iter().any(|o| matches!(o, Op::From(..))));
-        assert_eq!(io.0.borrow().regs[RX_PENDING / 4], 0);
+        assert_eq!(io.0.borrow().regs[LITEETH_WRITER_EV_PENDING / 4], 0);
     }
     assert_eq!(
         (
@@ -283,13 +283,16 @@ fn stop_reopen_keeps_tx_rotation_and_disables_both_event_sources() {
     d.stop_device_events();
     assert_eq!(
         io.0.borrow().ops,
-        vec![Op::Write(RX_ENABLE, 0), Op::Write(TX_ENABLE, 0)]
+        vec![
+            Op::Write(LITEETH_WRITER_EV_ENABLE, 0),
+            Op::Write(LITEETH_READER_EV_ENABLE, 0)
+        ]
     );
     assert_eq!(d.liteeth_start_xmit(&[0; 60]), Err(-22));
     d.prepare_open().unwrap();
     d.enable();
     d.liteeth_start_xmit(&[0; 60]).unwrap();
-    assert_eq!(io.0.borrow().regs[TX_SLOT / 4], 1);
+    assert_eq!(io.0.borrow().regs[LITEETH_READER_SLOT / 4], 1);
     d.stop_device_events();
     d.unregister().unwrap();
     io.clear_ops();

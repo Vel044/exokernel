@@ -38,24 +38,26 @@
 #define DRV_NAME	"liteeth"
 
 struct liteeth {
-	void __iomem *base;
-	struct net_device *netdev;
-	struct device *dev;
-	u32 slot_size;
+	void __iomem *base;	// MMIO 基址
+	struct net_device *netdev; // 网络设备对象
+	struct device *dev; // 父设备
+	u32 slot_size; // 单个收发槽大小（字节）
 
 	/* Tx */
-	u32 tx_slot;
-	u32 num_tx_slots;
-	void __iomem *tx_base;
+	u32 tx_slot; // 当前发送槽
+	u32 num_tx_slots; // 发送槽数量
+	void __iomem *tx_base; // 发送缓冲区基址
 
 	/* Rx */
-	u32 rx_slot;
-	u32 num_rx_slots;
-	void __iomem *rx_base;
+	u32 rx_slot; // 当前接收槽
+	u32 num_rx_slots; // 接收槽数量
+	void __iomem *rx_base; // 接收缓冲区基址
 };
 
+/* 接收一帧并交给网络栈。 */
 static int liteeth_rx(struct net_device *netdev)
 {
+	// Linux 网络栈，我那没有
 	struct liteeth *priv = netdev_priv(netdev);
 	struct sk_buff *skb;
 	unsigned char *data;
@@ -68,7 +70,9 @@ static int liteeth_rx(struct net_device *netdev)
 	if (len == 0 || len > 2048)
 		goto rx_drop;
 
+	// 为接收包分配一个 sk_buff 和 size 字节的数据缓冲区，供驱动把收到的帧复制进去
 	skb = netdev_alloc_skb_ip_align(netdev, len);
+
 	if (!skb) {
 		netdev_err(netdev, "couldn't get memory\n");
 		goto rx_drop;
@@ -89,6 +93,7 @@ rx_drop:
 	return NET_RX_DROP;
 }
 
+/* 处理中断并清除收发事件。 */
 static irqreturn_t liteeth_interrupt(int irq, void *dev_id)
 {
 	struct net_device *netdev = dev_id;
@@ -111,6 +116,7 @@ static irqreturn_t liteeth_interrupt(int irq, void *dev_id)
 	return IRQ_HANDLED;
 }
 
+/* 打开网卡并启用中断和发送队列。 */
 static int liteeth_open(struct net_device *netdev)
 {
 	struct liteeth *priv = netdev_priv(netdev);
@@ -136,6 +142,7 @@ static int liteeth_open(struct net_device *netdev)
 	return 0;
 }
 
+/* 停止网卡并释放 IRQ。 */
 static int liteeth_stop(struct net_device *netdev)
 {
 	struct liteeth *priv = netdev_priv(netdev);
@@ -151,6 +158,7 @@ static int liteeth_stop(struct net_device *netdev)
 	return 0;
 }
 
+/* 将一帧写入发送缓冲区并启动发送。 */
 static netdev_tx_t liteeth_start_xmit(struct sk_buff *skb,
 				      struct net_device *netdev)
 {
@@ -192,6 +200,7 @@ static netdev_tx_t liteeth_start_xmit(struct sk_buff *skb,
 	return NETDEV_TX_OK;
 }
 
+/* 汇总网卡统计。 */
 static void
 liteeth_get_stats64(struct net_device *netdev, struct rtnl_link_stats64 *stats)
 {
@@ -199,6 +208,7 @@ liteeth_get_stats64(struct net_device *netdev, struct rtnl_link_stats64 *stats)
 	dev_fetch_sw_netstats(stats, netdev->tstats);
 }
 
+/* 网卡操作入口。 */
 static const struct net_device_ops liteeth_netdev_ops = {
 	.ndo_open		= liteeth_open,
 	.ndo_stop		= liteeth_stop,
@@ -206,6 +216,7 @@ static const struct net_device_ops liteeth_netdev_ops = {
 	.ndo_start_xmit         = liteeth_start_xmit,
 };
 
+/* 读取设备树中的槽位数量和大小。 */
 static void liteeth_setup_slots(struct liteeth *priv)
 {
 	struct device_node *np = priv->dev->of_node;
@@ -230,6 +241,7 @@ static void liteeth_setup_slots(struct liteeth *priv)
 	}
 }
 
+/* 初始化并注册网卡。 */
 static int liteeth_probe(struct platform_device *pdev)
 {
 	struct net_device *netdev;
@@ -294,6 +306,7 @@ static int liteeth_probe(struct platform_device *pdev)
 	return 0;
 }
 
+/* 移除网卡。 */
 static void liteeth_remove(struct platform_device *pdev)
 {
 	struct net_device *netdev = platform_get_drvdata(pdev);
@@ -301,12 +314,14 @@ static void liteeth_remove(struct platform_device *pdev)
 	unregister_netdev(netdev);
 }
 
+/* 设备树匹配表。 */
 static const struct of_device_id liteeth_of_match[] = {
 	{ .compatible = "litex,liteeth" },
 	{ }
 };
 MODULE_DEVICE_TABLE(of, liteeth_of_match);
 
+/* platform 驱动定义。 */
 static struct platform_driver liteeth_driver = {
 	.probe = liteeth_probe,
 	.remove_new = liteeth_remove,
@@ -315,6 +330,7 @@ static struct platform_driver liteeth_driver = {
 		.of_match_table = liteeth_of_match,
 	},
 };
+/* 注册 platform 驱动。 */
 module_platform_driver(liteeth_driver);
 
 MODULE_AUTHOR("Joel Stanley <joel@jms.id.au>");

@@ -37,7 +37,8 @@ struct Config {
 /// 线性 L2 报文统计；顺序与窄兼容层一致，不是 Linux 二进制 ABI。
 #[repr(C)]
 #[derive(Default)]
-pub struct Stats {
+#[allow(non_camel_case_types)]
+pub struct rtnl_link_stats64 {
     pub rx_packets: u64,
     pub tx_packets: u64,
     pub rx_bytes: u64,
@@ -52,7 +53,7 @@ unsafe extern "C" {
     fn exo_liteeth_open() -> i32;
     fn exo_liteeth_send(p: *const u8, n: usize) -> i32;
     fn exo_liteeth_handle_irq() -> i32;
-    fn exo_liteeth_stats(s: *mut Stats) -> i32;
+    fn exo_liteeth_stats(s: *mut rtnl_link_stats64) -> i32;
     fn exo_liteeth_close() -> i32;
     fn exo_liteeth_detach() -> i32;
 }
@@ -172,8 +173,8 @@ impl Driver {
             n
         }
     }
-    pub fn liteeth_get_stats64(&mut self) -> Result<Stats, i32> {
-        let mut s = Stats::default();
+    pub fn liteeth_get_stats64(&mut self) -> Result<rtnl_link_stats64, i32> {
+        let mut s = rtnl_link_stats64::default();
         unsafe {
             checked(exo_liteeth_stats(&mut s))?;
         }

@@ -1,5 +1,5 @@
 {
-  "version": 3,
+  "version": 4,
   "status": "implemented_and_tested",
   "source": {
     "path": "libos/vendor/liteeth-linux/litex_liteeth.c",
@@ -40,18 +40,18 @@
     {
       "source_function": "liteeth_rx",
       "source_line": 57,
-      "target": "Device::liteeth_rx",
+      "target": "liteeth::liteeth_rx",
       "invariant": "按 slot/length 读取 SRAM，以同名 skb_put/eth_type_trans/netif_rx 交付完整帧；保持有界输入检查",
       "target_path": "libos/src/drivers/liteeth_core.rs",
-      "target_line": 171
+      "target_line": 207
     },
     {
       "source_function": "liteeth_interrupt",
       "source_line": 92,
-      "target": "Device::liteeth_interrupt",
+      "target": "liteeth::liteeth_interrupt",
       "invariant": "同名 request_irq 注册 EL0 回调；先 TX 后 RX，设备 W1C 在 kernel IRQ_ACK 前",
       "target_path": "libos/src/drivers/liteeth_core.rs",
-      "target_line": 159
+      "target_line": 195
     },
     {
       "source_function": "liteeth_open",
@@ -59,7 +59,7 @@
       "target": "Driver::liteeth_open",
       "invariant": "清旧 pending → 绑定 Notification → 开设备事件",
       "target_path": "libos/src/drivers/liteeth.rs",
-      "target_line": 139
+      "target_line": 137
     },
     {
       "source_function": "liteeth_stop",
@@ -67,23 +67,23 @@
       "target": "Driver::liteeth_stop",
       "invariant": "停止发送 → 关闭两路设备事件 → IRQ_UNBIND",
       "target_path": "libos/src/drivers/liteeth.rs",
-      "target_line": 180
+      "target_line": 178
     },
     {
       "source_function": "liteeth_start_xmit",
       "source_line": 154,
-      "target": "Device::liteeth_start_xmit",
+      "target": "liteeth::liteeth_start_xmit",
       "invariant": "READY/队列检查 → 容量判断 → SRAM copy → SLOT/LENGTH/START → 统计和轮转",
       "target_path": "libos/src/drivers/liteeth_core.rs",
-      "target_line": 132
+      "target_line": 168
     },
     {
       "source_function": "liteeth_get_stats64",
       "source_line": 195,
-      "target": "Device::liteeth_get_stats64",
+      "target": "liteeth::liteeth_get_stats64",
       "invariant": "单所属线程返回值类型统计，不构造 Linux 结构",
       "target_path": "libos/src/drivers/liteeth_core.rs",
-      "target_line": 206
+      "target_line": 235
     },
     {
       "source_function": "liteeth_setup_slots",
@@ -91,7 +91,7 @@
       "target": "liteeth_setup_slots",
       "invariant": "延用 2/2/2048 默认值，并校验乘积和资源容量",
       "target_path": "libos/src/drivers/liteeth_core.rs",
-      "target_line": 58
+      "target_line": 80
     },
     {
       "source_function": "liteeth_probe",
@@ -107,7 +107,7 @@
       "target": "Driver::liteeth_remove",
       "invariant": "先关闭/解绑，再释放映射、通知和固定 VA 所有权",
       "target_path": "libos/src/drivers/liteeth.rs",
-      "target_line": 190
+      "target_line": 188
     }
   ],
   "dependencies": [
@@ -707,16 +707,30 @@
     "previous_strategy": "首次实验直接把依赖合并到 liteeth.rs/liteeth_core.rs；本次抽出公共同名 Rust 封装，保留原 C 对照。"
   },
   "naming_contract": {
-    "rule": "9 个原驱动函数全部保留原 C 名称；49 个外部依赖保留同名 Rust 入口",
+    "rule": "原驱动中有对应关系的函数、寄存器常量、类型和字段保留原名；目标侧新增辅助对象单独说明",
     "driver_function_count": 9,
     "verification": "tools/liteeth/test_native.py",
     "target_only_helpers": [
-      "Device::prepare_open",
-      "Device::enable",
-      "Device::stop_device_events",
+      "liteeth::prepare_open",
+      "liteeth::enable",
+      "liteeth::stop_device_events",
       "Driver::wait_irq",
       "Driver::receive"
     ],
-    "note": "目标侧通知执行器和资源分层可增加辅助函数，不再用辅助函数名替代原 C 函数名；wait_irq 不属于原 C 函数。"
+    "note": "目标侧通知执行器和资源分层可增加辅助函数，不再用辅助函数名替代原 C 函数名；wait_irq 不属于原 C 函数。",
+    "register_constant_count": 20,
+    "driver_name_constant": "DRV_NAME",
+    "original_type_names": [
+      "liteeth",
+      "net_device",
+      "sk_buff",
+      "rtnl_link_stats64",
+      "pcpu_sw_netstats",
+      "platform_device",
+      "platform_driver"
+    ],
+    "rust_keyword_escape": {
+      "priv": "r#priv"
+    }
   }
 }

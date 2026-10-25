@@ -1,0 +1,107 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1970" viewBox="0 0 1800 1970" role="img">
+<title>LiteEth 原版驱动：9 个函数的时序与用途</title>
+<desc>依据本地 Linux drivers/net/ethernet/litex/litex_liteeth.c。七个外部回调入口和两个内部函数。按初始化、打开、运行、停止和移除组织；运行期间发送、硬件中断和统计查询按各自触发条件重复调用，不表示三个分支依次执行。图中只展开驱动自定义函数和主要公共接口，不展开公共接口内部实现。</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#60758b"/></marker></defs>
+<rect width="1800" height="1970" fill="white"/>
+<g font-family="PingFang SC,Microsoft YaHei,Noto Sans CJK SC,sans-serif" fill="#1e293b">
+<text x="40" y="56" font-size="39" fill="#172b3a" font-weight="700">LiteEth 原版驱动：所有函数按时间与用途展开</text>
+<text x="40" y="98" font-size="23" fill="#526575" font-weight="400">9 个驱动函数：7 个外部回调 + 2 个内部函数；公共接口在各步骤中列出。</text>
+<rect x="180" y="124" width="1580" height="62" rx="12" fill="#edf2f8" stroke="#d2dce8" stroke-width="2"/>
+<text x="202" y="163" font-size="25" fill="#334155" font-weight="600">module_platform_driver → 注册 platform 驱动 → 匹配设备树 &quot;litex,liteeth&quot; → probe</text>
+<rect x="35" y="226" width="112" height="42" rx="8" fill="#eaf2fd" stroke="#b8cdeb" stroke-width="2"/>
+<text x="48" y="255" font-size="23" fill="#1c5fa8" font-weight="700">1 初始化</text>
+<rect x="180" y="222" width="1000" height="300" rx="12" fill="#f6faff" stroke="#8db4e4" stroke-width="2"/>
+<text x="202" y="265" font-size="28" fill="#1459a6" font-weight="700" font-family="Menlo,Consolas,monospace">liteeth_probe()</text>
+<text x="202" y="295" font-size="19" fill="#5c6c7f" font-weight="400">调用者：platform 设备框架；用途：准备资源并注册网卡</text>
+<text x="202" y="338" font-size="23" fill="#1e293b" font-weight="400">① 创建 net_device、驱动私有区 priv 和软件统计。</text>
+<text x="202" y="378" font-size="23" fill="#1e293b" font-weight="400">② 取得 IRQ；映射 mac 寄存器区和 buffer 设备 SRAM。</text>
+<text x="202" y="418" font-size="23" fill="#1e293b" font-weight="400">③ 调用右侧 setup_slots；划分 RX / TX 缓冲区。</text>
+<text x="202" y="458" font-size="23" fill="#1e293b" font-weight="400">④ 设置 MAC 和 netdev_ops；register_netdev() 注册网卡。</text>
+<text x="202" y="499" font-size="21" fill="#526575" font-weight="400">此时完成设备接入；打开网卡时再绑定 IRQ、启用收发事件。</text>
+<rect x="1230" y="222" width="530" height="300" rx="12" fill="#f6faff" stroke="#8db4e4" stroke-width="2"/>
+<text x="1252" y="265" font-size="28" fill="#1459a6" font-weight="700" font-family="Menlo,Consolas,monospace">liteeth_setup_slots()</text>
+<text x="1252" y="295" font-size="19" fill="#5c6c7f" font-weight="400">内部调用：由 liteeth_probe() 调用</text>
+<text x="1252" y="338" font-size="23" fill="#1e293b" font-weight="400">读取设备树中的槽位配置：</text>
+<text x="1252" y="379" font-size="23" fill="#1e293b" font-weight="400">RX 槽数 / TX 槽数 / 每槽大小。</text>
+<text x="1252" y="423" font-size="21" fill="#526575" font-weight="400" font-family="Menlo,Consolas,monospace">of_property_read_u32()</text>
+<text x="1252" y="467" font-size="23" fill="#1e293b" font-weight="400">缺省值：2 / 2 / 2048 字节。</text>
+<path d="M1180 392 L1230 392" fill="none" stroke="#60758b" stroke-width="2.5" marker-end="url(#arrow)"/>
+<path d="M970 522 L970 580" fill="none" stroke="#60758b" stroke-width="2.5" marker-end="url(#arrow)"/>
+<rect x="35" y="590" width="112" height="42" rx="8" fill="#eaf2fd" stroke="#b8cdeb" stroke-width="2"/>
+<text x="48" y="619" font-size="23" fill="#1c5fa8" font-weight="700">2 打开</text>
+<rect x="180" y="580" width="1580" height="200" rx="12" fill="#f6faff" stroke="#8db4e4" stroke-width="2"/>
+<text x="202" y="624" font-size="28" fill="#1459a6" font-weight="700" font-family="Menlo,Consolas,monospace">liteeth_open()</text>
+<text x="830" y="624" font-size="22" fill="#526575" font-weight="400">调用者：网络设备核心（ndo_open）</text>
+<text x="202" y="669" font-size="23" fill="#1e293b" font-weight="400">① 清 RX / TX 旧 pending → ② request_irq(..., liteeth_interrupt, ..., netdev) 注册中断回调。</text>
+<text x="202" y="711" font-size="23" fill="#1e293b" font-weight="400">③ 写 RX / TX EV_ENABLE，启用设备事件。</text>
+<text x="202" y="753" font-size="23" fill="#1e293b" font-weight="400">④ netif_carrier_on() + netif_start_queue()：标记链路连接，开放发送队列。</text>
+<path d="M970 780 L970 830" fill="none" stroke="#60758b" stroke-width="2.5" marker-end="url(#arrow)"/>
+<rect x="35" y="835" width="112" height="42" rx="8" fill="#eaf2fd" stroke="#b8cdeb" stroke-width="2"/>
+<text x="48" y="864" font-size="23" fill="#1c5fa8" font-weight="700">3 运行</text>
+<text x="180" y="859" font-size="26" fill="#1e293b" font-weight="700">网卡开启期间：下面三类操作按需反复发生；发送、接收可以交错进行。</text>
+<text x="180" y="898" font-size="20" fill="#526575" font-weight="400">网络设备核心：有一帧要发送</text>
+<text x="705" y="898" font-size="20" fill="#526575" font-weight="400">硬件 RX / TX 事件 → Linux IRQ 框架</text>
+<text x="1370" y="898" font-size="20" fill="#526575" font-weight="400">网络设备核心：查询统计</text>
+<rect x="180" y="920" width="490" height="590" rx="12" fill="#f6faff" stroke="#8db4e4" stroke-width="2"/>
+<text x="202" y="963" font-size="28" fill="#1459a6" font-weight="700" font-family="Menlo,Consolas,monospace">liteeth_start_xmit()</text>
+<text x="202" y="993" font-size="19" fill="#5c6c7f" font-weight="400">用途：提交一个以太网帧给硬件</text>
+<text x="202" y="1033" font-size="23" fill="#1e293b" font-weight="400">① 检查 READER_READY。</text>
+<text x="218" y="1068" font-size="21" fill="#a85615" font-weight="400">未就绪：停队列，返回 BUSY。</text>
+<text x="218" y="1100" font-size="21" fill="#a85615" font-weight="400">保留 skb，等待之后重试。</text>
+<text x="202" y="1145" font-size="21" fill="#1e293b" font-weight="400">② 超长：丢弃、释放 skb、记错。</text>
+<text x="202" y="1190" font-size="22" fill="#1459a6" font-weight="400">③ memcpy_toio()：</text>
+<text x="218" y="1224" font-size="23" fill="#1e293b" font-weight="400">skb → 设备 TX SRAM。</text>
+<text x="202" y="1269" font-size="21" fill="#1e293b" font-weight="400">④ 写 SLOT / LENGTH / START，</text>
+<text x="218" y="1302" font-size="21" fill="#1e293b" font-weight="400">选发送槽、填长度、启动发送。</text>
+<text x="202" y="1347" font-size="21" fill="#1e293b" font-weight="400">⑤ 更新发送统计、轮转 tx_slot。</text>
+<text x="202" y="1392" font-size="21" fill="#1e293b" font-weight="400">⑥ 释放 skb，返回 TX_OK。</text>
+<text x="202" y="1458" font-size="20" fill="#526575" font-weight="400">TX_OK 表示驱动已消费该 skb；</text>
+<text x="202" y="1486" font-size="20" fill="#526575" font-weight="400">实际硬件事件由中断分支处理。</text>
+<rect x="705" y="920" width="630" height="224" rx="12" fill="#f6faff" stroke="#8db4e4" stroke-width="2"/>
+<text x="727" y="963" font-size="28" fill="#1459a6" font-weight="700" font-family="Menlo,Consolas,monospace">liteeth_interrupt()</text>
+<text x="727" y="993" font-size="19" fill="#5c6c7f" font-weight="400">用途：判断并处理 RX / TX pending</text>
+<text x="727" y="1032" font-size="21" fill="#1e293b" font-weight="400">TX pending：恢复暂停的发送队列 → 清 TX pending。</text>
+<text x="727" y="1068" font-size="18" fill="#526575" font-weight="400" font-family="Menlo,Consolas,monospace">netif_queue_stopped() / netif_wake_queue()</text>
+<text x="727" y="1114" font-size="21" fill="#1e293b" font-weight="400">RX pending：调用下方 liteeth_rx() → 清 RX pending。</text>
+<path d="M1020 1144 L1020 1190" fill="none" stroke="#60758b" stroke-width="2.5" marker-end="url(#arrow)"/>
+<rect x="705" y="1190" width="630" height="320" rx="12" fill="#edf8f6" stroke="#65b7aa" stroke-width="2"/>
+<text x="727" y="1232" font-size="28" fill="#1459a6" font-weight="700" font-family="Menlo,Consolas,monospace">liteeth_rx()</text>
+<text x="727" y="1262" font-size="19" fill="#5c6c7f" font-weight="400">内部调用：由 liteeth_interrupt() 调用；一次处理一帧</text>
+<text x="727" y="1299" font-size="20" fill="#1e293b" font-weight="400">① 读 WRITER_SLOT、WRITER_LENGTH，取得槽和长度。</text>
+<text x="727" y="1335" font-size="20" fill="#1e293b" font-weight="400">② 分配 skb；skb_put() 扩展有效区，取得写入位置。</text>
+<text x="727" y="1371" font-size="20" fill="#1e293b" font-weight="400">③ memcpy_fromio()：设备 RX SRAM → skb 内存。</text>
+<text x="727" y="1407" font-size="20" fill="#1e293b" font-weight="400">④ eth_type_trans()：处理以太网头，确定上层协议。</text>
+<text x="727" y="1443" font-size="20" fill="#1e293b" font-weight="400">⑤ 更新收包统计；netif_rx(skb) 交给 Linux 网络栈。</text>
+<text x="727" y="1483" font-size="18" fill="#a85615" font-weight="400">长度无效或分配失败：丢包并记录 rx_errors / rx_dropped。</text>
+<rect x="1370" y="920" width="390" height="300" rx="12" fill="#f6faff" stroke="#8db4e4" stroke-width="2"/>
+<text x="1392" y="963" font-size="28" fill="#1459a6" font-weight="700" font-family="Menlo,Consolas,monospace">liteeth_get_stats64()</text>
+<text x="1392" y="993" font-size="19" fill="#5c6c7f" font-weight="400">用途：汇总并返回统计</text>
+<text x="1392" y="1035" font-size="20" fill="#1e293b" font-weight="400">① 转换基础错误/丢包统计。</text>
+<text x="1392" y="1071" font-size="18" fill="#526575" font-weight="400" font-family="Menlo,Consolas,monospace">netdev_stats_to_stats64()</text>
+<text x="1392" y="1120" font-size="20" fill="#1e293b" font-weight="400">② 汇总各 CPU 收发统计。</text>
+<text x="1392" y="1156" font-size="18" fill="#526575" font-weight="400" font-family="Menlo,Consolas,monospace">dev_fetch_sw_netstats()</text>
+<text x="1392" y="1198" font-size="20" fill="#526575" font-weight="400">运行期间可按需查询。</text>
+<rect x="1370" y="1260" width="390" height="250" rx="12" fill="#f8fafc" stroke="#d2dce8" stroke-width="2"/>
+<text x="1392" y="1298" font-size="24" fill="#334155" font-weight="700">寄存器名的方向</text>
+<text x="1392" y="1340" font-size="21" fill="#1e293b" font-weight="400">WRITER：硬件写入 SRAM，</text>
+<text x="1392" y="1372" font-size="21" fill="#1e293b" font-weight="400">所以对应软件接收 RX。</text>
+<text x="1392" y="1424" font-size="21" fill="#1e293b" font-weight="400">READER：硬件读取 SRAM，</text>
+<text x="1392" y="1456" font-size="21" fill="#1e293b" font-weight="400">所以对应软件发送 TX。</text>
+<text x="1392" y="1489" font-size="18" fill="#526575" font-weight="400">本驱动收发使用 MMIO，不申请 DMA。</text>
+<path d="M970 1510 L970 1580" fill="none" stroke="#60758b" stroke-width="2.5" marker-end="url(#arrow)"/>
+<rect x="35" y="1590" width="112" height="42" rx="8" fill="#eaf2fd" stroke="#b8cdeb" stroke-width="2"/>
+<text x="48" y="1619" font-size="23" fill="#1c5fa8" font-weight="700">4 停止</text>
+<rect x="180" y="1580" width="1580" height="154" rx="12" fill="#fff9f1" stroke="#dfb880" stroke-width="2"/>
+<text x="202" y="1624" font-size="28" fill="#1459a6" font-weight="700" font-family="Menlo,Consolas,monospace">liteeth_stop()</text>
+<text x="830" y="1624" font-size="22" fill="#526575" font-weight="400">调用者：网络设备核心（ndo_stop）；之后可以再次 open</text>
+<text x="202" y="1670" font-size="23" fill="#1e293b" font-weight="400">① 停发送队列、标记链路断开 → ② 关闭 RX / TX EV_ENABLE → ③ free_irq() 注销中断回调。</text>
+<text x="202" y="1712" font-size="21" fill="#526575" font-weight="400">free_irq() 等待正在执行的回调结束；这里关闭网卡，资源仍由设备对象持有。</text>
+<path d="M970 1734 L970 1804" fill="none" stroke="#60758b" stroke-width="2.5" marker-end="url(#arrow)"/>
+<rect x="35" y="1814" width="112" height="42" rx="8" fill="#eaf2fd" stroke="#b8cdeb" stroke-width="2"/>
+<text x="48" y="1843" font-size="23" fill="#1c5fa8" font-weight="700">5 移除</text>
+<rect x="180" y="1804" width="1580" height="125" rx="12" fill="#fff9f1" stroke="#dfb880" stroke-width="2"/>
+<text x="202" y="1848" font-size="28" fill="#1459a6" font-weight="700" font-family="Menlo,Consolas,monospace">liteeth_remove()</text>
+<text x="830" y="1848" font-size="22" fill="#526575" font-weight="400">调用者：platform 设备框架；用途：注销设备</text>
+<text x="202" y="1892" font-size="22" fill="#1e293b" font-weight="400">unregister_netdev()：网卡仍开启时会先走 stop；设备解绑后 devm 自动回收托管对象、统计与 MMIO 映射。</text>
+</g>
+</svg>

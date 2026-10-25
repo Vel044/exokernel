@@ -1,0 +1,12 @@
+{
+  "rust-analyzer.cargo.extraEnv": {
+    "RUSTUP_TOOLCHAIN": "nightly"
+  },
+  "rust-analyzer.cargo.target": "aarch64-unknown-none",
+  "rust-analyzer.cargo.noDefaultFeatures": true,
+  "rust-analyzer.cargo.features": [
+    "libos/ide",
+    "exokernel/qemu"
+  ],
+  "rust-analyzer.cargo.allTargets": false
+}

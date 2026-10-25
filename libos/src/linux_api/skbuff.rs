@@ -3,7 +3,7 @@
 //! 报文按值转移所有权；不支持分片 skb、GSO 或完整 Linux 协议栈。
 use super::{
     error::{EBUSY, EINVAL},
-    netdevice::NetDevice,
+    netdevice::net_device,
 };
 #[repr(C, align(4))]
 struct Storage<const N: usize> {
@@ -12,7 +12,7 @@ struct Storage<const N: usize> {
     /// 内联拥有的线性帧，容量在实例类型中明确，不做每包堆分配。
     bytes: [u8; N],
 }
-pub struct SkBuff<const N: usize> {
+pub struct sk_buff<const N: usize> {
     /// 存储所有权、完整帧长度和协议解析后的 data 偏移。
     storage: Storage<N>,
     length: usize,
@@ -21,7 +21,7 @@ pub struct SkBuff<const N: usize> {
     /// 以太网协议号以主机整数表示；不承诺 C __be16 ABI。
     pub protocol: u16,
 }
-impl<const N: usize> SkBuff<N> {
+impl<const N: usize> sk_buff<N> {
     pub fn frame(&self) -> &[u8] {
         &self.storage.bytes[..self.length]
     }
@@ -30,13 +30,13 @@ impl<const N: usize> SkBuff<N> {
     }
 }
 pub fn netdev_alloc_skb_ip_align<P, const N: usize>(
-    _: &NetDevice<P>,
+    _: &net_device<P>,
     size: usize,
-) -> Result<SkBuff<N>, i32> {
+) -> Result<sk_buff<N>, i32> {
     if size > N {
         return Err(EINVAL);
     }
-    Ok(SkBuff {
+    Ok(sk_buff {
         storage: Storage {
             _headroom: [0; 2],
             bytes: [0; N],
@@ -47,19 +47,24 @@ pub fn netdev_alloc_skb_ip_align<P, const N: usize>(
         protocol: 0,
     })
 }
-pub fn skb_put<const N: usize>(skb: &mut SkBuff<N>, length: usize) -> Result<&mut [u8], i32> {
+pub fn skb_put<const N: usize>(skb: &mut sk_buff<N>, length: usize) -> Result<&mut [u8], i32> {
+    // 新数据从当前帧尾开始写。
     let start = skb.length;
+    // 计算新帧尾；检查加法溢出和缓冲区容量。
     let end = start
         .checked_add(length)
         .filter(|end| *end <= skb.capacity)
         .ok_or(EINVAL)?;
+    // 更新有效帧长度。
     skb.length = end;
+    // 返回新增区域，调用者把帧数据写到这里。
     Ok(&mut skb.storage.bytes[start..end])
 }
+
 /// 复用 Linux Ethernet II/802.2/原始 802.3 的协议判断，不支持 DSA 标签变体。
 pub fn eth_type_trans<P, const N: usize>(
-    skb: &mut SkBuff<N>,
-    _: &NetDevice<P>,
+    skb: &mut sk_buff<N>,
+    _: &net_device<P>,
 ) -> Result<u16, i32> {
     if skb.length < 14 || skb.pulled != 0 {
         return Err(EINVAL);
@@ -75,13 +80,13 @@ pub fn eth_type_trans<P, const N: usize>(
     };
     Ok(skb.protocol)
 }
-pub fn dev_kfree_skb_any<const N: usize>(skb: SkBuff<N>) {
+pub fn dev_kfree_skb_any<const N: usize>(skb: sk_buff<N>) {
     drop(skb);
 }
 /// 有界 FIFO，满时丢弃新包；实例之间没有全局队列或硬编码设备名。
 pub struct RxQueue<const N: usize, const Q: usize = 1> {
     /// 每个槽拥有 skb；head/count 只由所属线程修改。
-    slots: [Option<SkBuff<N>>; Q],
+    slots: [Option<sk_buff<N>>; Q],
     head: usize,
     count: usize,
 }
@@ -116,7 +121,7 @@ impl<const N: usize, const Q: usize> RxQueue<N, Q> {
 /// 消费 skb，即使满队列也不把所有权交还驱动；只提供 L2 交付，不进入 IP/socket。
 pub fn netif_rx<const N: usize, const Q: usize>(
     queue: &mut RxQueue<N, Q>,
-    skb: SkBuff<N>,
+    skb: sk_buff<N>,
 ) -> Result<(), i32> {
     if queue.count == Q {
         dev_kfree_skb_any(skb);
