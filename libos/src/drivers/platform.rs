@@ -116,6 +116,6 @@ pub struct LiteEthInfo {
     pub tx_slots: u32,
     /// 每个 slot 的字节容量。
     pub slot_size: u32,
-    /// 设备树声明的以太网地址；零地址让驱动生成本地地址。
+    /// MAC地址
     pub address: [u8; 6],
 }

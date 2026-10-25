@@ -4,7 +4,7 @@ from pathlib import Path
 import os,subprocess,json,re
 root=Path(__file__).resolve().parents[2]
 expected=set(json.loads((root/'docs/LiteEth/源码核查.json').read_text())['functions'])
-translated='\n'.join((root/name).read_text() for name in ['libos/src/drivers/liteeth_core.rs','libos/src/drivers/liteeth.rs'])
+translated=(root/'libos/src/drivers/liteeth.rs').read_text()
 provided=set(re.findall(r'\bfn\s+(liteeth_\w+)\s*(?:<[^>]*>)?\s*\(',translated))
 if expected != provided:
     raise SystemExit(f'原驱动函数名称不一致：缺少 {sorted(expected-provided)}，多出 {sorted(provided-expected)}')

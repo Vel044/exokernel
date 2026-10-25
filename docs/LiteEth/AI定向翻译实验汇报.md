@@ -83,7 +83,7 @@ python3 tools/liteeth/compare.py --qemu /path/to/qemu-system-aarch64
 该命令运行 C 兼容层宿主测试、Rust 状态机测试，串行构建并运行两个版本，最后比较输出并检查 Rust ELF 无 C 兼容层符号。QEMU 构建方法见 [工具说明](../../../tools/liteeth/README.md)。
 
 - [原始 C 驱动](../../../libos/vendor/liteeth-linux/litex_liteeth.c)
-- [Rust 设备状态机](../../../libos/src/drivers/liteeth_core.rs)
+- [Rust 驱动及设备逻辑](../../libos/src/drivers/liteeth.rs)
 - [Rust 内核接口接入](../../../libos/src/drivers/liteeth.rs)
 - [两版本共用测试应用](../../../libos/src/apps/liteeth_smoke.rs)
 - [Rust 状态机测试](../../../tests/liteeth_native.rs)

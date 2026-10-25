@@ -1,5 +1,5 @@
 //! 直接测试实际参与 EL0 构建的 Rust 状态机；普通数组不替代 QEMU MMIO/IRQ 验证。
-#[path = "../libos/src/drivers/liteeth_core.rs"]
+#[path = "../libos/src/drivers/liteeth.rs"]
 mod driver;
 #[path = "../libos/src/linux_api/mod.rs"]
 mod linux_api;

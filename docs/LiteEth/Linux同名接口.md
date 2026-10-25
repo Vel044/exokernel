@@ -6,19 +6,21 @@
 
 ## 原驱动函数也保留同名
 
-不仅外部依赖保留同名，原 `litex_liteeth.c` 的 9 个函数在 Rust 中也保持原名。下面链接指向实际逻辑；Driver 的发送/统计同名入口只是转发，不再使用 send/stats 代替原函数名称。
+不仅外部依赖保留同名，原 `litex_liteeth.c` 的 9 个函数在 Rust 中也保持原名。9 个函数已集中在 `liteeth.rs`，按原 C 的顺序排列；`liteeth_core.rs` 只保留旧入口转发。下面链接指向实际逻辑，文件后面的 Driver 发送/统计入口只做应用转发。
 
 | 原 C 函数 | Rust 同名实现 |
 | --- | --- |
-| `liteeth_rx` | [liteeth::liteeth_rx](../../libos/src/drivers/liteeth_core.rs#L207) |
-| `liteeth_interrupt` | [liteeth::liteeth_interrupt](../../libos/src/drivers/liteeth_core.rs#L195) |
-| `liteeth_open` | [Driver::liteeth_open](../../libos/src/drivers/liteeth.rs#L137) |
-| `liteeth_stop` | [Driver::liteeth_stop](../../libos/src/drivers/liteeth.rs#L178) |
-| `liteeth_start_xmit` | [liteeth::liteeth_start_xmit](../../libos/src/drivers/liteeth_core.rs#L168) |
-| `liteeth_get_stats64` | [liteeth::liteeth_get_stats64](../../libos/src/drivers/liteeth_core.rs#L235) |
-| `liteeth_setup_slots` | [liteeth_setup_slots](../../libos/src/drivers/liteeth_core.rs#L80) |
-| `liteeth_probe` | [Driver::liteeth_probe](../../libos/src/drivers/liteeth.rs#L80) |
-| `liteeth_remove` | [Driver::liteeth_remove](../../libos/src/drivers/liteeth.rs#L188) |
+| `liteeth_rx` | [liteeth::liteeth_rx](../../libos/src/drivers/liteeth.rs#L88) |
+| `liteeth_interrupt` | [liteeth::liteeth_interrupt](../../libos/src/drivers/liteeth.rs#L119) |
+| `liteeth_open` | [Driver::liteeth_open](../../libos/src/drivers/liteeth.rs#L140) |
+| `liteeth_stop` | [Driver::liteeth_stop](../../libos/src/drivers/liteeth.rs#L160) |
+| `liteeth_start_xmit` | [liteeth::liteeth_start_xmit](../../libos/src/drivers/liteeth.rs#L173) |
+| `liteeth_get_stats64` | [liteeth::liteeth_get_stats64](../../libos/src/drivers/liteeth.rs#L205) |
+| `liteeth_setup_slots` | [liteeth_setup_slots](../../libos/src/drivers/liteeth.rs#L215) |
+| `liteeth_probe` | [Driver::liteeth_probe](../../libos/src/drivers/liteeth.rs#L231) |
+| `liteeth_remove` | [Driver::liteeth_remove](../../libos/src/drivers/liteeth.rs#L319) |
+
+`probe` 中按原 C 的顺序展开创建 netdev、初始化统计、取 IRQ、映射、设置槽位及注册。临时 `pdev.drvdata` 保存网卡对象，随后转移到 Driver；统计仍为单所属线程计数。MAC 地址读取与随机回退仍未接入，当前实验透传完整 L2 帧。
 
 `wait_irq`、`receive` 是目标侧新增的通知等待/上层取帧接口；`prepare_open`、`enable`、`stop_device_events` 是分层接入时的辅助步骤。它们不替代上述原函数名。当前原 C 对照的 Rust 桥也使用同名应用入口，但 C 文件和 C FFI 符号不变。
 

@@ -48,7 +48,7 @@ pub fn devm_alloc_etherdev<P>(name: &'static str, r#priv: P) -> net_device<P> {
         registered: false,
         address: [0; 6],
         stats: rtnl_link_stats64::default(),
-        tstats: devm_netdev_alloc_pcpu_stats(),
+        tstats: pcpu_sw_netstats::default(), // 字段先清零，驱动 probe 显式初始化统计
     }
 }
 /// 值类型随 net_device 回收；单线程实现不冒充 Linux per-CPU 并发语义。

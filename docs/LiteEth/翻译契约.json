@@ -42,16 +42,16 @@
       "source_line": 57,
       "target": "liteeth::liteeth_rx",
       "invariant": "按 slot/length 读取 SRAM，以同名 skb_put/eth_type_trans/netif_rx 交付完整帧；保持有界输入检查",
-      "target_path": "libos/src/drivers/liteeth_core.rs",
-      "target_line": 207
+      "target_path": "libos/src/drivers/liteeth.rs",
+      "target_line": 88
     },
     {
       "source_function": "liteeth_interrupt",
       "source_line": 92,
       "target": "liteeth::liteeth_interrupt",
       "invariant": "同名 request_irq 注册 EL0 回调；先 TX 后 RX，设备 W1C 在 kernel IRQ_ACK 前",
-      "target_path": "libos/src/drivers/liteeth_core.rs",
-      "target_line": 195
+      "target_path": "libos/src/drivers/liteeth.rs",
+      "target_line": 119
     },
     {
       "source_function": "liteeth_open",
@@ -59,7 +59,7 @@
       "target": "Driver::liteeth_open",
       "invariant": "清旧 pending → 绑定 Notification → 开设备事件",
       "target_path": "libos/src/drivers/liteeth.rs",
-      "target_line": 137
+      "target_line": 140
     },
     {
       "source_function": "liteeth_stop",
@@ -67,39 +67,39 @@
       "target": "Driver::liteeth_stop",
       "invariant": "停止发送 → 关闭两路设备事件 → IRQ_UNBIND",
       "target_path": "libos/src/drivers/liteeth.rs",
-      "target_line": 178
+      "target_line": 160
     },
     {
       "source_function": "liteeth_start_xmit",
       "source_line": 154,
       "target": "liteeth::liteeth_start_xmit",
       "invariant": "READY/队列检查 → 容量判断 → SRAM copy → SLOT/LENGTH/START → 统计和轮转",
-      "target_path": "libos/src/drivers/liteeth_core.rs",
-      "target_line": 168
+      "target_path": "libos/src/drivers/liteeth.rs",
+      "target_line": 173
     },
     {
       "source_function": "liteeth_get_stats64",
       "source_line": 195,
       "target": "liteeth::liteeth_get_stats64",
       "invariant": "单所属线程返回值类型统计，不构造 Linux 结构",
-      "target_path": "libos/src/drivers/liteeth_core.rs",
-      "target_line": 235
+      "target_path": "libos/src/drivers/liteeth.rs",
+      "target_line": 205
     },
     {
       "source_function": "liteeth_setup_slots",
       "source_line": 209,
       "target": "liteeth_setup_slots",
       "invariant": "延用 2/2/2048 默认值，并校验乘积和资源容量",
-      "target_path": "libos/src/drivers/liteeth_core.rs",
-      "target_line": 80
+      "target_path": "libos/src/drivers/liteeth.rs",
+      "target_line": 215
     },
     {
       "source_function": "liteeth_probe",
       "source_line": 233,
       "target": "Driver::liteeth_probe",
-      "invariant": "校验描述 → 独占固定 VA → 创建通知 → 映射两段设备区；失败逆序回滚",
+      "invariant": "创建网卡和统计 → 取 IRQ → 独占固定 VA/创建通知 → 映射两段设备区 → 设置槽位 → 本地注册；失败时 Drop 回滚",
       "target_path": "libos/src/drivers/liteeth.rs",
-      "target_line": 80
+      "target_line": 231
     },
     {
       "source_function": "liteeth_remove",
@@ -107,7 +107,7 @@
       "target": "Driver::liteeth_remove",
       "invariant": "先关闭/解绑，再释放映射、通知和固定 VA 所有权",
       "target_path": "libos/src/drivers/liteeth.rs",
-      "target_line": 188
+      "target_line": 319
     }
   ],
   "dependencies": [
@@ -704,7 +704,8 @@
     "feature": "linux-driver-api",
     "same_name_interface_count": 49,
     "mapping": "同名接口映射.json",
-    "previous_strategy": "首次实验直接把依赖合并到 liteeth.rs/liteeth_core.rs；本次抽出公共同名 Rust 封装，保留原 C 对照。"
+    "previous_strategy": "首次实验直接把依赖合并到 liteeth.rs/liteeth_core.rs；本次抽出公共同名 Rust 封装，保留原 C 对照。",
+    "source_layout": "9 个原函数集中在 liteeth.rs，按原 C 顺序排列；probe 显式初始化统计，liteeth_core.rs 仅保留旧入口转发。"
   },
   "naming_contract": {
     "rule": "原驱动中有对应关系的函数、寄存器常量、类型和字段保留原名；目标侧新增辅助对象单独说明",
