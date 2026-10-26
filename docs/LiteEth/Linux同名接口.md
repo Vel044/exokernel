@@ -6,7 +6,7 @@
 
 ## 原驱动函数也保留同名
 
-不仅外部依赖保留同名，原 `litex_liteeth.c` 的 9 个函数在 Rust 中也保持原名。9 个函数已集中在 `liteeth.rs`，按原 C 的顺序排列；`liteeth_core.rs` 只保留旧入口转发。下面链接指向实际逻辑，文件后面的 Driver 发送/统计入口只做应用转发。
+不仅外部依赖保留同名，原 `litex_liteeth.c` 的 9 个函数在 Rust 中也保持原名。9 个函数集中在 `liteeth.rs`，按原 C 的顺序排列。下面链接指向实际逻辑，文件后面的 Driver 发送/统计入口只做应用转发。
 
 | 原 C 函数 | Rust 同名实现 |
 | --- | --- |
@@ -43,11 +43,11 @@ Rust `liteeth_start_xmit` 按值接收 `sk_buff`：队列忙时以 `Busy(skb)` �
 ```text
 LiteEth 设备逻辑
   litex_read8 / litex_write8 / memcpy_toio / memcpy_fromio
-    → 通用 Io → 设备选出的寄存器区或 SRAM → IoRegion volatile + barrier
+    → Mmio 的同名方法选择寄存器区或 SRAM → 同名封装 → IoRegion volatile + barrier
   skb_put / netif_rx / netif_*queue / dev_sw_netstats_*
     → 公共线性 skb、队列、链路、统计（全部 EL0）
   devm_platform_ioremap_resource_byname
-    → ExoMapper → MAP_MMIO，Mapping::drop → UNMAP_MMIO
+    → Mapping::map → MAP_MMIO，Mapping::drop → UNMAP_MMIO
   request_irq(registration, intid, liteeth::liteeth_interrupt, 0, "liteeth")
     → 保存 EL0 函数指针 → ExoIrq → IRQ_BIND
   wait_and_dispatch(&mut device)
@@ -88,7 +88,7 @@ IRQ 上下文由 `&mut device` 在派发时传入，而不是保存 `void* dev_i
 | `dev_sw_netstats_tx_add` | [netdevice.rs](../../libos/src/linux_api/netdevice.rs#L105) |
 | `devm_alloc_etherdev` | [netdevice.rs](../../libos/src/linux_api/netdevice.rs#L41) |
 | `devm_netdev_alloc_pcpu_stats` | [netdevice.rs](../../libos/src/linux_api/netdevice.rs#L55) |
-| `devm_platform_ioremap_resource_byname` | [platform.rs](../../libos/src/linux_api/platform.rs#L33) |
+| `devm_platform_ioremap_resource_byname` | [platform.rs](../../libos/src/linux_api/platform.rs#L30) |
 | `eth_hw_addr_random` | [netdevice.rs](../../libos/src/linux_api/netdevice.rs#L119) |
 | `eth_type_trans` | [skbuff.rs](../../libos/src/linux_api/skbuff.rs#L60) |
 | `free_irq` | [interrupt.rs](../../libos/src/linux_api/interrupt.rs#L59) |
@@ -96,8 +96,8 @@ IRQ 上下文由 `&mut device` 在派发时传入，而不是保存 `void* dev_i
 | `litex_read8` | [io.rs](../../libos/src/linux_api/io.rs#L12) |
 | `litex_write16` | [io.rs](../../libos/src/linux_api/io.rs#L21) |
 | `litex_write8` | [io.rs](../../libos/src/linux_api/io.rs#L18) |
-| `memcpy_fromio` | [io.rs](../../libos/src/linux_api/io.rs#L24) |
-| `memcpy_toio` | [io.rs](../../libos/src/linux_api/io.rs#L27) |
+| `memcpy_fromio` | [io.rs](../../libos/src/linux_api/io.rs#L27) |
+| `memcpy_toio` | [io.rs](../../libos/src/linux_api/io.rs#L30) |
 | `module_platform_driver` | [module.rs](../../libos/src/linux_api/module.rs#L64) |
 | `net_ratelimit` | [printk.rs](../../libos/src/linux_api/printk.rs#L37) |
 | `netdev_alloc_skb_ip_align` | [skbuff.rs](../../libos/src/linux_api/skbuff.rs#L32) |
@@ -112,11 +112,11 @@ IRQ 上下文由 `&mut device` 在派发时传入，而不是保存 `void* dev_i
 | `netif_start_queue` | [netdevice.rs](../../libos/src/linux_api/netdevice.rs#L86) |
 | `netif_stop_queue` | [netdevice.rs](../../libos/src/linux_api/netdevice.rs#L89) |
 | `netif_wake_queue` | [netdevice.rs](../../libos/src/linux_api/netdevice.rs#L92) |
-| `of_get_ethdev_address` | [platform.rs](../../libos/src/linux_api/platform.rs#L57) |
-| `of_property_read_u32` | [platform.rs](../../libos/src/linux_api/platform.rs#L51) |
-| `platform_get_drvdata` | [platform.rs](../../libos/src/linux_api/platform.rs#L48) |
-| `platform_get_irq` | [platform.rs](../../libos/src/linux_api/platform.rs#L41) |
-| `platform_set_drvdata` | [platform.rs](../../libos/src/linux_api/platform.rs#L45) |
+| `of_get_ethdev_address` | [platform.rs](../../libos/src/linux_api/platform.rs#L53) |
+| `of_property_read_u32` | [platform.rs](../../libos/src/linux_api/platform.rs#L47) |
+| `platform_get_drvdata` | [platform.rs](../../libos/src/linux_api/platform.rs#L44) |
+| `platform_get_irq` | [platform.rs](../../libos/src/linux_api/platform.rs#L37) |
+| `platform_set_drvdata` | [platform.rs](../../libos/src/linux_api/platform.rs#L41) |
 | `register_netdev` | [netdevice.rs](../../libos/src/linux_api/netdevice.rs#L65) |
 | `request_irq` | [interrupt.rs](../../libos/src/linux_api/interrupt.rs#L41) |
 | `skb_put` | [skbuff.rs](../../libos/src/linux_api/skbuff.rs#L50) |

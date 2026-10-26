@@ -47,12 +47,12 @@ impl Model {
     }
 }
 impl Io for Model {
-    fn read(&self, o: usize) -> u32 {
+    fn litex_read32(&self, o: usize) -> u32 {
         let mut s = self.0.borrow_mut();
         s.ops.push(Op::Read(o));
         s.regs[o / 4]
     }
-    fn write(&self, o: usize, v: u32) {
+    fn litex_write32(&self, o: usize, v: u32) {
         let mut s = self.0.borrow_mut();
         s.ops.push(Op::Write(o, v));
         if o == LITEETH_WRITER_EV_PENDING || o == LITEETH_READER_EV_PENDING {
@@ -64,12 +64,12 @@ impl Io for Model {
             s.regs[LITEETH_READER_READY / 4] = 0;
         }
     }
-    fn copy_from(&self, o: usize, b: &mut [u8]) {
+    fn memcpy_fromio(&self, o: usize, b: &mut [u8]) {
         let mut s = self.0.borrow_mut();
         s.ops.push(Op::From(o, b.len()));
         b.copy_from_slice(&s.buffer[o..o + b.len()]);
     }
-    fn copy_to(&self, o: usize, b: &[u8]) {
+    fn memcpy_toio(&self, o: usize, b: &[u8]) {
         let mut s = self.0.borrow_mut();
         s.ops.push(Op::To(o, b.len()));
         s.buffer[o..o + b.len()].copy_from_slice(b);

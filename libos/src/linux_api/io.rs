@@ -2,30 +2,33 @@
 //! MMIO 同名操作及可测试后端。地址是已授权映射的 CPU VA，不是 PA/DMA address。
 //! LiteX 的 8/16 位逻辑寄存器仍执行 32 位小端事务；设备 SRAM 使用逐字节 volatile。
 use core::{marker::PhantomData, ptr::NonNull};
-/// 通用驱动/模型边界；寄存器区与数据窗口的布局由具体设备后端持有。
+/// 驱动、映射和测试模型统一使用 Linux 同名方法；具体后端选择寄存器区或 SRAM。
 pub trait Io {
-    fn read(&self, offset: usize) -> u32;
-    fn write(&self, offset: usize, value: u32);
-    fn copy_from(&self, offset: usize, out: &mut [u8]);
-    fn copy_to(&self, offset: usize, bytes: &[u8]);
+    fn litex_read32(&self, offset: usize) -> u32;
+    fn litex_write32(&self, offset: usize, value: u32);
+    fn memcpy_fromio(&self, offset: usize, out: &mut [u8]);
+    fn memcpy_toio(&self, offset: usize, bytes: &[u8]);
 }
 pub fn litex_read8(io: &impl Io, offset: usize) -> u8 {
     litex_read32(io, offset) as u8
 }
 pub fn litex_read32(io: &impl Io, offset: usize) -> u32 {
-    io.read(offset)
+    io.litex_read32(offset)
 }
 pub fn litex_write8(io: &impl Io, offset: usize, value: u8) {
-    io.write(offset, value as u32)
+    litex_write32(io, offset, value as u32)
 }
 pub fn litex_write16(io: &impl Io, offset: usize, value: u16) {
-    io.write(offset, value as u32)
+    litex_write32(io, offset, value as u32)
+}
+pub fn litex_write32(io: &impl Io, offset: usize, value: u32) {
+    io.litex_write32(offset, value)
 }
 pub fn memcpy_fromio(io: &impl Io, offset: usize, out: &mut [u8]) {
-    io.copy_from(offset, out)
+    io.memcpy_fromio(offset, out)
 }
 pub fn memcpy_toio(io: &impl Io, offset: usize, bytes: &[u8]) {
-    io.copy_to(offset, bytes)
+    io.memcpy_toio(offset, bytes)
 }
 pub fn barrier() {
     #[cfg(target_arch = "aarch64")]
@@ -60,7 +63,9 @@ impl<'a> IoRegion<'a> {
             .checked_add(count)
             .is_some_and(|end| end <= self.size));
     }
-    pub fn read32(&self, offset: usize) -> u32 {
+}
+impl Io for IoRegion<'_> {
+    fn litex_read32(&self, offset: usize) -> u32 {
         self.check(offset, 4);
         assert!((self.base.as_ptr() as usize + offset) % 4 == 0);
         // SAFETY: 已验证范围/对齐；volatile 读取真实设备寄存器，屏障在读取之后。
@@ -69,7 +74,7 @@ impl<'a> IoRegion<'a> {
         barrier();
         u32::from_le(value)
     }
-    pub fn write32(&self, offset: usize, value: u32) {
+    fn litex_write32(&self, offset: usize, value: u32) {
         self.check(offset, 4);
         assert!((self.base.as_ptr() as usize + offset) % 4 == 0);
         barrier();
@@ -79,7 +84,7 @@ impl<'a> IoRegion<'a> {
         }
         barrier();
     }
-    pub fn copy_from(&self, offset: usize, out: &mut [u8]) {
+    fn memcpy_fromio(&self, offset: usize, out: &mut [u8]) {
         self.check(offset, out.len());
         for (i, byte) in out.iter_mut().enumerate() {
             // SAFETY: 映射存活且范围已校验；out 为独占普通内存切片。
@@ -87,7 +92,7 @@ impl<'a> IoRegion<'a> {
         }
         barrier();
     }
-    pub fn copy_to(&self, offset: usize, bytes: &[u8]) {
+    fn memcpy_toio(&self, offset: usize, bytes: &[u8]) {
         self.check(offset, bytes.len());
         for (i, byte) in bytes.iter().enumerate() {
             // SAFETY: 目标位于设备映射内；复制完成的屏障先于后续设备 START。

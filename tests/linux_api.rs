@@ -275,38 +275,18 @@ fn platform_resources_properties_private_data_and_mac_are_generic() {
     assert_eq!(net.address, [2, 1, 2, 3, 4, 5]);
     p.address = Some([255; 6]);
     assert_eq!(of_get_ethdev_address(&p, &mut net), Err(EINVAL));
-    struct Mapping(Rc<RefCell<usize>>);
-    impl Drop for Mapping {
-        fn drop(&mut self) {
-            *self.0.borrow_mut() -= 1;
-        }
-    }
-    struct Maps(Rc<RefCell<usize>>);
-    impl Mapper for Maps {
-        type Mapping = Mapping;
-        fn map(&self, r: NamedResource) -> Result<Mapping, i32> {
-            assert_eq!(r.name, "control");
-            *self.0.borrow_mut() += 1;
-            Ok(Mapping(self.0.clone()))
-        }
-    }
-    let mapper = Maps(Rc::new(RefCell::new(0)));
-    let m = devm_platform_ioremap_resource_byname(&p, "control", &mapper).unwrap();
-    assert!(devm_platform_ioremap_resource_byname(&p, "missing", &mapper).is_err());
-    assert_eq!(*mapper.0.borrow(), 1);
-    drop(m);
-    assert_eq!(*mapper.0.borrow(), 0);
+    // MMIO 建立、失败回滚和解除由 QEMU 用真实 MAP/UNMAP 系统调用验收。
 }
 #[test]
 fn mmio_views_use_csr32_and_checked_volatile_byte_copies() {
     let mut words = [0u32; 8];
     // SAFETY: 测试数组存活且独占，不与普通数组访问并发；视图不超出实际数组。
     let region = unsafe { IoRegion::new(words.as_mut_ptr().cast(), 32) };
-    region.write32(0, 0x12345678);
-    assert_eq!(region.read32(0), 0x12345678);
-    region.copy_to(9, &[1, 2, 3]);
+    litex_write32(&region, 0, 0x12345678);
+    assert_eq!(litex_read32(&region, 0), 0x12345678);
+    memcpy_toio(&region, 9, &[1, 2, 3]);
     let mut out = [0; 3];
-    region.copy_from(9, &mut out);
+    memcpy_fromio(&region, 9, &mut out);
     assert_eq!(out, [1, 2, 3]);
 }
 #[test]
@@ -314,7 +294,7 @@ fn mmio_views_use_csr32_and_checked_volatile_byte_copies() {
 fn mmio_rejects_out_of_bounds_before_pointer_access() {
     let mut words = [0u32; 2];
     let region = unsafe { IoRegion::new(words.as_mut_ptr().cast(), 8) };
-    region.write32(8, 0);
+    litex_write32(&region, 8, 0);
 }
 #[test]
 fn errors_logging_rate_limits_and_metadata_keep_meaning() {

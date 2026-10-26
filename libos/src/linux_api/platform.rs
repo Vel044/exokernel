@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //! 命名资源、设备属性与私有数据的同名访问。资源描述本身不授予硬件权限。
-//! 实际映射由 Mapper 后端校验并建立，返回值拥有映射，Drop 负责 devm 式回收。
+//! 映射接口直接接 Exokernel 的 MMIO 系统调用，返回的 Mapping 在 Drop 时解除映射。
 use super::{
     error::{EINVAL, ENXIO},
     netdevice::net_device,
@@ -26,17 +26,13 @@ pub struct platform_device<'a, P = ()> {
     pub address: Option<[u8; 6]>,
     pub drvdata: Option<P>,
 }
-pub trait Mapper {
-    type Mapping;
-    fn map(&self, resource: NamedResource) -> Result<Self::Mapping, i32>;
-}
-pub fn devm_platform_ioremap_resource_byname<P, M: Mapper>(
+#[cfg(feature = "linux-driver-api")]
+pub fn devm_platform_ioremap_resource_byname<P>(
     dev: &platform_device<'_, P>,
     name: &str,
-    mapper: &M,
-) -> Result<M::Mapping, i32> {
+) -> Result<super::exo::Mapping, i32> {
     let resource = dev.resources.iter().find(|r| r.name == name).ok_or(ENXIO)?;
-    mapper.map(*resource)
+    super::exo::Mapping::map(*resource)
 }
 pub fn platform_get_irq<P>(dev: &platform_device<'_, P>, index: usize) -> Result<u32, i32> {
     dev.irqs.get(index).copied().ok_or(ENXIO)

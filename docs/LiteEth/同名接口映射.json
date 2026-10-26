@@ -95,8 +95,8 @@
     {
       "name": "devm_platform_ioremap_resource_byname",
       "path": "libos/src/linux_api/platform.rs",
-      "line": 33,
-      "contract": "调用者提供通用资源/属性；映射由后端校验授权，返回对象 Drop 回收。"
+      "line": 30,
+      "contract": "按名取得资源，直接接 MAP_MMIO；返回 Mapping 在 Drop 时 UNMAP，不额外传入映射后端。"
     },
     {
       "name": "eth_hw_addr_random",
@@ -143,13 +143,13 @@
     {
       "name": "memcpy_fromio",
       "path": "libos/src/linux_api/io.rs",
-      "line": 24,
+      "line": 27,
       "contract": "CSR32、小端、volatile 与屏障；映射必须存活，偏移/范围必须有效。"
     },
     {
       "name": "memcpy_toio",
       "path": "libos/src/linux_api/io.rs",
-      "line": 27,
+      "line": 30,
       "contract": "CSR32、小端、volatile 与屏障；映射必须存活，偏移/范围必须有效。"
     },
     {
@@ -239,31 +239,31 @@
     {
       "name": "of_get_ethdev_address",
       "path": "libos/src/linux_api/platform.rs",
-      "line": 57,
+      "line": 53,
       "contract": "调用者提供通用资源/属性；映射由后端校验授权，返回对象 Drop 回收。"
     },
     {
       "name": "of_property_read_u32",
       "path": "libos/src/linux_api/platform.rs",
-      "line": 51,
+      "line": 47,
       "contract": "调用者提供通用资源/属性；映射由后端校验授权，返回对象 Drop 回收。"
     },
     {
       "name": "platform_get_drvdata",
       "path": "libos/src/linux_api/platform.rs",
-      "line": 48,
+      "line": 44,
       "contract": "调用者提供通用资源/属性；映射由后端校验授权，返回对象 Drop 回收。"
     },
     {
       "name": "platform_get_irq",
       "path": "libos/src/linux_api/platform.rs",
-      "line": 41,
+      "line": 37,
       "contract": "调用者提供通用资源/属性；映射由后端校验授权，返回对象 Drop 回收。"
     },
     {
       "name": "platform_set_drvdata",
       "path": "libos/src/linux_api/platform.rs",
-      "line": 45,
+      "line": 41,
       "contract": "调用者提供通用资源/属性；映射由后端校验授权，返回对象 Drop 回收。"
     },
     {

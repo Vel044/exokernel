@@ -3,7 +3,7 @@
 use super::{
     interrupt::IrqBackend,
     io::IoRegion,
-    platform::{Mapper, NamedResource},
+    platform::NamedResource,
     printk::LogSink,
 };
 use crate::{notification::Notification, runtime};
@@ -12,8 +12,6 @@ fn fatal() -> ! {
     runtime::puts(b"[linux_api] resource cleanup failed\r\n");
     runtime::exit(0x703)
 }
-/// 不携带任何网卡寄存器地址；VA 由每个驱动的平台描述选择，EL1 仍审核授权。
-pub struct ExoMapper;
 pub struct Mapping {
     /// 拥有一次 Device-nGnRE 映射的 CPU VA 和精确长度，Drop 撤销，不拥有设备 SRAM。
     va: u64,
@@ -21,9 +19,9 @@ pub struct Mapping {
     /// 当前实现只允许拥有线程撤销映射，避免跨线程映射/撤销竞争。
     _owner: core::marker::PhantomData<*mut ()>,
 }
-impl Mapper for ExoMapper {
-    type Mapping = Mapping;
-    fn map(&self, resource: NamedResource) -> Result<Mapping, i32> {
+impl Mapping {
+    /// PA、长度和 EL0 VA 来自设备资源描述；EL1 校验授权，成功后由本对象拥有映射。
+    pub(super) fn map(resource: NamedResource) -> Result<Self, i32> {
         if resource.base & 4095 != 0
             || resource.user_va & 4095 != 0
             || resource.size == 0
@@ -40,8 +38,6 @@ impl Mapper for ExoMapper {
             _owner: core::marker::PhantomData,
         })
     }
-}
-impl Mapping {
     pub fn region(&self) -> IoRegion<'_> {
         // SAFETY: Mapping 成功后拥有整个已授权 Device VA，视图借用阻止提前 Drop 撤销。
         unsafe { IoRegion::new(self.va as *mut u8, self.size as usize) }

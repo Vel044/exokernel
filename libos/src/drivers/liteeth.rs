@@ -13,7 +13,7 @@ use crate::linux_api::{
 use crate::{
     drivers::platform::LiteEthInfo,
     linux_api::{
-        exo::{ExoIrq, ExoMapper, Mapping},
+        exo::{ExoIrq, Mapping},
         interrupt::{free_irq, request_irq, IrqRegistration},
         platform::{
             devm_platform_ioremap_resource_byname, platform_get_irq, platform_set_drvdata,
@@ -289,8 +289,8 @@ impl Driver {
         let irq_registration = IrqRegistration::new(ExoIrq::new()?);
 
         // MAP_MMIO：分别将寄存器区和设备 SRAM 的 PA 映射到 EL0 VA。
-        let base = devm_platform_ioremap_resource_byname(&pdev, "mac", &ExoMapper)?;
-        let buf_base = devm_platform_ioremap_resource_byname(&pdev, "buffer", &ExoMapper)?;
+        let base = devm_platform_ioremap_resource_byname(&pdev, "mac")?;
+        let buf_base = devm_platform_ioremap_resource_byname(&pdev, "buffer")?;
 
         // 读取槽位配置，再设置 RX/TX 在设备 SRAM 中的位置。
         let layout =
@@ -364,17 +364,17 @@ mod target {
         pub(super) buf_base: Mapping,
     }
     impl Io for Mmio {
-        fn read(&self, offset: usize) -> u32 {
-            self.base.region().read32(offset)
+        fn litex_read32(&self, offset: usize) -> u32 {
+            litex_read32(&self.base.region(), offset)
         }
-        fn write(&self, offset: usize, value: u32) {
-            self.base.region().write32(offset, value);
+        fn litex_write32(&self, offset: usize, value: u32) {
+            litex_write32(&self.base.region(), offset, value);
         }
-        fn copy_from(&self, offset: usize, out: &mut [u8]) {
-            self.buf_base.region().copy_from(offset, out);
+        fn memcpy_fromio(&self, offset: usize, out: &mut [u8]) {
+            memcpy_fromio(&self.buf_base.region(), offset, out);
         }
-        fn copy_to(&self, offset: usize, bytes: &[u8]) {
-            self.buf_base.region().copy_to(offset, bytes);
+        fn memcpy_toio(&self, offset: usize, bytes: &[u8]) {
+            memcpy_toio(&self.buf_base.region(), offset, bytes);
         }
     }
     pub struct Driver {

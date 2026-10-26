@@ -705,7 +705,7 @@
     "same_name_interface_count": 49,
     "mapping": "同名接口映射.json",
     "previous_strategy": "首次实验直接把依赖合并到 liteeth.rs/liteeth_core.rs；本次抽出公共同名 Rust 封装，保留原 C 对照。",
-    "source_layout": "9 个原函数集中在 liteeth.rs，按原 C 顺序排列；probe 显式初始化统计，liteeth_core.rs 仅保留旧入口转发。"
+    "source_layout": "9 个原函数集中在 liteeth.rs，按原 C 顺序排列；probe 显式初始化统计，旧入口转发文件已删除。"
   },
   "naming_contract": {
     "rule": "原驱动中有对应关系的函数、寄存器常量、类型和字段保留原名；目标侧新增辅助对象单独说明",
