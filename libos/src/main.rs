@@ -94,6 +94,8 @@ pub extern "C" fn _start(boot_info_va: u64) -> ! {
     }
     // SAFETY: 已校验固定 VA 和窗口长度，EL1 保证整段映射只读且在任务期间保留。
     let dtb = unsafe { core::slice::from_raw_parts(info.dtb_va as *const u8, info.dtb_size as usize) };
+    #[cfg(feature = "linux-driver-api")]
+    linux_api::exo::initialize(dtb, info.cpu_count);
     let devices = drivers::dtb::discover(dtb, info.cpu_count).unwrap_or_else(|_| {
         runtime::puts(b"[libos] DTB discovery failed\r\n");
         runtime::exit(0x106)
@@ -106,9 +108,17 @@ pub extern "C" fn _start(boot_info_va: u64) -> ! {
 
 // no_std 程序必须提供 panic handler；这里避免展开栈和依赖完整运行时。
 #[panic_handler]
-fn panic(_: &core::panic::PanicInfo) -> ! {
+fn panic(info: &core::panic::PanicInfo) -> ! {
     // UART 已切换时直接写 PL011；若尚未切换，则退回 SYS_PUTS。
-    runtime::puts(b"[libos] panic\r\n");
+    struct PanicWriter;
+    impl core::fmt::Write for PanicWriter {
+        fn write_str(&mut self, text: &str) -> core::fmt::Result {
+            runtime::puts(text.as_bytes());
+            Ok(())
+        }
+    }
+    use core::fmt::Write;
+    let _ = writeln!(PanicWriter, "[libos] panic: {info}\r");
     // 通知 EL1 以 panic 错误码清理当前任务的映射、IRQ 和 DMA 资源。
     runtime::exit(0x102)
 }

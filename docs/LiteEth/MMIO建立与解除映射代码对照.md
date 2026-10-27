@@ -16,7 +16,7 @@ if (IS_ERR(buf_base))
 	return PTR_ERR(buf_base);
 ```
 
-Rust [Driver::liteeth_probe](../../libos/src/drivers/liteeth.rs#L240)：
+Rust [Driver::liteeth_probe](../../libos/src/drivers/liteeth.rs)：
 
 ```rust
 let base = devm_platform_ioremap_resource_byname(&pdev, "mac")?;
@@ -83,44 +83,26 @@ dest_ptr = __devm_ioremap(dev, res->start, size, type);
 
 ### 3. Rust：从 liteeth_probe 的映射调用开始
 
-Rust [liteeth_probe](../../libos/src/drivers/liteeth.rs#L292) 也是映射两段：
+[liteeth_probe](../../libos/src/drivers/liteeth.rs) 同样调用两次，保留 `IS_ERR/PTR_ERR` 错误分支：
 
 ```rust
-let base = devm_platform_ioremap_resource_byname(&pdev, "mac")?;
-let buf_base = devm_platform_ioremap_resource_byname(&pdev, "buffer")?;
+(*r#priv).base = devm_platform_ioremap_resource_byname(pdev, c"mac".as_ptr());
+if IS_ERR((*r#priv).base) { return PTR_ERR((*r#priv).base) as i32; }
+let buf_base = devm_platform_ioremap_resource_byname(pdev, c"buffer".as_ptr());
+if IS_ERR(buf_base) { return PTR_ERR(buf_base) as i32; }
 ```
 
-`"mac"` 是寄存器区，`"buffer"` 是收发 SRAM。
+[platform.rs](../../libos/src/linux_api/platform.rs) 按名字取资源、检查物理范围占用、按页对齐，再登记 devm 记录：
 
-往下进入 [linux_api/platform.rs](../../libos/src/linux_api/platform.rs#L30)：
-
-```rust
-let resource = dev.resources.iter().find(|r| r.name == name).ok_or(ENXIO)?;//找name为mac 和buffer 资源
-super::exo::Mapping::map(*resource)//映射
+```text
+devm_platform_ioremap_resource_byname(pdev, name)
+  → 在 pdev.resources 找 mac / buffer，冲突返回 ERR_PTR(-EBUSY)
+  → exo::map → runtime::map_mmio(PA, 长度, EL0 VA)
+  → SYS_MAP_MMIO(6) → EL1 校验授权并建立 Device-nGnRE 页表
+  → 保存实际映射的 VA / 长度和资源占用；返回设备 VA（含页内偏移）
 ```
 
-先按名字取资源，再调用 `Mapping::map`。这一步对应 Linux 的“按名字找资源，再交给映射函数”。
-
-[Mapping::map](../../libos/src/linux_api/exo.rs#L24) 检查地址和长度对齐后：
-
-```rust
-runtime::map_mmio(resource.base, resource.size, resource.user_va)
-    .map_err(|_| -5)?;
-
-Ok(Mapping { va: resource.user_va, size: resource.size, /* ... */ })
-```
-
-三个映射参数是：设备 PA、字节长度、指定的 EL0 VA。成功后返回 `Mapping`，保存 VA 和长度，供驱动访问及后续自动解除映射。
-
-其中 [runtime::map_mmio](../../libos/src/runtime/mod.rs#L303) 执行：
-
-```rust
-svc(exo_abi::SYS_MAP_MMIO, pa, size, va)
-```
-
-进入 EL1 的 [sys_map_mmio](../../kernel/src/syscall/dispatch.rs#L469)，校验授权和地址范围，再建立 Device-nGnRE 映射；返回 0 表示成功。
-
-**Linux 的 `__devm_ioremap` 调用 `ioremap` 建立内核 VA 映射；你的 `Mapping::map` 通过 `SYS_MAP_MMIO` 建立 EL0 VA 映射。**
+Linux 返回内核 VA；这里返回 EL0 VA。驱动调用处没有额外后端参数，也不使用 `ExoMapper`。
 
 ### 4. 建好以后，LiteEth 怎样使用映射
 
@@ -132,15 +114,15 @@ len = litex_read32(priv->base + LITEETH_WRITER_LENGTH);
 memcpy_fromio(data, priv->rx_base + rx_slot * priv->slot_size, len);
 ```
 
-Rust [liteeth_rx](../../libos/src/drivers/liteeth.rs#L90)：
+Rust [liteeth_rx](../../libos/src/drivers/liteeth.rs)：
 
 ```rust
-let rx_slot = litex_read8(&self.base, LITEETH_WRITER_SLOT) as usize;
-let len = litex_read32(&self.base, LITEETH_WRITER_LENGTH) as usize;
-memcpy_fromio(&self.base, self.rx_base + rx_slot * self.slot_size, data);
+let rx_slot = litex_read8((*r#priv).base.byte_add(LITEETH_WRITER_SLOT));
+let len = litex_read32((*r#priv).base.byte_add(LITEETH_WRITER_LENGTH)) as i32;
+memcpy_fromio(data, (*r#priv).rx_base.byte_add(rx_slot as usize * (*r#priv).slot_size as usize), len as usize);
 ```
 
-源码中的 `Mmio`、`IoRegion` 也统一使用 `litex_read32`、`litex_write32`、`memcpy_fromio`、`memcpy_toio`；`Mmio` 选择寄存器或 SRAM 映射后，调用同名封装完成访问，见 [liteeth.rs](../../libos/src/drivers/liteeth.rs#L366) 和 [io.rs](../../libos/src/linux_api/io.rs#L6)。
+`.byte_add(offset)` 对应 C 的 `base + offset`。同名 I/O 接口收到完整 VA，由 [exo.rs](../../libos/src/linux_api/exo.rs) 执行 volatile 访问和 `dmb osh`；映射后每次读写不再系统调用。
 
 ## ② 解除映射：从 liteeth_remove 开始
 
@@ -226,45 +208,30 @@ void devm_ioremap_release(struct device *dev, void *res)
 
 `probe` 失败后，设备框架也会回收本次 probe 已登记的 devm 资源。
 
-### 2. Rust：先 stop，再由 Mapping::drop 执行 UNMAP
+### 2. Rust：remove 返回后，由设备框架回收
 
-Rust [Driver::liteeth_remove](../../libos/src/drivers/liteeth.rs#L328)：
-
-```rust
-pub fn liteeth_remove(mut self) -> Result<(), i32> {
-    self.liteeth_stop()?;                       // 关设备事件、解绑 IRQ
-    unregister_netdev(&mut self.r#priv.netdev)   // 变更本地注册状态
-} // self 被消费；随后释放字段
-```
-
-`self` 拥有 `liteeth<Mmio>`；`Mmio` 拥有两份 `Mapping`。字段释放时，两段映射分别进入 [Mapping::drop](../../libos/src/linux_api/exo.rs#L46)：
+[liteeth_remove](../../libos/src/drivers/liteeth.rs) 保留 `pdev` 参数和原调用顺序：
 
 ```rust
-fn drop(&mut self) {
-    if runtime::unmap_mmio(self.va, self.size).is_err() {
-        fatal();
-    }
-}
+let netdev = platform_get_drvdata(pdev).cast::<net_device>();
+unregister_netdev(netdev);
 ```
 
-`runtime::unmap_mmio` 执行 `SYS_UNMAP_MMIO(11)`：`x0=EL0 VA`、`x1=长度`。EL1 [sys_unmap_mmio](../../kernel/src/syscall/dispatch.rs#L524) 校验对齐和长度，用 VA 与页数匹配当前任务的映射记录，再执行：
-
-```rust
-crate::task::remove_mmio(user_va, pages); // 核对并移除任务映射记录
-crate::mmu::unmap(root, user_va, pages);  // 撤销页表项
-crate::mmu::flush_el1_tlb();             // 使旧地址翻译失效
-```
-
-以上是成功路径摘录；实际实现会检查 `remove_mmio` 的返回值，以及 `unmap` 返回的页数是否完整，失败则返回错误。
+`unregister_netdev` 自动关闭仍在运行的网卡，调用原 `liteeth_stop`，同步结束 IRQ 回调；本身不解除 MMIO。
 
 ```text
-EL0 liteeth_remove
-  → liteeth_stop → free_irq → SYS_IRQ_UNBIND
-  → unregister_netdev
-  → Driver / Mmio 字段释放
-    → Mapping::drop（mac、buffer 各一次）
-    → runtime::unmap_mmio → SYS_UNMAP_MMIO(11)
-EL1 sys_unmap_mmio → 核对映射记录 → 撤销 PTE → TLB 失效
+应用 Driver::remove → module::detach
+  → liteeth_remove(pdev)
+      → unregister_netdev(netdev)
+          → 仍运行时 dev_close → liteeth_stop → free_irq
+  ← liteeth_remove 返回
+  → devres_release_all(&pdev.dev)                 设备框架继续清理
+      → 按登记的逆序解除 buffer、mac 映射
+          → exo::unmap → runtime::unmap_mmio
+          → SYS_UNMAP_MMIO(11)：x0=VA，x1=映射长度
+      → 释放物理范围占用、统计和 netdev 堆对象
 ```
 
-若调用者直接丢弃 `Driver`，它的 `Drop` 也先调用 `liteeth_stop`，再释放字段；`probe` 中途失败时，已创建的 `Mapping` 会因 `?` 返回而自动 Drop。例如第二段 `buffer` 映射失败，第一段 `mac` 会被解除映射。
+EL1 核对当前任务映射记录，撤销 PTE 并使 TLB 失效。解除映射不释放设备 SRAM。`probe` 中途失败也由 `module::bind` 执行同一套 devm 回滚。
+
+实现：[module.rs](../../libos/src/linux_api/module.rs)、[platform.rs](../../libos/src/linux_api/platform.rs)、[exo.rs](../../libos/src/linux_api/exo.rs)。

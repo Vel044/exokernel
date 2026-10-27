@@ -1,245 +1,245 @@
 {
   "linux_version": "6.12.75",
   "source": "/Users/vel/Work/RobotOS/Lerobot/linux/drivers/net/ethernet/litex/litex_liteeth.c",
-  "sha256": "bb8b3c2cac2f8821647c66cf00a96adf7eed02b0c6c9acc925d37eb7b628285e",
+  "sha256": "28ffe4097b0c95c97dd8c57570acccfb940d08a7d3be72c62a456507938cf76e",
   "scope": "Complete lexical direct function-like external names (49), 9 driver functions. Not recursive Linux dependency closure. SVG 01 is an IPv4 socket flow example, not a trace of the supplied guest binaries.",
   "functions": {
     "liteeth_rx": {
-      "line": 57,
+      "line": 58,
       "calls": {
         "netdev_priv": [
-          59
+          60
         ],
         "litex_read8": [
-          65
-        ],
-        "litex_read32": [
           66
         ],
+        "litex_read32": [
+          67
+        ],
         "netdev_alloc_skb_ip_align": [
-          71
+          72
         ],
         "netdev_err": [
-          73
+          74
         ],
         "skb_put": [
-          77
-        ],
-        "memcpy_fromio": [
           78
         ],
-        "eth_type_trans": [
+        "memcpy_fromio": [
           79
         ],
+        "eth_type_trans": [
+          80
+        ],
         "dev_sw_netstats_rx_add": [
-          81
+          82
         ],
         "netif_rx": [
-          83
+          84
         ]
       }
     },
     "liteeth_interrupt": {
-      "line": 92,
+      "line": 94,
       "calls": {
         "netdev_priv": [
-          95
+          97
         ],
         "litex_read8": [
-          98,
-          105
+          100,
+          107
         ],
         "netif_queue_stopped": [
-          100
+          102
         ],
         "netif_wake_queue": [
-          101
+          103
         ],
         "litex_write8": [
-          102,
-          108
+          104,
+          110
         ],
         "liteeth_rx": [
-          107
+          109
         ]
       }
     },
     "liteeth_open": {
-      "line": 114,
+      "line": 117,
       "calls": {
         "netdev_priv": [
-          116
+          119
         ],
         "litex_write8": [
-          120,
-          121,
-          130,
-          131
+          123,
+          124,
+          133,
+          134
         ],
         "request_irq": [
-          123
+          126
         ],
         "netdev_err": [
-          125
+          128
         ],
         "netif_carrier_on": [
-          133
+          136
         ],
         "netif_start_queue": [
-          134
+          137
         ]
       }
     },
     "liteeth_stop": {
-      "line": 139,
+      "line": 143,
       "calls": {
         "netdev_priv": [
-          141
+          145
         ],
         "netif_stop_queue": [
-          143
-        ],
-        "netif_carrier_off": [
-          144
-        ],
-        "litex_write8": [
-          146,
           147
         ],
+        "netif_carrier_off": [
+          148
+        ],
+        "litex_write8": [
+          150,
+          151
+        ],
         "free_irq": [
-          149
+          153
         ]
       }
     },
     "liteeth_start_xmit": {
-      "line": 154,
+      "line": 159,
       "calls": {
         "netdev_priv": [
-          157
+          162
         ],
         "litex_read8": [
-          160
+          165
         ],
         "net_ratelimit": [
-          161,
-          171
+          166,
+          176
         ],
         "netdev_err": [
-          162,
-          172
+          167,
+          177
         ],
         "netif_stop_queue": [
-          164
+          169
         ],
         "unlikely": [
-          170
+          175
         ],
         "dev_kfree_skb_any": [
-          174,
-          190
+          179,
+          195
         ],
         "memcpy_toio": [
-          182
+          187
         ],
         "litex_write8": [
-          183,
-          185
+          188,
+          190
         ],
         "litex_write16": [
-          184
+          189
         ],
         "dev_sw_netstats_tx_add": [
-          187
+          192
         ]
       }
     },
     "liteeth_get_stats64": {
-      "line": 195,
+      "line": 202,
       "calls": {
         "netdev_stats_to_stats64": [
-          198
+          204
         ],
         "dev_fetch_sw_netstats": [
-          199
+          205
         ]
       }
     },
     "liteeth_setup_slots": {
-      "line": 209,
+      "line": 217,
       "calls": {
         "of_property_read_u32": [
-          214,
-          220,
-          226
+          222,
+          228,
+          234
         ],
         "dev_dbg": [
-          216,
-          222,
-          228
+          224,
+          230,
+          236
         ]
       }
     },
     "liteeth_probe": {
-      "line": 233,
+      "line": 242,
       "calls": {
         "devm_alloc_etherdev": [
-          240
+          249
         ],
         "SET_NETDEV_DEV": [
-          244
+          253
         ],
         "platform_set_drvdata": [
-          245
+          254
         ],
         "netdev_priv": [
-          247
-        ],
-        "devm_netdev_alloc_pcpu_stats": [
-          251
-        ],
-        "platform_get_irq": [
           256
         ],
-        "devm_platform_ioremap_resource_byname": [
-          261,
+        "devm_netdev_alloc_pcpu_stats": [
+          260
+        ],
+        "platform_get_irq": [
           265
         ],
+        "devm_platform_ioremap_resource_byname": [
+          270,
+          274
+        ],
         "IS_ERR": [
-          262,
-          266
+          271,
+          275
         ],
         "PTR_ERR": [
-          263,
-          267
+          272,
+          276
         ],
         "liteeth_setup_slots": [
-          269
+          278
         ],
         "of_get_ethdev_address": [
-          279
+          288
         ],
         "eth_hw_addr_random": [
-          281
+          290
         ],
         "register_netdev": [
-          285
+          294
         ],
         "dev_err": [
-          287
+          296
         ],
         "netdev_info": [
-          291
+          300
         ]
       }
     },
     "liteeth_remove": {
-      "line": 297,
+      "line": 307,
       "calls": {
         "platform_get_drvdata": [
-          299
+          309
         ],
         "unregister_netdev": [
-          301
+          311
         ]
       }
     }
@@ -526,5 +526,6 @@
     "rx_queue_and_delivery": "net/core/dev.c:5281-5370,6206-6230",
     "platform_callbacks": "drivers/base/platform.c:1335,1379-1424",
     "litex_csr_access": "include/linux/litex.h:12-19,38-76"
-  }
+  },
+  "code_token_sha256": "8a529b65b903970915b08691ec9ee807c661887c2be9fb4a6c510d540f0dc74f"
 }

@@ -98,13 +98,13 @@ pub fn discover(bytes: &[u8], cpu_count: u32) -> Result<DeviceInfo, Error> {
             {
                 return Err(Error::InvalidResource);
             }
-            let mut address = [0; 6];
-            if let Some(p) = node
-                .property("local-mac-address")
-                .or_else(|| node.property("mac-address"))
-            {
-                address = p.value.try_into().map_err(|_| Error::InvalidResource)?;
-            }
+            let address = ["mac-address", "local-mac-address", "address"].iter()
+                .filter_map(|name| node.property(name))
+                .filter_map(|p| <[u8; 6]>::try_from(p.value).ok())
+                .find(|address| *address != [0; 6] && address[0] & 1 == 0)
+                .unwrap_or([0; 6]);
+            let property_presence = ["litex,rx-slots", "litex,tx-slots", "litex,slot-size"]
+                .iter().enumerate().fold(0, |mask, (i, name)| mask | ((node.property(name).is_some() as u8) << i));
             info.liteeth = Some(LiteEthInfo {
                 mac,
                 buffer: DeviceResource {
@@ -116,6 +116,7 @@ pub fn discover(bytes: &[u8], cpu_count: u32) -> Result<DeviceInfo, Error> {
                 tx_slots,
                 slot_size,
                 address,
+                property_presence,
             });
         }
         if compatible(node, "virtio,mmio") {

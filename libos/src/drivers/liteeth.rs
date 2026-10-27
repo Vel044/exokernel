@@ -1,526 +1,313 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//! 原生 Rust LiteEth 驱动；9 个原函数按 Linux C 文件的顺序集中排列。
-//! 设备逻辑在 EL0 执行；linux_api 提供同名接口，exo 后端接 MMIO、IRQ 和 Notification。
-
-pub use crate::linux_api::{io::Io, netdevice::rtnl_link_stats64};
+//! Linux LiteEth 逐函数翻译：入口、参数名、返回协议和设备分支保持原顺序。
+//! 所有入口由网络/platform 框架调用；unsafe 前提是 pdev/netdev/skb 指针有效且资源仍存活。
+//! EL0 设备访问经 linux_api，EL1 只负责映射授权、IRQ 路由和通知。
+#![allow(dead_code, non_camel_case_types, non_upper_case_globals)]
 use crate::linux_api::{
-    io::*,
-    netdevice::*,
-    platform::{of_property_read_u32, platform_device},
-    skbuff::*,
+    error::*, interrupt::*, io::*, module::*, netdevice::*, platform::*, printk::*, skbuff::*,
 };
-#[cfg(feature = "linux-driver-api")]
 use crate::{
-    drivers::platform::LiteEthInfo,
-    linux_api::{
-        exo::{ExoIrq, Mapping},
-        interrupt::{free_irq, request_irq, IrqRegistration},
-        platform::{
-            devm_platform_ioremap_resource_byname, platform_get_irq, platform_set_drvdata,
-            NamedResource,
-        },
-    },
-    runtime,
+    dev_dbg, dev_err, devm_netdev_alloc_pcpu_stats, module_platform_driver, netdev_err,
+    netdev_info, MODULE_AUTHOR, MODULE_DESCRIPTION, MODULE_DEVICE_TABLE, MODULE_LICENSE,
 };
-#[cfg(feature = "linux-driver-api")]
-use core::{
-    marker::PhantomData,
-    sync::atomic::{AtomicBool, Ordering},
-};
-
-// 与原 C 完全同名的寄存器偏移；WRITER 是 RX，READER 是 TX，不按软件收发方向改名。
+use core::{ffi::c_void, ptr};
 pub const LITEETH_WRITER_SLOT: usize = 0x00;
 pub const LITEETH_WRITER_LENGTH: usize = 0x04;
-#[allow(dead_code)] // 原驱动保留但当前路径未使用的硬件定义。
 pub const LITEETH_WRITER_ERRORS: usize = 0x08;
-#[allow(dead_code)] // 原驱动保留但当前路径未使用的硬件定义。
 pub const LITEETH_WRITER_EV_STATUS: usize = 0x0C;
 pub const LITEETH_WRITER_EV_PENDING: usize = 0x10;
 pub const LITEETH_WRITER_EV_ENABLE: usize = 0x14;
 pub const LITEETH_READER_START: usize = 0x18;
 pub const LITEETH_READER_READY: usize = 0x1C;
-#[allow(dead_code)] // 原驱动保留但当前路径未使用的硬件定义。
 pub const LITEETH_READER_LEVEL: usize = 0x20;
 pub const LITEETH_READER_SLOT: usize = 0x24;
 pub const LITEETH_READER_LENGTH: usize = 0x28;
-#[allow(dead_code)] // 原驱动保留但当前路径未使用的硬件定义。
 pub const LITEETH_READER_EV_STATUS: usize = 0x2C;
 pub const LITEETH_READER_EV_PENDING: usize = 0x30;
 pub const LITEETH_READER_EV_ENABLE: usize = 0x34;
-#[allow(dead_code)] // 原驱动保留但当前路径未使用的硬件定义。
 pub const LITEETH_PREAMBLE_CRC: usize = 0x38;
-#[allow(dead_code)] // 原驱动保留但当前路径未使用的硬件定义。
 pub const LITEETH_PREAMBLE_ERRORS: usize = 0x3C;
-#[allow(dead_code)] // 原驱动保留但当前路径未使用的硬件定义。
 pub const LITEETH_CRC_ERRORS: usize = 0x40;
-#[allow(dead_code)] // 原驱动保留但当前路径未使用的硬件定义。
 pub const LITEETH_PHY_CRG_RESET: usize = 0x00;
-#[allow(dead_code)] // 原驱动保留但当前路径未使用的硬件定义。
 pub const LITEETH_MDIO_W: usize = 0x04;
-#[allow(dead_code)] // 原驱动保留但当前路径未使用的硬件定义。
 pub const LITEETH_MDIO_R: usize = 0x0C;
 pub const DRV_NAME: &str = "liteeth";
-pub const MAX_FRAME: usize = 2048;
-// TX 侧的固定 skb 容量多留一个字节，用于保留并检测超过设备槽容量的报文。
-pub const MAX_TX_SKB_SIZE: usize = MAX_FRAME + 1;
 
-// 对应原 C 的 struct liteeth；base 持有寄存器和设备 SRAM 两段映射。
-#[allow(non_camel_case_types)]
-pub struct liteeth<I: Io> {
-    base: I,            // MMIO 访问后端
-    netdev: net_device, // 网卡对象：队列、链路和统计
-    slot_size: usize,   // 每槽字节数
-
-    tx_slot: usize,      // 下一次发送槽
-    num_tx_slots: usize, // 发送槽数
-    tx_base: usize,      // TX 区在设备 SRAM 中的偏移
-
-    #[allow(dead_code)]
-    rx_slot: usize, // 初始接收槽；收包时以硬件寄存器为准
-    num_rx_slots: usize, // 接收槽数
-    rx_base: usize,      // RX 区在设备 SRAM 中的偏移
-
-    opened: bool,                      // 已绑定 IRQ 并启用设备事件
-    receive_queue: RxQueue<MAX_FRAME>, // 保存完整帧，等待上层取走
-    pub delivery_drops: u64,           // 交付队列满时的丢包数
+// 与原 C 的字段、名称和用途一致；地址均为已映射 EL0 VA。
+pub struct liteeth {
+    pub base: *mut c_void,       // CSR MMIO 基址
+    pub netdev: *mut net_device, // 所属网卡
+    pub dev: *mut device,        // 父设备，拥有 devm 资源
+    pub slot_size: u32,          // 单槽字节数
+    pub tx_slot: u32,            // 下一发送槽
+    pub num_tx_slots: u32,       // TX 槽数
+    pub tx_base: *mut c_void,    // TX SRAM 基址
+    pub rx_slot: u32,            // 初始 RX 槽号
+    pub num_rx_slots: u32,       // RX 槽数
+    pub rx_base: *mut c_void,    // RX SRAM 基址
 }
 
-impl<I: Io> liteeth<I> {
-    // 接收一帧：设备 SRAM → skb → 本地队列。
-    pub(crate) fn liteeth_rx(&mut self) {
-        // 读设备寄存器：这帧在哪个槽、有多少字节。
-        let rx_slot = litex_read8(&self.base, LITEETH_WRITER_SLOT) as usize;
-        let len = litex_read32(&self.base, LITEETH_WRITER_LENGTH) as usize;
-        // 比原 C 多检查槽号、槽容量和以太网头，避免设备给出越界范围。
-        if len < 14 || len > MAX_FRAME || len > self.slot_size || rx_slot >= self.num_rx_slots {
-            self.netdev.stats.rx_errors += 1;
-            self.netdev.stats.rx_dropped += 1;
-            return;
+// 接收一帧；两个失败分支汇入原 rx_drop 清理位置。
+pub unsafe fn liteeth_rx(netdev: *mut net_device) -> i32 {
+    let r#priv = netdev_priv(netdev).cast::<liteeth>();
+    let rx_slot = litex_read8((*r#priv).base.byte_add(LITEETH_WRITER_SLOT));
+    let len = litex_read32((*r#priv).base.byte_add(LITEETH_WRITER_LENGTH)) as i32;
+    'rx_drop: {
+        if len == 0 || len > 2048 {
+            break 'rx_drop;
         }
-        // 目标侧队列满时保留先到的帧，仍累计本次有效收包。
-        if self.receive_queue.is_full() {
-            dev_sw_netstats_rx_add(&mut self.netdev, len);
-            self.delivery_drops += 1;
-            return;
+        let skb = netdev_alloc_skb_ip_align(netdev, len as u32);
+        if skb.is_null() {
+            netdev_err!(netdev, "couldn't get memory\n");
+            break 'rx_drop;
         }
-        // 准备 skb；内联容量固定，已校验 len。
-        let mut skb =
-            netdev_alloc_skb_ip_align::<_, MAX_FRAME>(&self.netdev, len).expect("已验证的 RX 容量");
-        let data = skb_put(&mut skb, len).unwrap(); // 扩展有效区，取得写入位置
-        memcpy_fromio(&self.base, self.rx_base + rx_slot * self.slot_size, data); // 设备 SRAM → skb
-        eth_type_trans(&mut skb, &self.netdev).expect("已验证的以太网头"); // 处理协议头
-
-        // 累计收包统计，再交给本地队列；不进入 Linux IP 协议栈。
-        dev_sw_netstats_rx_add(&mut self.netdev, len);
-        if netif_rx(&mut self.receive_queue, skb).is_err() {
-            self.delivery_drops += 1;
-        }
+        // 扩展 skb 数据区，再把设备 SRAM 复制到堆缓冲区。
+        let data = skb_put(skb, len as u32);
+        memcpy_fromio(
+            data,
+            (*r#priv)
+                .rx_base
+                .byte_add(rx_slot as usize * (*r#priv).slot_size as usize),
+            len as usize,
+        );
+        // 解析协议头，交给接收核心；netif_rx 取得 skb 所有权。
+        (*skb).protocol = eth_type_trans(skb, netdev);
+        dev_sw_netstats_rx_add(netdev, len as u32);
+        return netif_rx(skb);
     }
-
-    // 处理收发中断；保持原 C 的先 TX 后 RX 顺序。
-    pub fn liteeth_interrupt(&mut self) {
-        // 先处理 TX：恢复发送队列，再写 1 清 pending。
-        let reg = litex_read8(&self.base, LITEETH_READER_EV_PENDING);
-        if reg != 0 {
-            if netif_queue_stopped(&self.netdev) {
-                netif_wake_queue(&mut self.netdev);
-            }
-            litex_write8(&self.base, LITEETH_READER_EV_PENDING, reg);
-        }
-        // 再处理 RX：先复制帧，再清 pending；返回后由派发器 ACK 内核 IRQ。
-        let reg = litex_read8(&self.base, LITEETH_WRITER_EV_PENDING);
-        if reg != 0 {
-            self.liteeth_rx();
-            litex_write8(&self.base, LITEETH_WRITER_EV_PENDING, reg);
-        }
-    }
+    (*netdev).stats.rx_dropped += 1;
+    (*netdev).stats.rx_errors += 1;
+    NET_RX_DROP
 }
 
-#[cfg(feature = "linux-driver-api")]
-impl Driver {
-    // 打开网卡：清 pending → 绑定 IRQ → 启用设备。
-    pub fn liteeth_open(&mut self) -> Result<(), i32> {
-        if self.irq_registration.is_bound() {
-            return Err(-16);
+// 原 IRQ 回调；清设备 pending 后由目标 IRQ 服务 ACK 重新开放 GIC。
+pub unsafe fn liteeth_interrupt(irq: i32, dev_id: *mut c_void) -> irqreturn_t {
+    let netdev = dev_id.cast::<net_device>();
+    let r#priv = netdev_priv(netdev).cast::<liteeth>();
+    let reg = litex_read8((*r#priv).base.byte_add(LITEETH_READER_EV_PENDING));
+    if reg != 0 {
+        if netif_queue_stopped(netdev) {
+            netif_wake_queue(netdev);
         }
-        self.r#priv.prepare_open()?; // 检查状态，清 RX/TX 旧 pending
-
-        // IRQ_BIND：EL1 校验 INTID 授权并关联通知；回调函数仍保存在 EL0。
-        request_irq(
-            &mut self.irq_registration,
-            self.irq,
-            liteeth::liteeth_interrupt,
-            0,
-            DRV_NAME,
-        )?;
-        // 写设备 EV_ENABLE，标记链路连接并开放发送队列。
-        self.r#priv.enable();
-        Ok(())
+        litex_write8((*r#priv).base.byte_add(LITEETH_READER_EV_PENDING), reg);
     }
-
-    // 停止网卡；所属线程串行执行，关闭时没有并行回调。
-    pub fn liteeth_stop(&mut self) -> Result<(), i32> {
-        if self.irq_registration.is_bound() {
-            self.r#priv.stop_device_events(); // 停队列、断链路、关闭设备事件
-
-            // IRQ_UNBIND：禁用 GIC 路由；失败时保留绑定，禁止继续回收资源。
-            free_irq(&mut self.irq_registration)?;
-        }
-        Ok(())
+    let reg = litex_read8((*r#priv).base.byte_add(LITEETH_WRITER_EV_PENDING));
+    if reg != 0 {
+        liteeth_rx(netdev);
+        litex_write8((*r#priv).base.byte_add(LITEETH_WRITER_EV_PENDING), reg);
     }
+    let _ = irq; // 原驱动不使用 irq 参数，仍保留定义。
+    IRQ_HANDLED
 }
 
-impl<I: Io> liteeth<I> {
-    // 对应 ndo_start_xmit：BUSY 归还 skb；OK 时驱动消费或丢弃 skb。
-    pub fn liteeth_start_xmit<const N: usize>(
-        &mut self,
-        skb: sk_buff<N>,
-    ) -> Result<NetdevTxOutcome<N>, i32> {
-        let data = skb.data();
-        let len = data.len();
-        // 仅已打开的网卡接受完整以太网帧。
-        if !self.opened || len < 14 {
-            return Err(-22);
+// 清旧事件、注册 IRQ，成功后才启用设备。
+pub unsafe fn liteeth_open(netdev: *mut net_device) -> i32 {
+    let r#priv = netdev_priv(netdev).cast::<liteeth>();
+    litex_write8((*r#priv).base.byte_add(LITEETH_WRITER_EV_PENDING), 1);
+    litex_write8((*r#priv).base.byte_add(LITEETH_READER_EV_PENDING), 1);
+    let err = request_irq(
+        (*netdev).irq,
+        liteeth_interrupt,
+        0,
+        (*netdev).name.as_ptr(),
+        netdev.cast(),
+    );
+    if err != 0 {
+        netdev_err!(netdev, "failed to request irq {}\n", (*netdev).irq);
+        return err;
+    }
+    litex_write8((*r#priv).base.byte_add(LITEETH_WRITER_EV_ENABLE), 1);
+    litex_write8((*r#priv).base.byte_add(LITEETH_READER_EV_ENABLE), 1);
+    netif_carrier_on(netdev);
+    netif_start_queue(netdev);
+    0
+}
+
+// 先关闭设备事件，再释放注册的 IRQ。
+pub unsafe fn liteeth_stop(netdev: *mut net_device) -> i32 {
+    let r#priv = netdev_priv(netdev).cast::<liteeth>();
+    netif_stop_queue(netdev);
+    netif_carrier_off(netdev);
+    litex_write8((*r#priv).base.byte_add(LITEETH_WRITER_EV_ENABLE), 0);
+    litex_write8((*r#priv).base.byte_add(LITEETH_READER_EV_ENABLE), 0);
+    free_irq((*netdev).irq, netdev.cast());
+    0
+}
+
+// BUSY 不释放 skb；成功或超长丢弃时消费 skb，与原返回协议一致。
+pub unsafe fn liteeth_start_xmit(skb: *mut sk_buff, netdev: *mut net_device) -> netdev_tx_t {
+    let r#priv = netdev_priv(netdev).cast::<liteeth>();
+    // 硬件忙时停队列并返回 BUSY，不释放原 skb。
+    if litex_read8((*r#priv).base.byte_add(LITEETH_READER_READY)) == 0 {
+        if net_ratelimit() != 0 {
+            netdev_err!(netdev, "LITEETH_READER_READY not ready\n");
         }
-        // BUSY 时保留原帧和槽号；收到 TX 事件后再重试。
-        if netif_queue_stopped(&self.netdev) {
-            return Ok(NetdevTxOutcome::Busy(skb));
+        netif_stop_queue(netdev);
+        return NETDEV_TX_BUSY;
+    }
+    if unlikely((*skb).len > (*r#priv).slot_size) {
+        if net_ratelimit() != 0 {
+            netdev_err!(netdev, "tx packet too big\n");
         }
-        if litex_read8(&self.base, LITEETH_READER_READY) == 0 {
-            netif_stop_queue(&mut self.netdev);
-            return Ok(NetdevTxOutcome::Busy(skb));
-        }
-        // 超长帧按原 C 语义消费并丢弃，不提交硬件。
-        if len > self.slot_size {
-            self.netdev.stats.tx_errors += 1;
-            self.netdev.stats.tx_dropped += 1;
-            dev_kfree_skb_any(skb);
-            return Ok(NetdevTxOutcome::Consumed);
-        }
-        // 先复制数据到设备 SRAM，再写槽号、长度和 START。
-        let txbuffer = self.tx_base + self.tx_slot * self.slot_size;
-        memcpy_toio(&self.base, txbuffer, data);
-        litex_write8(&self.base, LITEETH_READER_SLOT, self.tx_slot as u8);
-        litex_write16(&self.base, LITEETH_READER_LENGTH, len as u16);
-        litex_write8(&self.base, LITEETH_READER_START, 1);
-        // 累计发送统计，切换到下一个发送槽。
-        dev_sw_netstats_tx_add(&mut self.netdev, 1, len);
-        self.tx_slot = (self.tx_slot + 1) % self.num_tx_slots;
         dev_kfree_skb_any(skb);
-        Ok(NetdevTxOutcome::Consumed)
+        (*netdev).stats.tx_dropped += 1;
+        (*netdev).stats.tx_errors += 1;
+        return NETDEV_TX_OK;
     }
+    // 数据写入 SRAM 后，再写槽号、长度和 START。
+    let txbuffer = (*r#priv)
+        .tx_base
+        .byte_add((*r#priv).tx_slot as usize * (*r#priv).slot_size as usize);
+    memcpy_toio(txbuffer, (*skb).data, (*skb).len as usize);
+    litex_write8(
+        (*r#priv).base.byte_add(LITEETH_READER_SLOT),
+        (*r#priv).tx_slot as u8,
+    );
+    litex_write16(
+        (*r#priv).base.byte_add(LITEETH_READER_LENGTH),
+        (*skb).len as u16,
+    );
+    litex_write8((*r#priv).base.byte_add(LITEETH_READER_START), 1);
+    dev_sw_netstats_tx_add(netdev, 1, (*skb).len);
+    (*r#priv).tx_slot = ((*r#priv).tx_slot + 1) % (*r#priv).num_tx_slots;
+    dev_kfree_skb_any(skb);
+    NETDEV_TX_OK
+}
 
-    // 汇总软件统计。
-    pub fn liteeth_get_stats64(&self) -> rtnl_link_stats64 {
-        // 基础错误/丢包统计 + 单所属线程的收发包/字节统计。
-        let mut stats = rtnl_link_stats64::default();
-        netdev_stats_to_stats64(&mut stats, &self.netdev.stats);
-        dev_fetch_sw_netstats(&mut stats, &self.netdev.tstats);
-        stats
+// 通过原 stats 输出参数返回统计。
+pub unsafe fn liteeth_get_stats64(netdev: *mut net_device, stats: *mut rtnl_link_stats64) {
+    netdev_stats_to_stats64(stats, ptr::addr_of!((*netdev).stats));
+    dev_fetch_sw_netstats(stats, (*netdev).tstats);
+}
+static liteeth_netdev_ops: net_device_ops = net_device_ops {
+    ndo_open: liteeth_open,
+    ndo_stop: liteeth_stop,
+    ndo_get_stats64: liteeth_get_stats64,
+    ndo_start_xmit: liteeth_start_xmit,
+};
+
+// 保留三次属性读取及各自的缺省分支，不在 DTB 层提前填好后省略它们。
+pub unsafe fn liteeth_setup_slots(r#priv: *mut liteeth) {
+    let np = (*(*r#priv).dev).of_node;
+    let err = of_property_read_u32(
+        np,
+        c"litex,rx-slots".as_ptr(),
+        ptr::addr_of_mut!((*r#priv).num_rx_slots),
+    );
+    if err != 0 {
+        dev_dbg!((*r#priv).dev, "unable to get litex,rx-slots, using 2\n");
+        (*r#priv).num_rx_slots = 2;
+    }
+    let err = of_property_read_u32(
+        np,
+        c"litex,tx-slots".as_ptr(),
+        ptr::addr_of_mut!((*r#priv).num_tx_slots),
+    );
+    if err != 0 {
+        dev_dbg!((*r#priv).dev, "unable to get litex,tx-slots, using 2\n");
+        (*r#priv).num_tx_slots = 2;
+    }
+    let err = of_property_read_u32(
+        np,
+        c"litex,slot-size".as_ptr(),
+        ptr::addr_of_mut!((*r#priv).slot_size),
+    );
+    if err != 0 {
+        dev_dbg!(
+            (*r#priv).dev,
+            "unable to get litex,slot-size, using 0x800\n"
+        );
+        (*r#priv).slot_size = 0x800;
     }
 }
 
-// 读取并检查 RX/TX 槽位布局。
-pub fn liteeth_setup_slots<P>(
-    pdev: &platform_device<'_, P>,
-    buffer_size: usize,
-) -> Result<Layout, i32> {
-    // 取得槽数和槽大小；DTB 解析阶段已补默认值 2/2/2048。
-    Layout {
-        num_rx_slots: of_property_read_u32(pdev, "litex,rx-slots")? as usize,
-        num_tx_slots: of_property_read_u32(pdev, "litex,tx-slots")? as usize,
-        slot_size: of_property_read_u32(pdev, "litex,slot-size")? as usize,
+// 由 platform 框架调用；失败回滚由框架的 devres_release_all 负责。
+pub unsafe fn liteeth_probe(pdev: *mut platform_device) -> i32 {
+    let netdev = devm_alloc_etherdev(
+        ptr::addr_of_mut!((*pdev).dev),
+        core::mem::size_of::<liteeth>() as i32,
+    );
+    if netdev.is_null() {
+        return -ENOMEM;
     }
-    .validate(buffer_size) // 检查槽数、槽大小及设备 SRAM 容量
+    SET_NETDEV_DEV(netdev, ptr::addr_of_mut!((*pdev).dev));
+    platform_set_drvdata(pdev, netdev.cast());
+    let r#priv = netdev_priv(netdev).cast::<liteeth>();
+    (*r#priv).netdev = netdev;
+    (*r#priv).dev = ptr::addr_of_mut!((*pdev).dev);
+    (*netdev).tstats =
+        devm_netdev_alloc_pcpu_stats!(ptr::addr_of_mut!((*pdev).dev), pcpu_sw_netstats);
+    if (*netdev).tstats.is_null() {
+        return -ENOMEM;
+    }
+    let irq = platform_get_irq(pdev, 0);
+    if irq < 0 {
+        return irq;
+    }
+    (*netdev).irq = irq as u32;
+    (*r#priv).base = devm_platform_ioremap_resource_byname(pdev, c"mac".as_ptr());
+    if IS_ERR((*r#priv).base) {
+        return PTR_ERR((*r#priv).base) as i32;
+    }
+    let buf_base = devm_platform_ioremap_resource_byname(pdev, c"buffer".as_ptr());
+    if IS_ERR(buf_base) {
+        return PTR_ERR(buf_base) as i32;
+    }
+    liteeth_setup_slots(r#priv);
+    (*r#priv).rx_base = buf_base;
+    (*r#priv).rx_slot = 0;
+    (*r#priv).tx_base =
+        buf_base.byte_add((*r#priv).num_rx_slots as usize * (*r#priv).slot_size as usize);
+    (*r#priv).tx_slot = 0;
+    let err = of_get_ethdev_address((*pdev).dev.of_node, netdev);
+    if err != 0 {
+        eth_hw_addr_random(netdev);
+    }
+    (*netdev).netdev_ops = ptr::addr_of!(liteeth_netdev_ops);
+    let err = register_netdev(netdev);
+    if err != 0 {
+        dev_err!(
+            ptr::addr_of!((*pdev).dev),
+            "Failed to register netdev {}\n",
+            err
+        );
+        return err;
+    }
+    netdev_info!(
+        netdev,
+        "irq {} slots: tx {} rx {} size {}\n",
+        (*netdev).irq,
+        (*r#priv).num_tx_slots,
+        (*r#priv).num_rx_slots,
+        (*r#priv).slot_size
+    );
+    0
 }
+
+// 先注销网卡；platform 框架在返回后回收 devm 资源。
+pub unsafe fn liteeth_remove(pdev: *mut platform_device) {
+    let netdev = platform_get_drvdata(pdev).cast::<net_device>();
+    unregister_netdev(netdev);
+}
+static liteeth_of_match: &[of_device_id] = &[
+    of_device_id {
+        compatible: "litex,liteeth",
+    },
+    of_device_id { compatible: "" },
+];
+MODULE_DEVICE_TABLE!(of, liteeth_of_match);
+static liteeth_driver: platform_driver = platform_driver {
+    probe: liteeth_probe,
+    remove_new: liteeth_remove,
+    driver: device_driver {
+        name: DRV_NAME,
+        of_match_table: liteeth_of_match,
+    },
+};
+module_platform_driver!(liteeth_driver);
+MODULE_AUTHOR!("Joel Stanley <joel@jms.id.au>");
+MODULE_DESCRIPTION!("LiteX Liteeth Ethernet driver");
+MODULE_LICENSE!("GPL");
 
 #[cfg(feature = "linux-driver-api")]
-impl Driver {
-    // 准备资源并注册网卡；此时还没有启用收发中断。
-    pub fn liteeth_probe(info: LiteEthInfo) -> Result<Self, i32> {
-        // 将已解析的 DTB 资源整理成 pdev，下面按原 C 的顺序初始化。
-        let resources = [
-            NamedResource {
-                name: "mac",
-                base: info.mac.base,
-                size: info.mac.size,
-                user_va: MAC_VA,
-            },
-            NamedResource {
-                name: "buffer",
-                base: info.buffer.base,
-                size: info.buffer.size,
-                user_va: BUFFER_VA,
-            },
-        ];
-        let properties = [
-            ("litex,rx-slots", info.rx_slots),
-            ("litex,tx-slots", info.tx_slots),
-            ("litex,slot-size", info.slot_size),
-        ];
-        let irqs = [info.mac.intid];
-        let mut pdev = platform_device {
-            name: DRV_NAME,
-            compatible: "litex,liteeth",
-            resources: &resources,
-            irqs: &irqs,
-            properties: &properties,
-            address: Some(info.address),
-            drvdata: None,
-        };
-
-        // 创建网卡对象，关联父设备，将 netdev 交给 pdev 保存。
-        let mut netdev = devm_alloc_etherdev(DRV_NAME, ());
-        SET_NETDEV_DEV(&mut netdev, pdev.name);
-        platform_set_drvdata(&mut pdev, netdev);
-
-        // 初始化收发统计；当前只有一个所属线程，不实现 Linux per-CPU 分配。
-        let netdev = pdev.drvdata.as_mut().ok_or(-22)?;
-        netdev.tstats = devm_netdev_alloc_pcpu_stats();
-
-        // 取得 GIC INTID，检查当前后端支持的资源范围。
-        let irq = platform_get_irq(&pdev, 0)?;
-        if info.mac.size < 0x44 || irq < 32 || info.mac.size > 4096 || info.buffer.size > 65536 {
-            return Err(-22);
-        }
-
-        // 目标侧准备：独占固定 VA，创建 Notification；IRQ 仍在 open 时绑定。
-        let claim = Claim::take()?;
-        let irq_registration = IrqRegistration::new(ExoIrq::new()?);
-
-        // MAP_MMIO：分别将寄存器区和设备 SRAM 的 PA 映射到 EL0 VA。
-        let base = devm_platform_ioremap_resource_byname(&pdev, "mac")?;
-        let buf_base = devm_platform_ioremap_resource_byname(&pdev, "buffer")?;
-
-        // 读取槽位配置，再设置 RX/TX 在设备 SRAM 中的位置。
-        let layout =
-            liteeth_setup_slots(&pdev, usize::try_from(info.buffer.size).map_err(|_| -22)?)?;
-        let netdev = pdev.drvdata.take().ok_or(-22)?; // 所有权从临时 pdev 移入驱动
-        let mut r#priv = liteeth {
-            base: Mmio { base, buf_base },
-            netdev,
-            slot_size: layout.slot_size,
-            tx_slot: 0,
-            num_tx_slots: layout.num_tx_slots,
-            tx_base: layout.num_rx_slots * layout.slot_size,
-            rx_slot: 0,
-            num_rx_slots: layout.num_rx_slots,
-            rx_base: 0,
-            opened: false,
-            receive_queue: RxQueue::new(),
-            delivery_drops: 0,
-        };
-
-        // 原 C 的 MAC 地址读取/随机回退尚未接入；当前实验透传完整 L2 帧。
-
-        // 本地注册网卡；原 C 的 netdev_ops 由下面的同名 Rust 方法承接。
-        register_netdev(&mut r#priv.netdev)?;
-        Ok(Self {
-            r#priv,
-            irq_registration,
-            irq,
-            _claim: claim,
-            _owner: PhantomData,
-        })
-    }
-
-    // 注销网卡并释放驱动资源。
-    pub fn liteeth_remove(mut self) -> Result<(), i32> {
-        self.liteeth_stop()?; // 先关设备事件并解绑 IRQ
-        unregister_netdev(&mut self.r#priv.netdev) // 注销后由 Drop 回收映射和通知
-    }
-}
-
-// 以下是 Rust 的资源封装；上面 9 个函数对应原 C。
-#[cfg(feature = "linux-driver-api")]
-mod target {
-    use super::*;
-    pub(super) const MAC_VA: u64 = 0x4050_0000;
-    pub(super) const BUFFER_VA: u64 = 0x4060_0000;
-    // Acquire/Release 保证旧映射回收先于再次占用固定 VA。
-    static CLAIMED: AtomicBool = AtomicBool::new(false);
-    pub(super) struct Claim;
-    impl Claim {
-        pub(super) fn take() -> Result<Self, i32> {
-            CLAIMED
-                .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
-                .map(|_| Self)
-                .map_err(|_| -16)
-        }
-    }
-    impl Drop for Claim {
-        fn drop(&mut self) {
-            CLAIMED.store(false, Ordering::Release);
-        }
-    }
-    pub(super) fn fatal() -> ! {
-        runtime::puts(b"[liteeth] FAIL native resource cleanup\r\n");
-        runtime::exit(0x703)
-    }
-    pub(super) struct Mmio {
-        // CSR VA：32 位总线事务，低 8/16 位存放逻辑值。
-        pub(super) base: Mapping,
-        // 设备 SRAM VA：CPU volatile 复制，无 DMA 分配及缓存一致性操作。
-        pub(super) buf_base: Mapping,
-    }
-    impl Io for Mmio {
-        fn litex_read32(&self, offset: usize) -> u32 {
-            litex_read32(&self.base.region(), offset)
-        }
-        fn litex_write32(&self, offset: usize, value: u32) {
-            litex_write32(&self.base.region(), offset, value);
-        }
-        fn memcpy_fromio(&self, offset: usize, out: &mut [u8]) {
-            memcpy_fromio(&self.buf_base.region(), offset, out);
-        }
-        fn memcpy_toio(&self, offset: usize, bytes: &[u8]) {
-            memcpy_toio(&self.buf_base.region(), offset, bytes);
-        }
-    }
-    pub struct Driver {
-        // 设备状态机和 MMIO 映射，解绑后才随对象释放。
-        pub(super) r#priv: liteeth<Mmio>,
-        // 注册层持有 Notification 和函数指针；没有 pending 时 WAIT 阻塞当前线程。
-        pub(super) irq_registration: IrqRegistration<liteeth<Mmio>, ExoIrq>,
-        // DTB 给出的 GIC INTID，绑定仍由 EL1 grant 审核。
-        pub(super) irq: u32,
-        // 最后释放固定 VA 所有权，失败回滚由字段 Drop 自动完成。
-        pub(super) _claim: Claim,
-        pub(super) _owner: PhantomData<*mut ()>,
-    }
-}
-#[cfg(feature = "linux-driver-api")]
-pub use target::Driver;
-#[cfg(feature = "linux-driver-api")]
-use target::{fatal, Claim, Mmio, BUFFER_VA, MAC_VA};
-
-#[cfg(feature = "linux-driver-api")]
-impl Driver {
-    // 应用调用转发到上方同名的设备实现。
-    pub fn liteeth_start_xmit<const N: usize>(
-        &mut self,
-        skb: sk_buff<N>,
-    ) -> Result<NetdevTxOutcome<N>, i32> {
-        self.r#priv.liteeth_start_xmit(skb)
-    }
-
-    pub fn liteeth_get_stats64(&self) -> Result<rtnl_link_stats64, i32> {
-        Ok(self.r#priv.liteeth_get_stats64())
-    }
-
-    // WAIT 返回后在 EL0 调用 liteeth_interrupt，再 ACK 内核 IRQ。
-    pub fn wait_irq(&mut self) -> Result<(), i32> {
-        self.irq_registration.wait_and_dispatch(&mut self.r#priv)
-    }
-
-    // 上层从本地队列取出完整帧。
-    pub fn receive(&mut self, out: &mut [u8]) -> usize {
-        self.r#priv.receive(out).unwrap_or_else(|_| fatal())
-    }
-}
-
-#[cfg(feature = "linux-driver-api")]
-impl Drop for Driver {
-    fn drop(&mut self) {
-        // 先关事件、解绑 IRQ，再允许字段自动释放映射和通知。
-        if self.liteeth_stop().is_err() {
-            fatal();
-        }
-    }
-}
-
-// 槽位布局；单位都是计数或字节，不是映射地址。
-#[derive(Clone, Copy)]
-pub struct Layout {
-    // RX slot 个数，硬件 slot 寄存器为 8 位。
-    pub num_rx_slots: usize,
-    // TX slot 个数，硬件 slot 寄存器为 8 位。
-    pub num_tx_slots: usize,
-    // 每个 slot 的字节容量，当前限定不超过 2048。
-    pub slot_size: usize,
-}
-impl Layout {
-    pub fn validate(self, buffer_size: usize) -> Result<Self, i32> {
-        // 禁止空槽、槽号溢出、单槽过大以及超出设备 SRAM。
-        if self.num_rx_slots == 0
-            || self.num_tx_slots == 0
-            || self.num_rx_slots > 256
-            || self.num_tx_slots > 256
-            || self.slot_size == 0
-            || self.slot_size > MAX_FRAME
-            || (self.num_rx_slots + self.num_tx_slots)
-                .checked_mul(self.slot_size)
-                .ok_or(-22)?
-                > buffer_size
-        {
-            return Err(-22);
-        }
-        Ok(self)
-    }
-}
-
-impl<I: Io> liteeth<I> {
-    // 测试构造：真实设备使用上方 probe；共用同一套布局校验和收发逻辑。
-    #[cfg(test)]
-    pub fn new(base: I, layout: Layout, buffer_size: usize) -> Result<Self, i32> {
-        let layout = layout.validate(buffer_size)?;
-        let mut netdev = devm_alloc_etherdev(DRV_NAME, ());
-        register_netdev(&mut netdev)?;
-        Ok(Self {
-            base,
-            slot_size: layout.slot_size,
-            num_rx_slots: layout.num_rx_slots,
-            num_tx_slots: layout.num_tx_slots,
-            rx_base: 0,
-            tx_base: layout.num_rx_slots * layout.slot_size,
-            rx_slot: 0,
-            tx_slot: 0,
-            opened: false,
-            netdev,
-            receive_queue: RxQueue::new(),
-            delivery_drops: 0,
-        })
-    }
-
-    // open 的前半段：校验状态并清旧 pending。
-    pub fn prepare_open(&mut self) -> Result<(), i32> {
-        if self.opened {
-            return Err(-16);
-        }
-        if !self.netdev.registered {
-            return Err(-22);
-        }
-        litex_write8(&self.base, LITEETH_WRITER_EV_PENDING, 1);
-        litex_write8(&self.base, LITEETH_READER_EV_PENDING, 1);
-        Ok(())
-    }
-
-    // IRQ 绑定成功后，open 才能启用设备事件和队列。
-    pub fn enable(&mut self) {
-        litex_write8(&self.base, LITEETH_WRITER_EV_ENABLE, 1);
-        litex_write8(&self.base, LITEETH_READER_EV_ENABLE, 1);
-        self.opened = true;
-        netif_carrier_on(&mut self.netdev);
-        netif_start_queue(&mut self.netdev);
-    }
-
-    // stop 的设备侧步骤；之后才允许 free_irq。
-    pub fn stop_device_events(&mut self) {
-        netif_stop_queue(&mut self.netdev);
-        netif_carrier_off(&mut self.netdev);
-        litex_write8(&self.base, LITEETH_WRITER_EV_ENABLE, 0);
-        litex_write8(&self.base, LITEETH_READER_EV_ENABLE, 0);
-        self.opened = false;
-    }
-
-    // 输出空间不足时保留帧，让调用者重试。
-    pub fn receive(&mut self, out: &mut [u8]) -> Result<usize, i32> {
-        self.receive_queue.receive(out)
-    }
-
-    // 测试使用；调用前必须先 stop。
-    #[cfg(test)]
-    pub fn unregister(&mut self) -> Result<(), i32> {
-        unregister_netdev(&mut self.netdev)
-    }
-}
+pub use super::liteeth_runtime::Driver;

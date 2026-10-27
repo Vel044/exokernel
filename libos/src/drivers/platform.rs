@@ -118,4 +118,6 @@ pub struct LiteEthInfo {
     pub slot_size: u32,
     /// MAC地址
     pub address: [u8; 6],
+    /// 三个 slot 属性是否在 DTB 中出现，保留原驱动的缺省分支。
+    pub property_presence: u8,
 }

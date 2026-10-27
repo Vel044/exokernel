@@ -1,158 +1,119 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//! 有界线性 skb 与有界接收交付队列。容量由调用者指定，不依赖任何 LiteEth 寄存器。
-//! 报文按值转移所有权；不支持分片 skb、GSO 或完整 Linux 协议栈。
-use super::{
-    error::{EBUSY, EINVAL},
-    netdevice::net_device,
-};
-#[repr(C, align(4))]
-struct Storage<const N: usize> {
-    /// Linux NET_IP_ALIGN 的两个头部填充字节，使 Ethernet 后的 IP 头 4 字节对齐。
-    _headroom: [u8; 2],
-    /// 内联拥有的线性帧，容量在实例类型中明确，不做每包堆分配。
-    bytes: [u8; N],
-}
-pub struct sk_buff<const N: usize> {
-    /// 存储所有权、完整帧长度和协议解析后的 data 偏移。
-    storage: Storage<N>,
-    length: usize,
-    capacity: usize,
-    pulled: usize,
-    /// 以太网协议号以主机整数表示；不承诺 C __be16 ABI。
+//! 堆分配的线性 skb；NULL、尾指针、协议头和释放责任遵循 Linux 调用协议。
+use super::{memory, netdevice::net_device};
+use core::ptr;
+pub const NET_RX_SUCCESS: i32 = 0;
+pub const NET_RX_DROP: i32 = 1;
+pub struct sk_buff {
+    pub head: *mut u8,
+    pub data: *mut u8,
+    pub tail: usize,
+    pub end: usize,
+    pub len: u32,
     pub protocol: u16,
+    pub dev: *mut net_device,
+    pub mac_header: usize,
+    pub pkt_type: u8,
+    pub(crate) allocation_size: usize,
 }
-/// Rust 版 ndo_start_xmit 的结果；Busy 必须把未消费的 skb 还给调用方。
-pub enum NetdevTxOutcome<const N: usize> {
-    /// 对应 NETDEV_TX_OK；驱动已经消费或丢弃 skb。
-    Consumed,
-    /// 对应 NETDEV_TX_BUSY；调用方仍拥有 skb，可等待资源后重试。
-    Busy(sk_buff<N>),
-}
-impl<const N: usize> sk_buff<N> {
-    pub fn frame(&self) -> &[u8] {
-        &self.storage.bytes[..self.length]
-    }
-    pub fn data(&self) -> &[u8] {
-        &self.storage.bytes[self.pulled..self.length]
-    }
-}
-/// 测试/上层网络代码构造待发送 skb；不是 Linux 驱动内的发送分配步骤。
-pub fn skb_from_bytes<const N: usize>(bytes: &[u8]) -> Result<sk_buff<N>, i32> {
-    if bytes.len() > N {
-        return Err(EINVAL);
-    }
-    let mut skb = sk_buff {
-        storage: Storage {
-            _headroom: [0; 2],
-            bytes: [0; N],
-        },
-        length: bytes.len(),
-        capacity: N,
-        pulled: 0,
-        protocol: 0,
+pub unsafe fn netdev_alloc_skb_ip_align(dev: *mut net_device, length: u32) -> *mut sk_buff {
+    let size = match (length as usize).checked_add(2) {
+        Some(s) => s,
+        None => return ptr::null_mut(),
     };
-    skb.storage.bytes[..bytes.len()].copy_from_slice(bytes);
-    Ok(skb)
-}
-pub fn netdev_alloc_skb_ip_align<P, const N: usize>(
-    _: &net_device<P>,
-    size: usize,
-) -> Result<sk_buff<N>, i32> {
-    if size > N {
-        return Err(EINVAL);
+    let head = memory::allocate(size, 4);
+    if head.is_null() {
+        return ptr::null_mut();
     }
-    Ok(sk_buff {
-        storage: Storage {
-            _headroom: [0; 2],
-            bytes: [0; N],
-        },
-        length: 0,
-        capacity: size,
-        pulled: 0,
+    let skb = memory::value(sk_buff {
+        head,
+        data: head.add(2),
+        tail: 2,
+        end: size,
+        len: 0,
         protocol: 0,
-    })
-}
-pub fn skb_put<const N: usize>(skb: &mut sk_buff<N>, length: usize) -> Result<&mut [u8], i32> {
-    // 新数据从当前帧尾开始写。
-    let start = skb.length;
-    // 计算新帧尾；检查加法溢出和缓冲区容量。
-    let end = start
-        .checked_add(length)
-        .filter(|end| *end <= skb.capacity)
-        .ok_or(EINVAL)?;
-    // 更新有效帧长度。
-    skb.length = end;
-    // 返回新增区域，调用者把帧数据写到这里。
-    Ok(&mut skb.storage.bytes[start..end])
-}
-
-/// 复用 Linux Ethernet II/802.2/原始 802.3 的协议判断，不支持 DSA 标签变体。
-pub fn eth_type_trans<P, const N: usize>(
-    skb: &mut sk_buff<N>,
-    _: &net_device<P>,
-) -> Result<u16, i32> {
-    if skb.length < 14 || skb.pulled != 0 {
-        return Err(EINVAL);
+        dev,
+        mac_header: 2,
+        pkt_type: 0,
+        allocation_size: size,
+    });
+    if skb.is_null() {
+        memory::release(head, size, 4);
     }
-    let protocol = u16::from_be_bytes([skb.storage.bytes[12], skb.storage.bytes[13]]);
-    skb.pulled = 14;
-    skb.protocol = if protocol >= 0x600 {
-        protocol
-    } else if skb.data().starts_with(&[0xff, 0xff]) {
-        0x0001
+    skb
+}
+pub unsafe fn skb_put(skb: *mut sk_buff, len: u32) -> *mut u8 {
+    let tmp = (*skb).head.add((*skb).tail);
+    let end = (*skb)
+        .tail
+        .checked_add(len as usize)
+        .expect("skb尾指针溢出");
+    (*skb).tail = end;
+    (*skb).len = (*skb).len.checked_add(len).expect("skb长度溢出");
+    if (*skb).tail > (*skb).end {
+        panic!("skb_over_panic");
+    }
+    tmp
+}
+pub unsafe fn eth_type_trans(skb: *mut sk_buff, dev: *mut net_device) -> u16 {
+    (*skb).dev = dev;
+    (*skb).mac_header = (*skb).data.offset_from((*skb).head) as usize;
+    assert!((*skb).len >= 14, "以太网头不足");
+    let eth = core::slice::from_raw_parts((*skb).data, 14);
+    (*skb).pkt_type = if eth[..6] == [255; 6] {
+        1
+    } else if eth[0] & 1 != 0 {
+        2
+    } else if eth[..6] != (*dev).dev_addr {
+        3
     } else {
-        0x0004
+        0
     };
-    Ok(skb.protocol)
-}
-pub fn dev_kfree_skb_any<const N: usize>(skb: sk_buff<N>) {
-    drop(skb);
-}
-/// 有界 FIFO，满时丢弃新包；实例之间没有全局队列或硬编码设备名。
-pub struct RxQueue<const N: usize, const Q: usize = 1> {
-    /// 每个槽拥有 skb；head/count 只由所属线程修改。
-    slots: [Option<sk_buff<N>>; Q],
-    head: usize,
-    count: usize,
-}
-impl<const N: usize, const Q: usize> RxQueue<N, Q> {
-    pub fn new() -> Self {
-        Self {
-            slots: core::array::from_fn(|_| None),
-            head: 0,
-            count: 0,
-        }
+    let proto = u16::from_be_bytes([eth[12], eth[13]]);
+    (*skb).data = (*skb).data.add(14);
+    (*skb).len -= 14;
+    if (*dev).dsa_without_ethertype {
+        return 0x00f8u16.to_be();
     }
-    pub fn is_full(&self) -> bool {
-        self.count == Q
+    if proto >= 0x600 {
+        return proto.to_be();
     }
-    /// 缓冲太小则保留队首包，调用者可重试；交付完整 L2 帧而非仅 skb.data。
-    pub fn receive(&mut self, out: &mut [u8]) -> Result<usize, i32> {
-        if self.count == 0 {
-            return Ok(0);
-        }
-        let frame = self.slots[self.head].as_ref().unwrap().frame();
-        if out.len() < frame.len() {
-            return Err(EINVAL);
-        }
-        let n = frame.len();
-        out[..n].copy_from_slice(frame);
-        dev_kfree_skb_any(self.slots[self.head].take().unwrap());
-        self.head = (self.head + 1) % Q;
-        self.count -= 1;
-        Ok(n)
+    if (*skb).len >= 2 && *(*skb).data == 255 && *(*skb).data.add(1) == 255 {
+        1u16.to_be()
+    } else {
+        4u16.to_be()
     }
 }
-/// 消费 skb，即使满队列也不把所有权交还驱动；只提供 L2 交付，不进入 IP/socket。
-pub fn netif_rx<const N: usize, const Q: usize>(
-    queue: &mut RxQueue<N, Q>,
-    skb: sk_buff<N>,
-) -> Result<(), i32> {
-    if queue.count == Q {
+pub unsafe fn netif_rx(skb: *mut sk_buff) -> i32 {
+    let dev = (*skb).dev;
+    // 接收核心取得所有权；排队失败也消费 skb，不归还给驱动。
+    if dev.is_null() || !(*dev).registered || (*dev).rx_queue.try_reserve(1).is_err() {
         dev_kfree_skb_any(skb);
-        return Err(EBUSY);
+        return NET_RX_DROP;
     }
-    queue.slots[(queue.head + queue.count) % Q] = Some(skb);
-    queue.count += 1;
-    Ok(())
+    (*dev).rx_queue.push_back(skb);
+    NET_RX_SUCCESS
+}
+pub unsafe fn dev_kfree_skb_any(skb: *mut sk_buff) {
+    if !skb.is_null() {
+        memory::release((*skb).head, (*skb).allocation_size, 4);
+        memory::free_value(skb);
+    }
+}
+pub unsafe fn frame(skb: *const sk_buff) -> &'static [u8] {
+    core::slice::from_raw_parts(
+        (*skb).head.add((*skb).mac_header),
+        (*skb).tail - (*skb).mac_header,
+    )
+}
+pub unsafe fn skb_from_bytes(dev: *mut net_device, bytes: &[u8]) -> *mut sk_buff {
+    let skb = netdev_alloc_skb_ip_align(dev, bytes.len() as u32);
+    if !skb.is_null() {
+        ptr::copy_nonoverlapping(
+            bytes.as_ptr(),
+            skb_put(skb, bytes.len() as u32),
+            bytes.len(),
+        );
+    }
+    skb
 }

@@ -95,7 +95,9 @@ with (case/'qemu.log').open('wb') as f:
         writes=[(int(o,16),int(v)) for o,v in re.findall(r'LITEETH_TRACE WRITE ([0-9a-f]+) (\d+)',device_log)]
         for index,(offset,value) in enumerate(writes):
             if offset==0x18 and [x[0] for x in writes[index-2:index+1]]!=[0x24,0x28,0x18]:raise RuntimeError('发送寄存器提交顺序错误')
-        output=dict(passed=True,implementation=a.implementation,frames=results,stats=stats,device_tx=tx,device_rx=rx,lifecycle=lifecycle,c_ffi_symbols=ffi,elf_bytes=(case/'libos.elf').stat().st_size,elf_sha256=hashlib.sha256((case/'libos.elf').read_bytes()).hexdigest(),scope='QEMU model; raw L2 echo; oversize drop; no IP/socket')
+        automatic_irq=b'[liteeth] automatic IRQ callback before WAIT passed' in text()
+        if a.implementation=='rust' and not automatic_irq:raise RuntimeError('未验证应用 WAIT 前自动执行 IRQ 回调')
+        output=dict(automatic_irq_before_application_wait=automatic_irq,passed=True,implementation=a.implementation,frames=results,stats=stats,device_tx=tx,device_rx=rx,lifecycle=lifecycle,c_ffi_symbols=ffi,elf_bytes=(case/'libos.elf').stat().st_size,elf_sha256=hashlib.sha256((case/'libos.elf').read_bytes()).hexdigest(),scope='QEMU model; raw L2 echo; oversize drop; no IP/socket')
         (case/'result.json').write_text(json.dumps(output,indent=2)+'\n')
         print(f'PASS {a.implementation}: 17 frames, statistics, slot/CSR order, oversize, lifecycle; {case}')
     finally:

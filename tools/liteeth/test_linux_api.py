@@ -5,7 +5,7 @@ import json,re,subprocess
 root=Path(__file__).resolve().parents[2]
 source=root/'docs/LiteEth/源码核查.json'
 expected={name for group in json.loads(source.read_text())['groups'] for name in group['names']}
-provided={name for path in (root/'libos/src/linux_api').glob('*.rs') for name in re.findall(r'pub (?:const )?fn (\w+)',path.read_text())}
+provided={name for path in (root/'libos/src/linux_api').glob('*.rs') for match in re.findall(r'pub (?:unsafe )?(?:const )?fn (\w+)|macro_rules!\s*(\w+)',path.read_text()) for name in match if name}
 missing=expected-provided
 if missing:raise SystemExit(f'缺少同名封装：{sorted(missing)}')
 print(f'PASS {len(expected)} 个同名 Rust 接口完整覆盖',flush=True)

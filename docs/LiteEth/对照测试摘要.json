@@ -1,6 +1,7 @@
 {
   "passed": true,
-  "source_sha256": "bb8b3c2cac2f8821647c66cf00a96adf7eed02b0c6c9acc925d37eb7b628285e",
+  "source_sha256": "da562e8b074295a2188439e97c420588204737d1978c5fb8bd616d8bee8858cb",
+  "source_code_sha256": "8a529b65b903970915b08691ec9ee807c661887c2be9fb4a6c510d540f0dc74f",
   "source_version": "Linux 6.12.75",
   "compared": [
     "frames",
@@ -22,17 +23,17 @@
     "tx_dropped": 1
   },
   "rust_core_tests": 11,
-  "rust_linux_api_tests": 13,
+  "rust_linux_api_tests": 15,
   "same_name_linux_interfaces": 49,
   "c_host_sanitizers": [
     "AddressSanitizer",
     "UndefinedBehaviorSanitizer"
   ],
-  "c_elf_bytes": 152480,
-  "rust_elf_bytes": 147448,
+  "c_elf_bytes": 154880,
+  "rust_elf_bytes": 188760,
   "rust_c_ffi_symbols": [],
-  "scope": "单设备、单所属 EL0 线程；QEMU LiteEth 模型；L2 收发、超长 TX 丢弃、失败回滚、启停回收；不含真实 FPGA/IP/socket/形式化证明",
-  "evidence_path": "target/liteeth-comparison/20261025-091153",
-  "preserved_driver_functions": 9,
-  "implementation": "原生 Rust LiteEth：9 个原驱动函数和 49 个外部接口均保留原名"
+  "automatic_irq_before_application_wait": true,
+  "scope": "原生 Rust 由独立 EL0 IRQ 线程自动派发，设备访问互斥；QEMU LiteEth 模型；L2 收发、超长 TX 丢弃、失败回滚、启停回收；不含真实 FPGA/IP/socket/形式化证明",
+  "strict_constraints_fully_satisfied": false,
+  "dependency_semantic_gaps_document": "docs/LiteEth/逐函数翻译整改结果.md"
 }

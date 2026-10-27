@@ -1,319 +1,237 @@
-//! 直接测试实际参与 EL0 构建的 Rust 状态机；普通数组不替代 QEMU MMIO/IRQ 验证。
+//! 逐函数翻译的实际驱动测试：对照原分支、返回值、MMIO 顺序及资源生命周期。
+extern crate alloc;
 #[path = "../libos/src/drivers/liteeth.rs"]
 mod driver;
 #[path = "../libos/src/linux_api/mod.rs"]
 mod linux_api;
-use driver::*;
-use linux_api::skbuff::{skb_from_bytes, NetdevTxOutcome};
-use std::{cell::RefCell, rc::Rc};
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum Op {
-    Read(usize),
-    Write(usize, u32),
-    From(usize, usize),
-    To(usize, usize),
+#[path = "support/liteeth.rs"]
+mod support;
+use linux_api::{memory, netdevice::*, skbuff::*};
+use support::*;
+#[test]
+fn busy_keeps_skb_and_slot() {
+    reset();
+    let mut f = fixture();
+    f.open();
+    let p = packet(f.dev(), 60);
+    let live = memory::live();
+    STATE.with(|s| s.borrow_mut().csr[0x1c / 4] = 0);
+    assert_eq!(
+        unsafe { driver::liteeth_start_xmit(p, f.dev()) },
+        NETDEV_TX_BUSY
+    );
+    assert_eq!(memory::live(), live);
+    assert_eq!(f.stats().tx_packets, 0);
+    tx_done();
+    unsafe {
+        driver::liteeth_interrupt(42, f.dev().cast());
+        assert_eq!(driver::liteeth_start_xmit(p, f.dev()), NETDEV_TX_OK);
+    }
+    assert_eq!(f.stats().tx_packets, 1);
 }
-struct State {
-    regs: [u32; 64],
-    buffer: Vec<u8>,
-    ops: Vec<Op>,
+#[test]
+fn oversize_consumes_and_counts_after_ready() {
+    reset();
+    let mut f = fixture();
+    f.open();
+    let before = memory::live();
+    let p = packet(f.dev(), 2049);
+    assert_eq!(
+        unsafe { driver::liteeth_start_xmit(p, f.dev()) },
+        NETDEV_TX_OK
+    );
+    assert_eq!(memory::live(), before);
+    let s = f.stats();
+    assert_eq!((s.tx_dropped, s.tx_errors, s.tx_packets), (1, 1, 0));
 }
-#[derive(Clone)]
-struct Model(Rc<RefCell<State>>);
-impl Model {
-    fn new() -> Self {
-        let mut regs = [0; 64];
-        regs[LITEETH_READER_READY / 4] = 1;
-        Self(Rc::new(RefCell::new(State {
-            regs,
-            buffer: vec![0; 8192],
-            ops: vec![],
-        })))
+#[test]
+fn tx_slot_length_start_and_rotation() {
+    reset();
+    let mut f = fixture();
+    f.open();
+    STATE.with(|s| s.borrow_mut().ops.clear());
+    for _ in 0..3 {
+        tx_done();
+        let p = packet(f.dev(), 60);
+        assert_eq!(unsafe { driver::liteeth_start_xmit(p, f.dev()) }, 0);
     }
-    fn tx_done(&self) {
-        let mut s = self.0.borrow_mut();
-        s.regs[LITEETH_READER_READY / 4] = 1;
-        s.regs[LITEETH_READER_EV_PENDING / 4] = 1;
-    }
-    fn rx(&self, slot: u32, length: u32, fill: u8) {
-        let mut s = self.0.borrow_mut();
-        s.buffer.fill(fill);
-        s.regs[LITEETH_WRITER_SLOT / 4] = slot;
-        s.regs[LITEETH_WRITER_LENGTH / 4] = length;
-        s.regs[LITEETH_WRITER_EV_PENDING / 4] = 1;
-    }
-    fn clear_ops(&self) {
-        self.0.borrow_mut().ops.clear();
-    }
-}
-impl Io for Model {
-    fn litex_read32(&self, o: usize) -> u32 {
-        let mut s = self.0.borrow_mut();
-        s.ops.push(Op::Read(o));
-        s.regs[o / 4]
-    }
-    fn litex_write32(&self, o: usize, v: u32) {
-        let mut s = self.0.borrow_mut();
-        s.ops.push(Op::Write(o, v));
-        if o == LITEETH_WRITER_EV_PENDING || o == LITEETH_READER_EV_PENDING {
-            s.regs[o / 4] &= !v;
-        } else {
-            s.regs[o / 4] = v;
+    let ops = STATE.with(|s| s.borrow().ops.clone());
+    let slots: Vec<_> = ops
+        .iter()
+        .filter_map(|op| {
+            if let Op::Write(0x24, v) = op {
+                Some(*v)
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert_eq!(slots, [0, 1, 0]);
+    for i in 0..ops.len() {
+        if ops[i] == Op::Write(0x18, 1) {
+            assert_eq!(
+                ops[i - 2],
+                Op::Write(
+                    0x24,
+                    slots[ops[..i]
+                        .iter()
+                        .filter(|v| **v == Op::Write(0x18, 1))
+                        .count()]
+                )
+            );
+            assert_eq!(ops[i - 1], Op::Write(0x28, 60));
         }
-        if o == LITEETH_READER_START {
-            s.regs[LITEETH_READER_READY / 4] = 0;
-        }
-    }
-    fn memcpy_fromio(&self, o: usize, b: &mut [u8]) {
-        let mut s = self.0.borrow_mut();
-        s.ops.push(Op::From(o, b.len()));
-        b.copy_from_slice(&s.buffer[o..o + b.len()]);
-    }
-    fn memcpy_toio(&self, o: usize, b: &[u8]) {
-        let mut s = self.0.borrow_mut();
-        s.ops.push(Op::To(o, b.len()));
-        s.buffer[o..o + b.len()].copy_from_slice(b);
     }
 }
-fn closed() -> (liteeth<Model>, Model) {
-    let io = Model::new();
-    let platform = linux_api::platform::platform_device::<()> {
-        name: "liteeth-test",
-        compatible: "litex,liteeth",
-        resources: &[],
-        irqs: &[],
-        properties: &[
-            ("litex,rx-slots", 2),
-            ("litex,tx-slots", 2),
-            ("litex,slot-size", 2048),
+#[test]
+fn rx_copies_before_w1c_and_preserves_frame() {
+    reset();
+    let mut f = fixture();
+    f.open();
+    rx(1, 60);
+    STATE.with(|s| s.borrow_mut().ops.clear());
+    assert_eq!(unsafe { driver::liteeth_interrupt(42, f.dev().cast()) }, 1);
+    let s = f.stats();
+    assert_eq!((s.rx_packets, s.rx_bytes), (1, 60));
+    unsafe {
+        let skb = (*f.dev()).rx_queue.pop_front().unwrap();
+        assert_eq!(frame(skb).len(), 60);
+        assert_eq!((*skb).len, 46);
+        dev_kfree_skb_any(skb);
+    }
+    let ops = STATE.with(|s| s.borrow().ops.clone());
+    assert!(
+        ops.iter().position(|o| *o == Op::From(2048, 60)).unwrap()
+            < ops.iter().position(|o| *o == Op::Write(0x10, 1)).unwrap()
+    );
+}
+#[test]
+fn rx_original_zero_and_oversize_drop_paths() {
+    reset();
+    let mut f = fixture();
+    f.open();
+    for len in [0, 2049] {
+        rx(0, len);
+        assert_eq!(unsafe { driver::liteeth_rx(f.dev()) }, NET_RX_DROP);
+    }
+    assert_eq!((f.stats().rx_errors, f.stats().rx_dropped), (2, 2));
+}
+#[test]
+fn rx_allocation_failure_uses_drop_join() {
+    reset();
+    let mut f = fixture();
+    f.open();
+    rx(0, 60);
+    for n in [0, 1] {
+        memory::fail_after(n);
+        assert_eq!(unsafe { driver::liteeth_rx(f.dev()) }, NET_RX_DROP);
+        memory::fail_after(usize::MAX);
+    }
+    assert_eq!((f.stats().rx_errors, f.stats().rx_dropped), (2, 2));
+    assert!(
+        STATE.with(|s| s
+            .borrow()
+            .logs
+            .iter()
+            .filter(|l| l.contains("couldn't get memory"))
+            .count())
+            == 2
+    );
+}
+#[test]
+fn open_failure_does_not_enable_device() {
+    reset();
+    let mut f = fixture();
+    STATE.with(|s| {
+        let mut s = s.borrow_mut();
+        s.fail_bind = true;
+        s.ops.clear();
+    });
+    assert_eq!(unsafe { dev_open(f.dev()) }, -5);
+    assert!(!STATE.with(|s| s
+        .borrow()
+        .ops
+        .iter()
+        .any(|o| matches!(o, Op::Write(0x14, 1) | Op::Write(0x34, 1)))));
+}
+#[test]
+fn default_and_explicit_properties_are_in_driver() {
+    reset();
+    let f = fixture();
+    unsafe {
+        let p = netdev_priv(f.dev()).cast::<driver::liteeth>();
+        assert_eq!(
+            ((*p).num_rx_slots, (*p).num_tx_slots, (*p).slot_size),
+            (2, 2, 2048)
+        );
+    }
+    drop(f);
+    let mut f = Fixture::new(
+        vec![
+            ("litex,rx-slots", 1),
+            ("litex,tx-slots", 3),
+            ("litex,slot-size", 1024),
         ],
-        address: None,
-        drvdata: None,
-    };
-    let layout = liteeth_setup_slots(&platform, 8192).unwrap();
-    let d = liteeth::new(io.clone(), layout, 8192).unwrap();
-    (d, io)
-}
-fn tx(d: &mut liteeth<Model>, bytes: &[u8]) -> Result<bool, i32> {
-    match d.liteeth_start_xmit(skb_from_bytes::<MAX_TX_SKB_SIZE>(bytes)?)? {
-        NetdevTxOutcome::Consumed => Ok(true),
-        NetdevTxOutcome::Busy(_) => Ok(false),
-    }
-}
-fn opened() -> (liteeth<Model>, Model) {
-    let (mut d, io) = closed();
-    d.prepare_open().unwrap();
-    d.enable();
-    io.clear_ops();
-    (d, io)
-}
-#[test]
-fn rejects_invalid_layout_before_access() {
-    for (rx, tx, size, span) in [
-        (0, 2, 2048, 8192),
-        (2, 0, 2048, 8192),
-        (257, 2, 2048, 8192),
-        (2, 2, 0, 8192),
-        (2, 2, 2049, 8192),
-        (2, 2, 2048, 8191),
-    ] {
-        let io = Model::new();
-        assert!(liteeth::new(
-            io.clone(),
-            Layout {
-                num_rx_slots: rx,
-                num_tx_slots: tx,
-                slot_size: size
-            },
-            span
-        )
-        .is_err());
-        assert!(io.0.borrow().ops.is_empty());
-    }
-}
-#[test]
-fn open_clears_events_before_enable_and_rejects_double_open() {
-    let (mut d, io) = closed();
-    d.prepare_open().unwrap();
-    d.enable();
-    assert_eq!(
-        io.0.borrow().ops,
-        vec![
-            Op::Write(LITEETH_WRITER_EV_PENDING, 1),
-            Op::Write(LITEETH_READER_EV_PENDING, 1),
-            Op::Write(LITEETH_WRITER_EV_ENABLE, 1),
-            Op::Write(LITEETH_READER_EV_ENABLE, 1)
-        ]
+        Some([2, 0, 0, 0, 0, 1]),
     );
-    io.clear_ops();
-    assert_eq!(d.prepare_open(), Err(-16));
-    assert!(io.0.borrow().ops.is_empty());
-}
-#[test]
-fn closed_and_short_tx_do_not_touch_hardware() {
-    let (mut d, io) = closed();
-    assert_eq!(tx(&mut d, &[1; 60]), Err(-22));
-    assert!(io.0.borrow().ops.is_empty());
-    d.prepare_open().unwrap();
-    d.enable();
-    io.clear_ops();
-    assert_eq!(tx(&mut d, &[1; 13]), Err(-22));
-    assert!(io.0.borrow().ops.is_empty());
-}
-#[test]
-fn tx_copies_before_register_commit_and_rotates_slots() {
-    let (mut d, io) = opened();
-    for slot in [0, 1, 0] {
-        io.tx_done();
-        d.liteeth_interrupt();
-        io.clear_ops();
-        assert_eq!(tx(&mut d, &[7; 60]), Ok(true));
+    assert_eq!(f.attach(), 0);
+    unsafe {
+        let p = netdev_priv(f.dev()).cast::<driver::liteeth>();
         assert_eq!(
-            io.0.borrow().ops,
-            vec![
-                Op::Read(LITEETH_READER_READY),
-                Op::To(4096 + slot * 2048, 60),
-                Op::Write(LITEETH_READER_SLOT, slot as u32),
-                Op::Write(LITEETH_READER_LENGTH, 60),
-                Op::Write(LITEETH_READER_START, 1)
-            ]
-        );
-        assert_eq!(
-            &io.0.borrow().buffer[4096 + slot * 2048..4096 + slot * 2048 + 60],
-            &[7; 60]
+            ((*p).num_rx_slots, (*p).num_tx_slots, (*p).slot_size),
+            (1, 3, 1024)
         );
     }
-    assert_eq!(d.liteeth_get_stats64().tx_packets, 3);
 }
 #[test]
-fn busy_keeps_packet_slot_and_stats_until_completion() {
-    let (mut d, io) = opened();
-    io.0.borrow_mut().regs[LITEETH_READER_READY / 4] = 0;
-    let busy = d
-        .liteeth_start_xmit(skb_from_bytes::<MAX_TX_SKB_SIZE>(&[8; 60]).unwrap())
-        .unwrap();
-    let NetdevTxOutcome::Busy(skb) = busy else {
-        panic!("expected BUSY")
-    };
-    assert_eq!(skb.frame(), &[8; 60]);
-    assert_eq!(d.liteeth_get_stats64(), rtnl_link_stats64::default());
-    io.0.borrow_mut().regs[LITEETH_READER_READY / 4] = 1;
-    io.clear_ops();
-    let NetdevTxOutcome::Busy(skb) = d.liteeth_start_xmit(skb).unwrap() else {
-        panic!("expected BUSY until completion IRQ")
-    };
-    assert!(io.0.borrow().ops.is_empty());
-    io.tx_done();
-    d.liteeth_interrupt();
-    assert!(matches!(
-        d.liteeth_start_xmit(skb).unwrap(),
-        NetdevTxOutcome::Consumed
-    ));
-    assert_eq!(io.0.borrow().regs[LITEETH_READER_SLOT / 4], 0);
-}
-#[test]
-fn oversize_is_consumed_and_counted_without_tx() {
-    let (mut d, io) = opened();
-    assert_eq!(tx(&mut d, &[0; 2049]), Ok(true));
-    assert_eq!(io.0.borrow().ops, vec![Op::Read(LITEETH_READER_READY)]);
-    let s = d.liteeth_get_stats64();
-    assert_eq!((s.tx_packets, s.tx_errors, s.tx_dropped), (0, 1, 1));
-}
-#[test]
-fn irq_handles_tx_then_copies_rx_before_w1c() {
-    let (mut d, io) = opened();
-    io.tx_done();
-    io.rx(1, 60, 9);
-    d.liteeth_interrupt();
-    assert_eq!(
-        io.0.borrow().ops,
-        vec![
-            Op::Read(LITEETH_READER_EV_PENDING),
-            Op::Write(LITEETH_READER_EV_PENDING, 1),
-            Op::Read(LITEETH_WRITER_EV_PENDING),
-            Op::Read(LITEETH_WRITER_SLOT),
-            Op::Read(LITEETH_WRITER_LENGTH),
-            Op::From(2048, 60),
-            Op::Write(LITEETH_WRITER_EV_PENDING, 1)
-        ]
-    );
-    let mut out = [0; 60];
-    assert_eq!(d.receive(&mut out), Ok(60));
-    assert_eq!(out, [9; 60]);
-    assert_eq!(d.liteeth_get_stats64().rx_bytes, 60);
-}
-#[test]
-fn invalid_device_slot_or_length_is_dropped_without_sram_access() {
-    let (mut d, io) = opened();
-    for (slot, n) in [
-        (0, 0),
-        (0, 13),
-        (0, 2049),
-        (0, u32::MAX),
-        (2, 60),
-        (255, 60),
-    ] {
-        io.clear_ops();
-        io.rx(slot, n, 0);
-        d.liteeth_interrupt();
-        assert!(!io.0.borrow().ops.iter().any(|o| matches!(o, Op::From(..))));
-        assert_eq!(io.0.borrow().regs[LITEETH_WRITER_EV_PENDING / 4], 0);
+fn probe_allocation_and_map_failures_rollback() {
+    reset();
+    for n in 0..3 {
+        let mut f = Fixture::new(vec![], Some([2, 0, 0, 0, 0, 1]));
+        memory::fail_after(n);
+        assert_eq!(f.attach(), -12);
+        memory::fail_after(usize::MAX);
+        assert_eq!(memory::live(), 0);
     }
+    for pa in [0x1000, 0x2000] {
+        STATE.with(|s| s.borrow_mut().map_fail = Some(pa));
+        let mut f = Fixture::new(vec![], Some([2, 0, 0, 0, 0, 1]));
+        assert_eq!(f.attach(), -5);
+        assert_eq!(memory::live(), 0);
+        assert_eq!(STATE.with(|s| s.borrow().maps), 0);
+    }
+    STATE.with(|s| s.borrow_mut().map_fail = None);
+    let mut f = fixture();
+    f.detach();
+    assert_eq!(memory::live(), 0);
+}
+#[test]
+fn stop_reopen_and_remove_auto_stop() {
+    reset();
+    let mut f = fixture();
+    f.open();
+    f.close();
+    assert_eq!(STATE.with(|s| s.borrow().bound), 0);
+    f.open();
+    f.detach();
     assert_eq!(
-        (
-            d.liteeth_get_stats64().rx_errors,
-            d.liteeth_get_stats64().rx_dropped
-        ),
-        (6, 6)
+        STATE.with(|s| {
+            let s = s.borrow();
+            (s.bound, s.maps)
+        }),
+        (0, 0)
     );
+    assert_eq!(memory::live(), 0);
 }
 #[test]
-fn small_output_preserves_frame_for_retry() {
-    let (mut d, io) = opened();
-    io.rx(0, 60, 11);
-    d.liteeth_interrupt();
-    assert_eq!(d.receive(&mut [0; 59]), Err(-22));
-    let mut out = [0; 60];
-    assert_eq!(d.receive(&mut out), Ok(60));
-    assert_eq!(out, [11; 60]);
-    assert_eq!(d.receive(&mut out), Ok(0));
-}
-#[test]
-fn full_delivery_slot_keeps_first_frame_and_records_drop() {
-    let (mut d, io) = opened();
-    io.rx(0, 60, 12);
-    d.liteeth_interrupt();
-    io.rx(1, 60, 13);
-    d.liteeth_interrupt();
-    let mut out = [0; 60];
-    d.receive(&mut out).unwrap();
-    assert_eq!(out, [12; 60]);
-    assert_eq!(d.delivery_drops, 1);
-    assert_eq!(d.liteeth_get_stats64().rx_packets, 2);
-}
-#[test]
-fn stop_reopen_keeps_tx_rotation_and_disables_both_event_sources() {
-    let (mut d, io) = opened();
-    assert!(tx(&mut d, &[0; 60]).unwrap());
-    io.tx_done();
-    d.liteeth_interrupt();
-    io.clear_ops();
-    d.stop_device_events();
-    assert_eq!(
-        io.0.borrow().ops,
-        vec![
-            Op::Write(LITEETH_WRITER_EV_ENABLE, 0),
-            Op::Write(LITEETH_READER_EV_ENABLE, 0)
-        ]
-    );
-    assert_eq!(tx(&mut d, &[0; 60]), Err(-22));
-    d.prepare_open().unwrap();
-    d.enable();
-    assert!(tx(&mut d, &[0; 60]).unwrap());
-    assert_eq!(io.0.borrow().regs[LITEETH_READER_SLOT / 4], 1);
-    d.stop_device_events();
-    d.unregister().unwrap();
-    io.clear_ops();
-    assert_eq!(d.prepare_open(), Err(-22));
-    assert!(io.0.borrow().ops.is_empty());
+fn mac_read_and_random_fallback_are_executed() {
+    reset();
+    let f = fixture();
+    assert_eq!(unsafe { (*f.dev()).dev_addr }, [2, 1, 2, 3, 4, 5]);
+    drop(f);
+    let mut f = Fixture::new(vec![], None);
+    assert_eq!(f.attach(), 0);
+    let address = unsafe { (*f.dev()).dev_addr };
+    assert_eq!(address[0] & 3, 2);
+    assert_ne!(address, [0; 6]);
 }

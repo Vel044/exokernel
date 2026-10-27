@@ -27,31 +27,17 @@ liteeth_probe
 
 [platform_get_irq](../../../linux/drivers/base/platform.c#L260) 可能创建或取得硬件 IRQ 到 Linux IRQ 的映射，**返回的 Linux IRQ 不保证等于 GIC INTID**。此时还没有注册 LiteEth 回调。
 
-### 2. Rust：取得 INTID，创建 Notification
+### 2. Rust：取得已解析的 GIC INTID
 
-Rust [liteeth_probe](../../libos/src/drivers/liteeth.rs#L240)：
-
-```rust
-let irqs = [info.mac.intid]; // 来自 EL0 解析的 DTB，保存到 pdev.irqs
-let irq = platform_get_irq(&pdev, 0)?;
-let irq_registration = IrqRegistration::new(ExoIrq::new()?);
-```
-
-[platform_get_irq](../../libos/src/linux_api/platform.rs#L37) 从已经解析好的数组取值：
+[liteeth_probe](../../libos/src/drivers/liteeth.rs)：
 
 ```rust
-dev.irqs.get(index).copied().ok_or(ENXIO)
+let irq = platform_get_irq(pdev, 0);
+if irq < 0 { return irq; }
+(*netdev).irq = irq as u32;
 ```
 
-[ExoIrq::new](../../libos/src/linux_api/exo.rs#L59) → [Notification::create](../../libos/src/kernel_api/notification.rs#L25)：
-
-```rust
-crate::runtime::svc(exo_abi::SYS_NOTIFICATION_CREATE, 0, 0, 0)
-```
-
-`SYS_NOTIFICATION_CREATE(28)` 进入 EL1 的 [notification_create](../../kernel/src/object/ipc.rs#L487)，创建属于当前任务的通知对象，返回 handle。`IrqRegistration` 保存它，初始 `binding=None`；此时还没有绑定或启用 GIC IRQ。
-
-**Linux 使用 IRQ domain 管理编号；当前 Rust 直接保存 GIC INTID，并额外创建接收中断通知的 Notification。**
+`pdev.irqs` 来自 EL0 设备树解析。这里只取编号；Notification 移到 `request_irq` 内创建。Linux 取得虚拟 IRQ；本内核使用 GIC INTID。
 
 ## ② 绑定：从 liteeth_open 开始
 
@@ -93,51 +79,27 @@ retval = __setup_irq(irq, desc, action);
 
 LiteEth 传入 flags=0，未申请共享 IRQ。注册失败就返回错误，设备事件中断不会被启用。
 
-### 2. Rust：EL0 保存回调，EL1 绑定 Notification
+### 2. Rust：保留五个参数和原回调
 
-Rust [liteeth_open](../../libos/src/drivers/liteeth.rs#L141)：
-
-```rust
-self.r#priv.prepare_open()?; // 清 RX/TX 旧 pending
-request_irq(
-    &mut self.irq_registration, // 注册对象，内部持有 Notification
-    self.irq,                  // GIC INTID
-    liteeth::liteeth_interrupt, // EL0 回调
-    0,                         // flags
-    DRV_NAME,
-)?;
-self.r#priv.enable();           // 成功后写 RX/TX EV_ENABLE=1
-```
-
-[linux_api::request_irq](../../libos/src/linux_api/interrupt.rs#L41) 检查尚未绑定、flags=0，再执行：
+[liteeth_open](../../libos/src/drivers/liteeth.rs)：
 
 ```rust
-registration.backend.bind(irq)?;                     // 绑定失败立即返回
-registration.binding = Some((irq, handler, name));  // EL0 保存函数指针
+let err = request_irq((*netdev).irq, liteeth_interrupt, 0,
+                      (*netdev).name.as_ptr(), netdev.cast());
+if err != 0 { /* 原日志 */ return err; }
 ```
 
-`backend.bind` 实际进入 [ExoIrq::bind](../../libos/src/linux_api/exo.rs#L66)：
-
-```rust
-self.notification.bind_irq(irq, 1).map_err(|_| -5) // badge=1 表示这个 IRQ 事件
-```
-
-往下调用：
+[interrupt.rs](../../libos/src/linux_api/interrupt.rs) 保存 `handler/flags/name/dev`。回调仍是 `liteeth_interrupt(irq, dev_id) -> irqreturn_t`，`dev_id` 就是注册时的 `netdev`。
 
 ```text
-liteeth_open → request_irq
-  → ExoIrq::bind → Notification::bind_irq
-  → runtime::irq_bind_notification
-  → SYS_IRQ_BIND(7)：INTID、Notification handle、badge=1、目标当前 CPU
-  → EL1 sys_irq_bind
-    → task::bind_irq：登记 INTID / handle / badge
-    → gic::configure_spi：设置触发类型及目标 CPU
-    → gic::enable_spi：开放这根 IRQ
+request_irq
+  → NOTIFICATION_CREATE(28)                    建硬件事件通知
+  → IRQ_BIND(7)：INTID、Notification、badge=1  EL1 校验 grant/owner 并建立路由
+  → 建处理完成通知
+  → THREAD_CREATE(18)                         在绑定 CPU 创建 EL0 IRQ 服务线程
 ```
 
-[runtime::irq_bind_notification](../../libos/src/runtime/mod.rs#L344) 执行系统调用；[sys_irq_bind](../../kernel/src/syscall/dispatch.rs#L605) 校验 SPI 编号、IRQ grant、通知对象所有者、badge、目标 CPU 和重复绑定。触发类型取自内核的 grant flags，成功返回 0；其他 IRQ flags 当前在 EL0 返回不支持。
-
-**函数指针留在 EL0；EL1 只保存 INTID 与 Notification 的关系。** Linux 注册时保存 `dev_id=netdev`；Rust 在派发时才通过 `&mut self.r#priv` 传入驱动状态。
+成功后原驱动才打开 RX/TX 设备事件。回调指针留在 EL0；EL1 只保存 IRQ→Notification 路由。LiteEth 传 `flags=0`；其他 flags 当前明确返回不支持。
 
 ## ③ 触发：从硬件事件到 liteeth_interrupt
 
@@ -163,44 +125,22 @@ res = action->handler(irq, action->dev_id); // 进入 liteeth_interrupt
 
 普通未强制线程化的配置下，回调在内核硬中断上下文执行；`threadirqs` / PREEMPT_RT 等配置可能改为 IRQ 线程执行。应用不需要先调用 read 才触发驱动接收。
 
-### 2. Rust：EL1 通知，EL0 wait_irq 派发
-
-应用在 [liteeth_smoke.rs](../../libos/src/apps/liteeth_smoke.rs#L92) 中调用：
-
-```rust
-driver.wait_irq().unwrap_or_else(|e| fail(b"IRQ", e)); // 等通知并执行驱动回调
-let n = driver.receive(&mut frame);                  // 从已收好的本地队列取帧
-```
-
-从 [Driver::wait_irq](../../libos/src/drivers/liteeth.rs#L412) 进入 [wait_and_dispatch](../../libos/src/linux_api/interrupt.rs#L30)：
-
-```rust
-let (irq, handler, _) = self.binding.ok_or(EINVAL)?;
-if self.backend.wait()? { // ExoIrq → Notification::wait → SYS_NOTIFICATION_WAIT(30)
-    handler(context);    // liteeth_interrupt(&mut self.r#priv)
-    self.backend.ack(irq)?;
-}
-```
-
-[Notification::wait](../../libos/src/kernel_api/notification.rs#L57) 把 handle 传给内核。有 pending badge 就取走并返回；没有则阻塞当前线程。设备中断到达时，[EL1 IRQ 入口](../../kernel/src/syscall/dispatch.rs#L270) 按顺序执行：
-
-```rust
-crate::gic::disable_spi(intid);                       // 暂时屏蔽这根 IRQ
-crate::gic::write_eoir(iar_token);                    // 写 GIC EOIR / DIR
-crate::task::record_irq_pending(intid);               // 等待用户态 ACK
-let _ = crate::ipc::notification_signal(notification, badge); // 投递通知、唤醒等待线程
-```
+### 2. Rust：服务线程自动调用，不等应用 read
 
 ```text
-LiteEth → GIC → EL1 IRQ 入口
-  → 屏蔽 SPI → EOI/deactivate → 投递 Notification
-  → EL0 的 WAIT 返回 badge
-  → wait_and_dispatch 调用 liteeth_interrupt
+设备 pending → GIC → EL1 IRQ 异常
+  → 屏蔽该 SPI，执行 GIC EOI/DIR，投递硬件 Notification
+  → IRQ 服务线程的 NOTIFICATION_WAIT(30) 返回
+  → 取得设备锁，调用 liteeth_interrupt(irq, 原 dev_id)
+      → 原顺序：TX pending / wake queue / W1C，再 RX / memcpy_fromio / W1C
+  → IRQ_ACK(9)                                EL1 重新开放 SPI
+  → 网络核心推进被唤醒的积压发送
+  → SIGNAL(29)                               通知应用处理完成
 ```
 
-中断先到时，badge 会保留到 WAIT 取走；多个 badge 按位合并，不是事件次数计数。这里的 `notification_signal` 是 EL1 内部调用，不经过 `SYS_NOTIFICATION_SIGNAL`。
+[exo.rs::irq_worker](../../libos/src/linux_api/exo.rs) 循环执行 [interrupt::dispatch](../../libos/src/linux_api/interrupt.rs)。应用的 `Driver::wait_irq` 只等待完成通知，不负责调用硬件回调。
 
-**Rust 必须由所属 EL0 线程调用 `wait_irq` 才执行回调。** 内核只处理 GIC 和通知，不处理 LiteEth 寄存器或数据包。
+Linux 回调运行于内核 IRQ 上下文；这里运行于 EL0 服务线程。设备锁避免回调和应用同时修改普通统计/报文队列；应用阻塞等待通知时不持锁。
 
 ## ④ 结束：从 liteeth_interrupt 返回，再到 liteeth_stop 解绑
 
@@ -217,7 +157,7 @@ if (reg) {
 return IRQ_HANDLED;
 ```
 
-Rust [liteeth_interrupt](../../libos/src/drivers/liteeth.rs#L121) 对应：
+Rust [liteeth_interrupt](../../libos/src/drivers/liteeth.rs) 对应：
 
 ```rust
 let reg = litex_read8(&self.base, LITEETH_WRITER_EV_PENDING);
@@ -241,65 +181,28 @@ liteeth_interrupt 返回 IRQ_HANDLED
 
 见 [handle_fasteoi_irq](../../../linux/kernel/irq/chip.c#L687) 和 [GIC 的 irq_eoi 实现](../../../linux/drivers/irqchip/irq-gic.c#L218)。普通模式在此写 EOIR；分离 deactivate 的模式在中断入口先写 EOIR，回调后再写 DIR。具体顺序由 irqchip 和配置决定，LiteEth 不执行用户态 ACK 系统调用。
 
-### 3. Rust：回调返回后，通过 ACK 重新开放 SPI
+### 3. Rust：先关设备，再同步解除注册
 
-[wait_and_dispatch](../../libos/src/linux_api/interrupt.rs#L30) 在 `handler(context)` 返回后调用 `ExoIrq::ack`。后者在 [exo.rs](../../libos/src/linux_api/exo.rs#L74) 执行并检查：
-
-```rust
-match runtime::svc(exo_abi::SYS_IRQ_ACK, irq as u64, 0, 0) {
-    0 => Ok(()),
-    _ => Err(-5),
-}
-```
-
-`SYS_IRQ_ACK(9)` → [sys_irq_ack](../../kernel/src/syscall/dispatch.rs#L657) → [task::ack_irq](../../kernel/src/object/task.rs#L490)：找到该 INTID 的绑定，确认 `awaiting_ack=true`，清除该状态并 `gic::enable_spi(intid)`；没有绑定或不在等待 ACK 则失败。
-
-| 动作 | 当前 Rust 中的位置 | 作用 |
-| --- | --- | --- |
-| 清 `EV_PENDING` | EL0 `liteeth_interrupt` | 清 LiteEth 设备事件 |
-| 写 EOIR / DIR | EL1 硬件 IRQ 入口 | GIC priority drop / deactivate |
-| `SYS_IRQ_ACK` | EL0 回调返回后请求 EL1 | 校验处理状态，重新开放 SPI |
-
-**ACK 不再写 EOI；EOIR/DIR 在投递通知前已经写过。**
-
-### 4. 最终解绑：从 liteeth_stop 到 free_irq
-
-Linux [liteeth_stop](../../../linux/drivers/net/ethernet/litex/litex_liteeth.c#L150)：
-
-```c
-netif_stop_queue(netdev);
-netif_carrier_off(netdev);
-litex_write8(priv->base + LITEETH_WRITER_EV_ENABLE, 0);
-litex_write8(priv->base + LITEETH_READER_EV_ENABLE, 0);
-free_irq(netdev->irq, netdev);
-```
-
-往下进入 [free_irq / __free_irq](../../../linux/kernel/irq/manage.c#L1879)：按 `dev_id` 移除 action；最后一个 handler 移除时关闭 IRQ，等待其他 CPU 上正在执行的处理结束，再释放 action。
-
-Rust [liteeth_stop](../../libos/src/drivers/liteeth.rs#L162)：
-
-```rust
-if self.irq_registration.is_bound() {
-    self.r#priv.stop_device_events();       // 停队列、断链路、写 EV_ENABLE=0
-    free_irq(&mut self.irq_registration)?;
-}
-```
-
-[linux_api::free_irq](../../libos/src/linux_api/interrupt.rs#L59) 先解绑，成功后才删除 EL0 回调：
-
-```rust
-let (irq, _, _) = registration.binding.ok_or(EINVAL)?;
-registration.backend.unbind(irq)?;
-registration.binding = None;
-```
+[liteeth_stop](../../libos/src/drivers/liteeth.rs) 保留原顺序：
 
 ```text
-liteeth_stop → free_irq → ExoIrq::unbind → runtime::irq_unbind
-  → SYS_IRQ_UNBIND(10) → sys_irq_unbind → task::unbind_irq
-  → 禁用 SPI，删除 EL1 绑定
-  → 返回 EL0，清除 binding 中的函数指针
+netif_stop_queue → netif_carrier_off
+  → 关闭 RX / TX EV_ENABLE
+  → free_irq(irq, netdev)
 ```
 
-[task::unbind_irq](../../kernel/src/object/task.rs#L404) 负责禁用和删除绑定；失败则保留 EL0 binding。当前驱动与注册对象由单个 EL0 线程独占、通过 `&mut` 串行派发，因此没有照搬 Linux 的跨 CPU 回调等待机制。
+[free_irq](../../libos/src/linux_api/interrupt.rs) 的返回值与 Linux 一样是注册时的名称指针：
 
-`stop` 保留 Notification，供重新 `open` 使用。最终 `liteeth_remove` 消费 Driver，或直接 Drop Driver 时，都会先 stop，再由 [ExoIrq::drop](../../libos/src/linux_api/exo.rs#L85) → `Notification::destroy` → `SYS_NOTIFICATION_DESTROY(32)` 销毁通知。内核拒绝销毁仍绑定 IRQ 或仍有等待线程的对象；清理失败时终止执行，禁止继续回收仍被使用的资源。
+```text
+移除相同 irq/dev_id 的 action，禁止新回调
+  → IRQ_UNBIND(10)                            EL1 关路由并清状态
+  → SIGNAL(29, badge=2)                       取消服务线程尚未结束的等待
+  → 等在途 callback 返回                     不把设备提前释放
+  → 服务线程 THREAD_EXIT(19) 自动回收；旧 handle 失效后确认退出
+  → NOTIFICATION_DESTROY(32)                  销毁硬件通知和完成通知
+  → 释放 EL0 注册记录，返回原 name 指针
+```
+
+线程退出同步使用 `THREAD_RUNTIME(33)` 查询旧句柄，等待时 `THREAD_YIELD(20)`。具体编号以 [abi/src/lib.rs](../../abi/src/lib.rs) 为准。
+
+Linux 通过 `synchronize_irq` 等待内核在途处理；这里同步服务线程和回调。两边都要求 `free_irq` 返回后才能释放回调使用的设备状态；不能在自身回调里调用它。

@@ -55,3 +55,6 @@ pub(crate) mod xhci;
 
 #[cfg(any(feature = "ide", feature = "app-liteeth-rust-smoke"))]
 pub(crate) mod liteeth;
+
+#[cfg(any(feature = "ide", feature = "app-liteeth-rust-smoke"))]
+pub(crate) mod liteeth_runtime;

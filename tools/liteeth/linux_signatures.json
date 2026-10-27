@@ -1,0 +1,197 @@
+{
+  "request_irq": {
+    "parameters": "irq:u32,handler:irq_handler_t,flags:u64,name:*constc_char,dev:*mutc_void",
+    "return": "i32",
+    "path": "libos/src/linux_api/interrupt.rs"
+  },
+  "free_irq": {
+    "parameters": "irq:u32,dev_id:*mutc_void",
+    "return": "*constc_void",
+    "path": "libos/src/linux_api/interrupt.rs"
+  },
+  "litex_read8": {
+    "parameters": "reg:*mutc_void",
+    "return": "u8",
+    "path": "libos/src/linux_api/io.rs"
+  },
+  "litex_read32": {
+    "parameters": "reg:*mutc_void",
+    "return": "u32",
+    "path": "libos/src/linux_api/io.rs"
+  },
+  "litex_write8": {
+    "parameters": "reg:*mutc_void,val:u8",
+    "return": "()",
+    "path": "libos/src/linux_api/io.rs"
+  },
+  "litex_write16": {
+    "parameters": "reg:*mutc_void,val:u16",
+    "return": "()",
+    "path": "libos/src/linux_api/io.rs"
+  },
+  "memcpy_fromio": {
+    "parameters": "to:*mutu8,from:*constc_void,count:usize",
+    "return": "()",
+    "path": "libos/src/linux_api/io.rs"
+  },
+  "memcpy_toio": {
+    "parameters": "to:*mutc_void,from:*constu8,count:usize",
+    "return": "()",
+    "path": "libos/src/linux_api/io.rs"
+  },
+  "IS_ERR": {
+    "parameters": "ptr:*constc_void",
+    "return": "bool",
+    "path": "libos/src/linux_api/error.rs"
+  },
+  "PTR_ERR": {
+    "parameters": "ptr:*constc_void",
+    "return": "i64",
+    "path": "libos/src/linux_api/error.rs"
+  },
+  "unlikely": {
+    "parameters": "x:bool",
+    "return": "bool",
+    "path": "libos/src/linux_api/error.rs"
+  },
+  "netdev_alloc_skb_ip_align": {
+    "parameters": "dev:*mutnet_device,length:u32",
+    "return": "*mutsk_buff",
+    "path": "libos/src/linux_api/skbuff.rs"
+  },
+  "skb_put": {
+    "parameters": "skb:*mutsk_buff,len:u32",
+    "return": "*mutu8",
+    "path": "libos/src/linux_api/skbuff.rs"
+  },
+  "eth_type_trans": {
+    "parameters": "skb:*mutsk_buff,dev:*mutnet_device",
+    "return": "u16",
+    "path": "libos/src/linux_api/skbuff.rs"
+  },
+  "netif_rx": {
+    "parameters": "skb:*mutsk_buff",
+    "return": "i32",
+    "path": "libos/src/linux_api/skbuff.rs"
+  },
+  "dev_kfree_skb_any": {
+    "parameters": "skb:*mutsk_buff",
+    "return": "()",
+    "path": "libos/src/linux_api/skbuff.rs"
+  },
+  "net_ratelimit": {
+    "parameters": "",
+    "return": "i32",
+    "path": "libos/src/linux_api/printk.rs"
+  },
+  "devm_alloc_etherdev": {
+    "parameters": "dev:*mutdevice,sizeof_priv:i32",
+    "return": "*mutnet_device",
+    "path": "libos/src/linux_api/netdevice.rs"
+  },
+  "netdev_priv": {
+    "parameters": "dev:*constnet_device",
+    "return": "*mutc_void",
+    "path": "libos/src/linux_api/netdevice.rs"
+  },
+  "SET_NETDEV_DEV": {
+    "parameters": "net:*mutnet_device,pdev:*mutdevice",
+    "return": "()",
+    "path": "libos/src/linux_api/netdevice.rs"
+  },
+  "register_netdev": {
+    "parameters": "dev:*mutnet_device",
+    "return": "i32",
+    "path": "libos/src/linux_api/netdevice.rs"
+  },
+  "unregister_netdev": {
+    "parameters": "dev:*mutnet_device",
+    "return": "()",
+    "path": "libos/src/linux_api/netdevice.rs"
+  },
+  "netif_queue_stopped": {
+    "parameters": "dev:*constnet_device",
+    "return": "bool",
+    "path": "libos/src/linux_api/netdevice.rs"
+  },
+  "netif_start_queue": {
+    "parameters": "dev:*mutnet_device",
+    "return": "()",
+    "path": "libos/src/linux_api/netdevice.rs"
+  },
+  "netif_stop_queue": {
+    "parameters": "dev:*mutnet_device",
+    "return": "()",
+    "path": "libos/src/linux_api/netdevice.rs"
+  },
+  "netif_wake_queue": {
+    "parameters": "dev:*mutnet_device",
+    "return": "()",
+    "path": "libos/src/linux_api/netdevice.rs"
+  },
+  "netif_carrier_on": {
+    "parameters": "dev:*mutnet_device",
+    "return": "()",
+    "path": "libos/src/linux_api/netdevice.rs"
+  },
+  "netif_carrier_off": {
+    "parameters": "dev:*mutnet_device",
+    "return": "()",
+    "path": "libos/src/linux_api/netdevice.rs"
+  },
+  "dev_sw_netstats_rx_add": {
+    "parameters": "dev:*mutnet_device,len:u32",
+    "return": "()",
+    "path": "libos/src/linux_api/netdevice.rs"
+  },
+  "dev_sw_netstats_tx_add": {
+    "parameters": "dev:*mutnet_device,packets:u32,len:u32",
+    "return": "()",
+    "path": "libos/src/linux_api/netdevice.rs"
+  },
+  "netdev_stats_to_stats64": {
+    "parameters": "stats64:*mutrtnl_link_stats64,netdev_stats:*constnet_device_stats",
+    "return": "()",
+    "path": "libos/src/linux_api/netdevice.rs"
+  },
+  "dev_fetch_sw_netstats": {
+    "parameters": "s:*mutrtnl_link_stats64,netstats:*constpcpu_sw_netstats",
+    "return": "()",
+    "path": "libos/src/linux_api/netdevice.rs"
+  },
+  "eth_hw_addr_random": {
+    "parameters": "dev:*mutnet_device",
+    "return": "()",
+    "path": "libos/src/linux_api/netdevice.rs"
+  },
+  "platform_set_drvdata": {
+    "parameters": "pdev:*mutplatform_device,data:*mutc_void",
+    "return": "()",
+    "path": "libos/src/linux_api/platform.rs"
+  },
+  "platform_get_drvdata": {
+    "parameters": "pdev:*constplatform_device",
+    "return": "*mutc_void",
+    "path": "libos/src/linux_api/platform.rs"
+  },
+  "platform_get_irq": {
+    "parameters": "dev:*mutplatform_device,num:u32",
+    "return": "i32",
+    "path": "libos/src/linux_api/platform.rs"
+  },
+  "of_property_read_u32": {
+    "parameters": "np:*constdevice_node,propname:*constc_char,out_value:*mutu32",
+    "return": "i32",
+    "path": "libos/src/linux_api/platform.rs"
+  },
+  "of_get_ethdev_address": {
+    "parameters": "np:*mutdevice_node,dev:*mutnet_device",
+    "return": "i32",
+    "path": "libos/src/linux_api/platform.rs"
+  },
+  "devm_platform_ioremap_resource_byname": {
+    "parameters": "pdev:*mutplatform_device,name:*constc_char",
+    "return": "*mutc_void",
+    "path": "libos/src/linux_api/platform.rs"
+  }
+}

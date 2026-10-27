@@ -1,737 +1,90 @@
 {
-  "version": 4,
-  "status": "implemented_and_tested",
+  "version": 6,
+  "status": "driver_runs_dependency_semantics_not_fully_equivalent",
+  "migration_constraints": {
+    "recorded_on": "2026-10-26",
+    "document": "驱动逐函数翻译约束.md",
+    "precedence": "后续验收按这三条硬约束执行；下方旧范围、替换策略和同名约定记录历史实现，不构成例外。",
+    "rules": [
+      {
+        "id": 1,
+        "subject": "驱动入口",
+        "preserve": "函数名、参数名、参数数量与顺序、类型含义、返回协议和语义",
+        "reject": "擅自将原显式参数替换为 self、删除参数或将输出参数改成返回对象"
+      },
+      {
+        "id": 2,
+        "subject": "驱动调用的依赖函数",
+        "preserve": "函数名、参数名、参数数量与顺序、类型含义、返回协议，以及成功/失败、阻塞/回调、资源和并发语义",
+        "reject": "增加后端参数、删除上下文、缩小行为范围或用同名简化实现冒充语义一致"
+      },
+      {
+        "id": 3,
+        "subject": "有意义的分支",
+        "preserve": "条件、嵌套、顺序、分支操作、返回值、错误及清理路径，能够逐项对照源码",
+        "reject": "擅自增加、删除、合并或移出原分支，以及用问号、unwrap/expect 或断言隐藏重要分支"
+      }
+    ],
+    "language_mapping": "只允许明确且保留语义的 C/Rust 类型及语法映射；接口和返回协议变化默认不符合。",
+    "existing_implementation_conformance": "driver_structure_verified_dependency_semantics_partial",
+    "verification": "9 个入口签名、20 个 if 条件/嵌套、调用序列及 49 个依赖定义已核查；行为测试与剩余语义差距见整改结果。",
+    "existing_test_evidence": "target/liteeth-comparison/20261026-163330/summary.json"
+  },
   "source": {
     "path": "libos/vendor/liteeth-linux/litex_liteeth.c",
     "version": "Linux 6.12.75",
-    "sha256": "bb8b3c2cac2f8821647c66cf00a96adf7eed02b0c6c9acc925d37eb7b628285e"
+    "sha256": "da562e8b074295a2188439e97c420588204737d1978c5fb8bd616d8bee8858cb",
+    "code_token_sha256": "8a529b65b903970915b08691ec9ee807c661887c2be9fb4a6c510d540f0dc74f",
+    "local_linux": "../linux/drivers/net/ethernet/litex/litex_liteeth.c",
+    "comment_only_differences_allowed": true
   },
-  "generation": {
-    "method": "当前会话 AI 阅读源文件与依赖实现后定向重写，再通过构建和测试修订",
-    "task": "翻译为直接使用 exokernel 现有接口的 Rust LiteEth 驱动；保留原 C 文件作对照",
-    "not_claimed": [
-      "可重放的自动翻译器",
-      "可执行语义 IR 编译管线",
-      "完整 Linux 兼容",
-      "完整功能形式化等价"
-    ],
-    "contract_timing": "Rust 实现和对照测试完成后汇总；不是生成前冻结的输入",
-    "actual_sequence": [
-      "阅读原始源码、已有定位清单及依赖实现",
-      "在会话分析中决定替换方式并编写 Rust 实现",
-      "构建、宿主测试和 QEMU C/Rust 对照",
-      "事后整理本结构化契约及实验汇报"
-    ],
-    "stage_limitations": [
-      "生成前未单独交付完整驱动解释与未知项列表",
-      "生成前未固定完整、带版本的依赖替换契约",
-      "没有读取契约并生成实现的自动工具",
-      "忙状态未逐事件采用相同时序重放",
-      "非法 RX 异常等并未全部在 C/Rust 间差分验证"
-    ]
+  "driver": {
+    "implementation": "libos/src/drivers/liteeth.rs",
+    "runtime": "libos/src/drivers/liteeth_runtime.rs",
+    "entry_count": 9,
+    "branch_count": 20,
+    "interfaces": "同名接口映射.json",
+    "ordinary_interfaces": 39,
+    "macros": 10
   },
-  "scope": [
-    "单设备、单所属 EL0 线程",
-    "线性完整 L2 帧，18..2048 字节测试输入",
-    "固定 MMIO VA；原有 EL1 grant 和 Notification/ACK 机制",
-    "设备 SRAM 复制，无 DMA"
-  ],
-  "functions": [
-    {
-      "source_function": "liteeth_rx",
-      "source_line": 57,
-      "target": "liteeth::liteeth_rx",
-      "invariant": "按 slot/length 读取 SRAM，以同名 skb_put/eth_type_trans/netif_rx 交付完整帧；保持有界输入检查",
-      "target_path": "libos/src/drivers/liteeth.rs",
-      "target_line": 88
-    },
-    {
-      "source_function": "liteeth_interrupt",
-      "source_line": 92,
-      "target": "liteeth::liteeth_interrupt",
-      "invariant": "同名 request_irq 注册 EL0 回调；先 TX 后 RX，设备 W1C 在 kernel IRQ_ACK 前",
-      "target_path": "libos/src/drivers/liteeth.rs",
-      "target_line": 119
-    },
-    {
-      "source_function": "liteeth_open",
-      "source_line": 114,
-      "target": "Driver::liteeth_open",
-      "invariant": "清旧 pending → 绑定 Notification → 开设备事件",
-      "target_path": "libos/src/drivers/liteeth.rs",
-      "target_line": 140
-    },
-    {
-      "source_function": "liteeth_stop",
-      "source_line": 139,
-      "target": "Driver::liteeth_stop",
-      "invariant": "停止发送 → 关闭两路设备事件 → IRQ_UNBIND",
-      "target_path": "libos/src/drivers/liteeth.rs",
-      "target_line": 160
-    },
-    {
-      "source_function": "liteeth_start_xmit",
-      "source_line": 154,
-      "target": "liteeth::liteeth_start_xmit",
-      "invariant": "队列/READY 检查 → BUSY 原样归还 skb；OK 路径完成或丢弃并消费 skb → SRAM copy → SLOT/LENGTH/START → 统计和轮转",
-      "target_path": "libos/src/drivers/liteeth.rs",
-      "target_line": 175
-    },
-    {
-      "source_function": "liteeth_get_stats64",
-      "source_line": 195,
-      "target": "liteeth::liteeth_get_stats64",
-      "invariant": "单所属线程返回值类型统计，不构造 Linux 结构",
-      "target_path": "libos/src/drivers/liteeth.rs",
-      "target_line": 205
-    },
-    {
-      "source_function": "liteeth_setup_slots",
-      "source_line": 209,
-      "target": "liteeth_setup_slots",
-      "invariant": "延用 2/2/2048 默认值，并校验乘积和资源容量",
-      "target_path": "libos/src/drivers/liteeth.rs",
-      "target_line": 215
-    },
-    {
-      "source_function": "liteeth_probe",
-      "source_line": 233,
-      "target": "Driver::liteeth_probe",
-      "invariant": "创建网卡和统计 → 取 IRQ → 独占固定 VA/创建通知 → 映射两段设备区 → 设置槽位 → 本地注册；失败时 Drop 回滚",
-      "target_path": "libos/src/drivers/liteeth.rs",
-      "target_line": 231
-    },
-    {
-      "source_function": "liteeth_remove",
-      "source_line": 297,
-      "target": "Driver::liteeth_remove",
-      "invariant": "先关闭/解绑，再释放映射、通知和固定 VA 所有权",
-      "target_path": "libos/src/drivers/liteeth.rs",
-      "target_line": 319
-    }
-  ],
-  "dependencies": [
-    {
-      "name": "IS_ERR",
-      "action": "same_name_rust_wrapper",
-      "target": "libos/src/linux_api/error.rs::IS_ERR",
-      "reason": "Rust Result/bool，不使用 C 错误指针 ABI；unlikely 不提供分支优化保证。",
-      "initial_experiment": {
-        "action": "replace",
-        "target": "Result / match / 条件分支",
-        "reason": "不再使用编码错误指针；unlikely 不承担设备语义"
-      }
-    },
-    {
-      "name": "MODULE_AUTHOR",
-      "action": "same_name_rust_wrapper",
-      "target": "libos/src/linux_api/module.rs::MODULE_AUTHOR",
-      "reason": "同名元信息构造函数与显式 OF probe/remove，不提供 Linux 动态模块加载。",
-      "initial_experiment": {
-        "action": "eliminate",
-        "target": "Cargo 场景分发与 SPDX/原始源码版权文件",
-        "reason": "不提供 Linux 模块加载和总线自动匹配；保留来源与版权"
-      }
-    },
-    {
-      "name": "MODULE_DESCRIPTION",
-      "action": "same_name_rust_wrapper",
-      "target": "libos/src/linux_api/module.rs::MODULE_DESCRIPTION",
-      "reason": "同名元信息构造函数与显式 OF probe/remove，不提供 Linux 动态模块加载。",
-      "initial_experiment": {
-        "action": "eliminate",
-        "target": "Cargo 场景分发与 SPDX/原始源码版权文件",
-        "reason": "不提供 Linux 模块加载和总线自动匹配；保留来源与版权"
-      }
-    },
-    {
-      "name": "MODULE_DEVICE_TABLE",
-      "action": "same_name_rust_wrapper",
-      "target": "libos/src/linux_api/module.rs::MODULE_DEVICE_TABLE",
-      "reason": "同名元信息构造函数与显式 OF probe/remove，不提供 Linux 动态模块加载。",
-      "initial_experiment": {
-        "action": "eliminate",
-        "target": "Cargo 场景分发与 SPDX/原始源码版权文件",
-        "reason": "不提供 Linux 模块加载和总线自动匹配；保留来源与版权"
-      }
-    },
-    {
-      "name": "MODULE_LICENSE",
-      "action": "same_name_rust_wrapper",
-      "target": "libos/src/linux_api/module.rs::MODULE_LICENSE",
-      "reason": "同名元信息构造函数与显式 OF probe/remove，不提供 Linux 动态模块加载。",
-      "initial_experiment": {
-        "action": "eliminate",
-        "target": "Cargo 场景分发与 SPDX/原始源码版权文件",
-        "reason": "不提供 Linux 模块加载和总线自动匹配；保留来源与版权"
-      }
-    },
-    {
-      "name": "PTR_ERR",
-      "action": "same_name_rust_wrapper",
-      "target": "libos/src/linux_api/error.rs::PTR_ERR",
-      "reason": "Rust Result/bool，不使用 C 错误指针 ABI；unlikely 不提供分支优化保证。",
-      "initial_experiment": {
-        "action": "replace",
-        "target": "Result / match / 条件分支",
-        "reason": "不再使用编码错误指针；unlikely 不承担设备语义"
-      }
-    },
-    {
-      "name": "SET_NETDEV_DEV",
-      "action": "same_name_rust_wrapper",
-      "target": "libos/src/linux_api/netdevice.rs::SET_NETDEV_DEV",
-      "reason": "单所属线程、单发送队列；本地对象/统计，不提供 Linux qdisc、per-CPU 并发与 socket。",
-      "initial_experiment": {
-        "action": "replace",
-        "target": "Driver / Device 的字段和所有权",
-        "reason": "消除 Linux 对象和私有指针关联；限定单设备、单所属线程"
-      }
-    },
-    {
-      "name": "dev_dbg",
-      "action": "same_name_rust_wrapper",
-      "target": "libos/src/linux_api/printk.rs::dev_dbg",
-      "reason": "显式输出后端和实例独立限流；不是 Linux 全局 printk 配置。",
-      "initial_experiment": {
-        "action": "replace",
-        "target": "应用错误日志 / 确定的测试统计",
-        "reason": "取消 Linux 日志接口，未保留全部逐字日志；该驱动无时间驱动的硬件协议"
-      }
-    },
-    {
-      "name": "dev_err",
-      "action": "same_name_rust_wrapper",
-      "target": "libos/src/linux_api/printk.rs::dev_err",
-      "reason": "显式输出后端和实例独立限流；不是 Linux 全局 printk 配置。",
-      "initial_experiment": {
-        "action": "replace",
-        "target": "应用错误日志 / 确定的测试统计",
-        "reason": "取消 Linux 日志接口，未保留全部逐字日志；该驱动无时间驱动的硬件协议"
-      }
-    },
-    {
-      "name": "dev_fetch_sw_netstats",
-      "action": "same_name_rust_wrapper",
-      "target": "libos/src/linux_api/netdevice.rs::dev_fetch_sw_netstats",
-      "reason": "单所属线程、单发送队列；本地对象/统计，不提供 Linux qdisc、per-CPU 并发与 socket。",
-      "initial_experiment": {
-        "action": "replace",
-        "target": "Stats 值类型",
-        "reason": "保留计数含义；不承诺 Linux per-CPU 并发统计"
-      }
-    },
-    {
-      "name": "dev_kfree_skb_any",
-      "action": "same_name_rust_wrapper",
-      "target": "libos/src/linux_api/skbuff.rs::dev_kfree_skb_any",
-      "reason": "有界线性 skb；显式所有权和容量；仅完整 L2 交付，不支持分片/GSO/DSA。",
-      "initial_experiment": {
-        "action": "same_name_rust_wrapper",
-        "target": "拥有所有权的线性 sk_buff；BUSY 原样归还，OK 显式消费",
-        "reason": "保留 Linux NETDEV_TX_BUSY/OK 的 skb 所有权规则；不做每包堆分配"
-      }
-    },
-    {
-      "name": "dev_sw_netstats_rx_add",
-      "action": "same_name_rust_wrapper",
-      "target": "libos/src/linux_api/netdevice.rs::dev_sw_netstats_rx_add",
-      "reason": "单所属线程、单发送队列；本地对象/统计，不提供 Linux qdisc、per-CPU 并发与 socket。",
-      "initial_experiment": {
-        "action": "replace",
-        "target": "Stats 值类型",
-        "reason": "保留计数含义；不承诺 Linux per-CPU 并发统计"
-      }
-    },
-    {
-      "name": "dev_sw_netstats_tx_add",
-      "action": "same_name_rust_wrapper",
-      "target": "libos/src/linux_api/netdevice.rs::dev_sw_netstats_tx_add",
-      "reason": "单所属线程、单发送队列；本地对象/统计，不提供 Linux qdisc、per-CPU 并发与 socket。",
-      "initial_experiment": {
-        "action": "replace",
-        "target": "Stats 值类型",
-        "reason": "保留计数含义；不承诺 Linux per-CPU 并发统计"
-      }
-    },
-    {
-      "name": "devm_alloc_etherdev",
-      "action": "same_name_rust_wrapper",
-      "target": "libos/src/linux_api/netdevice.rs::devm_alloc_etherdev",
-      "reason": "单所属线程、单发送队列；本地对象/统计，不提供 Linux qdisc、per-CPU 并发与 socket。",
-      "initial_experiment": {
-        "action": "replace",
-        "target": "Driver / Device 的字段和所有权",
-        "reason": "消除 Linux 对象和私有指针关联；限定单设备、单所属线程"
-      }
-    },
-    {
-      "name": "devm_netdev_alloc_pcpu_stats",
-      "action": "same_name_rust_wrapper",
-      "target": "libos/src/linux_api/netdevice.rs::devm_netdev_alloc_pcpu_stats",
-      "reason": "单所属线程、单发送队列；本地对象/统计，不提供 Linux qdisc、per-CPU 并发与 socket。",
-      "initial_experiment": {
-        "action": "replace",
-        "target": "Stats 值类型",
-        "reason": "保留计数含义；不承诺 Linux per-CPU 并发统计"
-      }
-    },
-    {
-      "name": "devm_platform_ioremap_resource_byname",
-      "action": "same_name_rust_wrapper",
-      "target": "libos/src/linux_api/platform.rs::devm_platform_ioremap_resource_byname",
-      "reason": "调用者提供通用资源/属性；映射由后端校验授权，返回对象 Drop 回收。",
-      "initial_experiment": {
-        "action": "map",
-        "target": "Mapping::map / Drop → runtime MAP_MMIO / UNMAP_MMIO",
-        "reason": "保留页对齐、Device 内存属性、grant 审核和失败释放"
-      }
-    },
-    {
-      "name": "eth_hw_addr_random",
-      "action": "same_name_rust_wrapper",
-      "target": "libos/src/linux_api/netdevice.rs::eth_hw_addr_random",
-      "reason": "单所属线程、单发送队列；本地对象/统计，不提供 Linux qdisc、per-CPU 并发与 socket。",
-      "initial_experiment": {
-        "action": "out_of_scope",
-        "target": "上层 DeviceInfo.address",
-        "reason": "原文件只设置 net_device 身份，不写硬件 MAC 寄存器；本次上层提供完整 L2 帧，不生成 MAC、ARP 或 IP"
-      }
-    },
-    {
-      "name": "eth_type_trans",
-      "action": "same_name_rust_wrapper",
-      "target": "libos/src/linux_api/skbuff.rs::eth_type_trans",
-      "reason": "有界线性 skb；显式所有权和容量；仅完整 L2 交付，不支持分片/GSO/DSA。",
-      "initial_experiment": {
-        "action": "replace",
-        "target": "Device 接收槽 → Driver::receive",
-        "reason": "交付完整帧，不进行 Linux 协议分类；槽满保留第一帧并显式记录 delivery_drops"
-      }
-    },
-    {
-      "name": "free_irq",
-      "action": "same_name_rust_wrapper",
-      "target": "libos/src/linux_api/interrupt.rs::free_irq",
-      "reason": "独占 IRQ、flags=0、EL0 串行回调；不支持 IRQF_SHARED 或硬中断上下文。",
-      "initial_experiment": {
-        "action": "map",
-        "target": "Notification::bind_irq / runtime::irq_unbind",
-        "reason": "回调改成所属 EL0 线程主动处理；无 C 回调指针，不承诺 Linux 硬中断上下文"
-      }
-    },
-    {
-      "name": "litex_read32",
-      "action": "same_name_rust_wrapper",
-      "target": "libos/src/linux_api/io.rs::litex_read32",
-      "reason": "CSR32、小端、volatile 与屏障；映射必须存活，偏移/范围必须有效。",
-      "initial_experiment": {
-        "action": "translate",
-        "target": "Io::read/write 的 Mmio 实现",
-        "reason": "保持 32 位 CSR 事务、低 8/16 位含义、LE 和 ARM dmb osh"
-      }
-    },
-    {
-      "name": "litex_read8",
-      "action": "same_name_rust_wrapper",
-      "target": "libos/src/linux_api/io.rs::litex_read8",
-      "reason": "CSR32、小端、volatile 与屏障；映射必须存活，偏移/范围必须有效。",
-      "initial_experiment": {
-        "action": "translate",
-        "target": "Io::read/write 的 Mmio 实现",
-        "reason": "保持 32 位 CSR 事务、低 8/16 位含义、LE 和 ARM dmb osh"
-      }
-    },
-    {
-      "name": "litex_write16",
-      "action": "same_name_rust_wrapper",
-      "target": "libos/src/linux_api/io.rs::litex_write16",
-      "reason": "CSR32、小端、volatile 与屏障；映射必须存活，偏移/范围必须有效。",
-      "initial_experiment": {
-        "action": "translate",
-        "target": "Io::read/write 的 Mmio 实现",
-        "reason": "保持 32 位 CSR 事务、低 8/16 位含义、LE 和 ARM dmb osh"
-      }
-    },
-    {
-      "name": "litex_write8",
-      "action": "same_name_rust_wrapper",
-      "target": "libos/src/linux_api/io.rs::litex_write8",
-      "reason": "CSR32、小端、volatile 与屏障；映射必须存活，偏移/范围必须有效。",
-      "initial_experiment": {
-        "action": "translate",
-        "target": "Io::read/write 的 Mmio 实现",
-        "reason": "保持 32 位 CSR 事务、低 8/16 位含义、LE 和 ARM dmb osh"
-      }
-    },
-    {
-      "name": "memcpy_fromio",
-      "action": "same_name_rust_wrapper",
-      "target": "libos/src/linux_api/io.rs::memcpy_fromio",
-      "reason": "CSR32、小端、volatile 与屏障；映射必须存活，偏移/范围必须有效。",
-      "initial_experiment": {
-        "action": "translate",
-        "target": "Io::copy_from/copy_to 的 Mmio 实现",
-        "reason": "设备 SRAM 上逐字节 volatile；只允许已验证的 slot 和长度"
-      }
-    },
-    {
-      "name": "memcpy_toio",
-      "action": "same_name_rust_wrapper",
-      "target": "libos/src/linux_api/io.rs::memcpy_toio",
-      "reason": "CSR32、小端、volatile 与屏障；映射必须存活，偏移/范围必须有效。",
-      "initial_experiment": {
-        "action": "translate",
-        "target": "Io::copy_from/copy_to 的 Mmio 实现",
-        "reason": "设备 SRAM 上逐字节 volatile；只允许已验证的 slot 和长度"
-      }
-    },
-    {
-      "name": "module_platform_driver",
-      "action": "same_name_rust_wrapper",
-      "target": "libos/src/linux_api/module.rs::module_platform_driver",
-      "reason": "同名元信息构造函数与显式 OF probe/remove，不提供 Linux 动态模块加载。",
-      "initial_experiment": {
-        "action": "eliminate",
-        "target": "Cargo 场景分发与 SPDX/原始源码版权文件",
-        "reason": "不提供 Linux 模块加载和总线自动匹配；保留来源与版权"
-      }
-    },
-    {
-      "name": "net_ratelimit",
-      "action": "same_name_rust_wrapper",
-      "target": "libos/src/linux_api/printk.rs::net_ratelimit",
-      "reason": "显式输出后端和实例独立限流；不是 Linux 全局 printk 配置。",
-      "initial_experiment": {
-        "action": "replace",
-        "target": "应用错误日志 / 确定的测试统计",
-        "reason": "取消 Linux 日志接口，未保留全部逐字日志；该驱动无时间驱动的硬件协议"
-      }
-    },
-    {
-      "name": "netdev_alloc_skb_ip_align",
-      "action": "same_name_rust_wrapper",
-      "target": "libos/src/linux_api/skbuff.rs::netdev_alloc_skb_ip_align",
-      "reason": "有界线性 skb；显式所有权和容量；仅完整 L2 交付，不支持分片/GSO/DSA。",
-      "initial_experiment": {
-        "action": "eliminate",
-        "target": "有界帧数组和借用切片",
-        "reason": "本次仅线性 L2 帧；取消每包堆分配，BUSY 保留调用者报文所有权"
-      }
-    },
-    {
-      "name": "netdev_err",
-      "action": "same_name_rust_wrapper",
-      "target": "libos/src/linux_api/printk.rs::netdev_err",
-      "reason": "显式输出后端和实例独立限流；不是 Linux 全局 printk 配置。",
-      "initial_experiment": {
-        "action": "replace",
-        "target": "应用错误日志 / 确定的测试统计",
-        "reason": "取消 Linux 日志接口，未保留全部逐字日志；该驱动无时间驱动的硬件协议"
-      }
-    },
-    {
-      "name": "netdev_info",
-      "action": "same_name_rust_wrapper",
-      "target": "libos/src/linux_api/printk.rs::netdev_info",
-      "reason": "显式输出后端和实例独立限流；不是 Linux 全局 printk 配置。",
-      "initial_experiment": {
-        "action": "replace",
-        "target": "应用错误日志 / 确定的测试统计",
-        "reason": "取消 Linux 日志接口，未保留全部逐字日志；该驱动无时间驱动的硬件协议"
-      }
-    },
-    {
-      "name": "netdev_priv",
-      "action": "same_name_rust_wrapper",
-      "target": "libos/src/linux_api/netdevice.rs::netdev_priv",
-      "reason": "单所属线程、单发送队列；本地对象/统计，不提供 Linux qdisc、per-CPU 并发与 socket。",
-      "initial_experiment": {
-        "action": "replace",
-        "target": "Driver / Device 的字段和所有权",
-        "reason": "消除 Linux 对象和私有指针关联；限定单设备、单所属线程"
-      }
-    },
-    {
-      "name": "netdev_stats_to_stats64",
-      "action": "same_name_rust_wrapper",
-      "target": "libos/src/linux_api/netdevice.rs::netdev_stats_to_stats64",
-      "reason": "单所属线程、单发送队列；本地对象/统计，不提供 Linux qdisc、per-CPU 并发与 socket。",
-      "initial_experiment": {
-        "action": "replace",
-        "target": "Stats 值类型",
-        "reason": "保留计数含义；不承诺 Linux per-CPU 并发统计"
-      }
-    },
-    {
-      "name": "netif_carrier_off",
-      "action": "same_name_rust_wrapper",
-      "target": "libos/src/linux_api/netdevice.rs::netif_carrier_off",
-      "reason": "单所属线程、单发送队列；本地对象/统计，不提供 Linux qdisc、per-CPU 并发与 socket。",
-      "initial_experiment": {
-        "action": "eliminate",
-        "target": "open/close 状态",
-        "reason": "本次不向 Linux 网络核心发布链路状态，不支持 PHY 管理"
-      }
-    },
-    {
-      "name": "netif_carrier_on",
-      "action": "same_name_rust_wrapper",
-      "target": "libos/src/linux_api/netdevice.rs::netif_carrier_on",
-      "reason": "单所属线程、单发送队列；本地对象/统计，不提供 Linux qdisc、per-CPU 并发与 socket。",
-      "initial_experiment": {
-        "action": "eliminate",
-        "target": "open/close 状态",
-        "reason": "本次不向 Linux 网络核心发布链路状态，不支持 PHY 管理"
-      }
-    },
-    {
-      "name": "netif_queue_stopped",
-      "action": "same_name_rust_wrapper",
-      "target": "libos/src/linux_api/netdevice.rs::netif_queue_stopped",
-      "reason": "单所属线程、单发送队列；本地对象/统计，不提供 Linux qdisc、per-CPU 并发与 socket。",
-      "initial_experiment": {
-        "action": "replace",
-        "target": "opened / stopped 状态和 TX pending",
-        "reason": "BUSY 不轮转 slot；完成事件重启提交；不实现 qdisc/NAPI"
-      }
-    },
-    {
-      "name": "netif_rx",
-      "action": "same_name_rust_wrapper",
-      "target": "libos/src/linux_api/skbuff.rs::netif_rx",
-      "reason": "有界线性 skb；显式所有权和容量；仅完整 L2 交付，不支持分片/GSO/DSA。",
-      "initial_experiment": {
-        "action": "replace",
-        "target": "Device 接收槽 → Driver::receive",
-        "reason": "交付完整帧，不进行 Linux 协议分类；槽满保留第一帧并显式记录 delivery_drops"
-      }
-    },
-    {
-      "name": "netif_start_queue",
-      "action": "same_name_rust_wrapper",
-      "target": "libos/src/linux_api/netdevice.rs::netif_start_queue",
-      "reason": "单所属线程、单发送队列；本地对象/统计，不提供 Linux qdisc、per-CPU 并发与 socket。",
-      "initial_experiment": {
-        "action": "replace",
-        "target": "opened / stopped 状态和 TX pending",
-        "reason": "BUSY 不轮转 slot；完成事件重启提交；不实现 qdisc/NAPI"
-      }
-    },
-    {
-      "name": "netif_stop_queue",
-      "action": "same_name_rust_wrapper",
-      "target": "libos/src/linux_api/netdevice.rs::netif_stop_queue",
-      "reason": "单所属线程、单发送队列；本地对象/统计，不提供 Linux qdisc、per-CPU 并发与 socket。",
-      "initial_experiment": {
-        "action": "replace",
-        "target": "opened / stopped 状态和 TX pending",
-        "reason": "BUSY 不轮转 slot；完成事件重启提交；不实现 qdisc/NAPI"
-      }
-    },
-    {
-      "name": "netif_wake_queue",
-      "action": "same_name_rust_wrapper",
-      "target": "libos/src/linux_api/netdevice.rs::netif_wake_queue",
-      "reason": "单所属线程、单发送队列；本地对象/统计，不提供 Linux qdisc、per-CPU 并发与 socket。",
-      "initial_experiment": {
-        "action": "replace",
-        "target": "opened / stopped 状态和 TX pending",
-        "reason": "BUSY 不轮转 slot；完成事件重启提交；不实现 qdisc/NAPI"
-      }
-    },
-    {
-      "name": "of_get_ethdev_address",
-      "action": "same_name_rust_wrapper",
-      "target": "libos/src/linux_api/platform.rs::of_get_ethdev_address",
-      "reason": "调用者提供通用资源/属性；映射由后端校验授权，返回对象 Drop 回收。",
-      "initial_experiment": {
-        "action": "out_of_scope",
-        "target": "上层 DeviceInfo.address",
-        "reason": "原文件只设置 net_device 身份，不写硬件 MAC 寄存器；本次上层提供完整 L2 帧，不生成 MAC、ARP 或 IP"
-      }
-    },
-    {
-      "name": "of_property_read_u32",
-      "action": "same_name_rust_wrapper",
-      "target": "libos/src/linux_api/platform.rs::of_property_read_u32",
-      "reason": "调用者提供通用资源/属性；映射由后端校验授权，返回对象 Drop 回收。",
-      "initial_experiment": {
-        "action": "map",
-        "target": "DeviceInfo / LiteEthInfo / dtb::discover",
-        "reason": "设备树仍在 EL0 解析；描述不授予资源权限"
-      }
-    },
-    {
-      "name": "platform_get_drvdata",
-      "action": "same_name_rust_wrapper",
-      "target": "libos/src/linux_api/platform.rs::platform_get_drvdata",
-      "reason": "调用者提供通用资源/属性；映射由后端校验授权，返回对象 Drop 回收。",
-      "initial_experiment": {
-        "action": "replace",
-        "target": "Driver / Device 的字段和所有权",
-        "reason": "消除 Linux 对象和私有指针关联；限定单设备、单所属线程"
-      }
-    },
-    {
-      "name": "platform_get_irq",
-      "action": "same_name_rust_wrapper",
-      "target": "libos/src/linux_api/platform.rs::platform_get_irq",
-      "reason": "调用者提供通用资源/属性；映射由后端校验授权，返回对象 Drop 回收。",
-      "initial_experiment": {
-        "action": "map",
-        "target": "DeviceInfo / LiteEthInfo / dtb::discover",
-        "reason": "设备树仍在 EL0 解析；描述不授予资源权限"
-      }
-    },
-    {
-      "name": "platform_set_drvdata",
-      "action": "same_name_rust_wrapper",
-      "target": "libos/src/linux_api/platform.rs::platform_set_drvdata",
-      "reason": "调用者提供通用资源/属性；映射由后端校验授权，返回对象 Drop 回收。",
-      "initial_experiment": {
-        "action": "replace",
-        "target": "Driver / Device 的字段和所有权",
-        "reason": "消除 Linux 对象和私有指针关联；限定单设备、单所属线程"
-      }
-    },
-    {
-      "name": "register_netdev",
-      "action": "same_name_rust_wrapper",
-      "target": "libos/src/linux_api/netdevice.rs::register_netdev",
-      "reason": "单所属线程、单发送队列；本地对象/统计，不提供 Linux qdisc、per-CPU 并发与 socket。",
-      "initial_experiment": {
-        "action": "eliminate",
-        "target": "Driver attach/open/close/detach",
-        "reason": "保留驱动生命周期；本次完整 L2 帧契约不提供 Linux 网络设备注册语义"
-      }
-    },
-    {
-      "name": "request_irq",
-      "action": "same_name_rust_wrapper",
-      "target": "libos/src/linux_api/interrupt.rs::request_irq",
-      "reason": "独占 IRQ、flags=0、EL0 串行回调；不支持 IRQF_SHARED 或硬中断上下文。",
-      "initial_experiment": {
-        "action": "map",
-        "target": "Notification::bind_irq / runtime::irq_unbind",
-        "reason": "回调改成所属 EL0 线程主动处理；无 C 回调指针，不承诺 Linux 硬中断上下文"
-      }
-    },
-    {
-      "name": "skb_put",
-      "action": "same_name_rust_wrapper",
-      "target": "libos/src/linux_api/skbuff.rs::skb_put",
-      "reason": "有界线性 skb；显式所有权和容量；仅完整 L2 交付，不支持分片/GSO/DSA。",
-      "initial_experiment": {
-        "action": "eliminate",
-        "target": "有界帧数组和借用切片",
-        "reason": "本次仅线性 L2 帧；取消每包堆分配，BUSY 保留调用者报文所有权"
-      }
-    },
-    {
-      "name": "unlikely",
-      "action": "same_name_rust_wrapper",
-      "target": "libos/src/linux_api/error.rs::unlikely",
-      "reason": "Rust Result/bool，不使用 C 错误指针 ABI；unlikely 不提供分支优化保证。",
-      "initial_experiment": {
-        "action": "replace",
-        "target": "Result / match / 条件分支",
-        "reason": "不再使用编码错误指针；unlikely 不承担设备语义"
-      }
-    },
-    {
-      "name": "unregister_netdev",
-      "action": "same_name_rust_wrapper",
-      "target": "libos/src/linux_api/netdevice.rs::unregister_netdev",
-      "reason": "单所属线程、单发送队列；本地对象/统计，不提供 Linux qdisc、per-CPU 并发与 socket。",
-      "initial_experiment": {
-        "action": "eliminate",
-        "target": "Driver attach/open/close/detach",
-        "reason": "保留驱动生命周期；本次完整 L2 帧契约不提供 Linux 网络设备注册语义"
-      }
-    }
-  ],
-  "invariants": [
-    "TX_READY==0 或发送暂停时，不写 SRAM/START，不增加 TX 包数，不轮转 slot，不取得调用者报文所有权",
-    "SRAM copy 先于 SLOT/LENGTH/START；slot 按 tx_slots 取模",
-    "IRQ 先 TX pending，再 RX；RX 数据复制先于 RX W1C；设备处理先于 IRQ_ACK",
-    "停止后禁止发送；先关闭设备事件并解绑，再撤销映射/销毁通知",
-    "attach 中任一步失败，已取得资源必须回滚，下一次 attach 必须成功"
-  ],
-  "explicit_differences": [
-    {
-      "case": "设备给出越界 RX slot 或长度",
-      "c": "原 C 对 slot 检查不足；现有 C 适配层越界时终止任务",
-      "rust": "先校验 slot/长度，计入 rx_errors/rx_dropped，清 pending 后继续；单元测试覆盖"
-    },
-    {
-      "case": "RX 短于 14 字节",
-      "c": "C 适配层丢弃，但原驱动已累计 RX 包统计",
-      "rust": "作为非法 L2 帧计入错误/丢弃；非等价行为，明确收紧边界"
-    },
-    {
-      "case": "上层接收缓冲过小",
-      "c": "C 参考桥终止任务",
-      "rust": "core 返回错误并保留帧；当前共享应用固定 2048 字节，Driver 包装仍按不可恢复错误处理"
-    },
-    {
-      "case": "MAC 自动生成、Linux 链路发布和协议分类",
-      "c": "C 兼容层提供简化实现",
-      "rust": "移出当前完整 L2 帧契约；不声称 Linux 网络栈功能等价"
-    }
-  ],
   "validation": {
+    "checker": "tools/liteeth/check_translation.py",
+    "signature_mapping": "tools/liteeth/linux_signatures.json",
+    "native_tests": 11,
+    "dependency_tests": 15,
     "comparison_summary": "对照测试摘要.json",
-    "native_tests": "tests/liteeth_native.rs",
     "qemu_runner": "tools/liteeth/compare.py",
     "kernel_syscalls": [
       "MAP_MMIO",
       "UNMAP_MMIO",
       "NOTIFICATION_CREATE",
       "NOTIFICATION_WAIT",
+      "NOTIFICATION_SIGNAL",
       "NOTIFICATION_DESTROY",
       "IRQ_BIND",
       "IRQ_ACK",
       "IRQ_UNBIND",
+      "THREAD_CREATE",
+      "THREAD_RUNTIME",
+      "THREAD_EXIT",
+      "THREAD_YIELD",
       "PUTS 仅诊断"
     ],
-    "new_kernel_syscalls": 0,
-    "linux_api_tests": "tests/linux_api.rs"
+    "new_kernel_syscalls": 0
   },
-  "revision": {
-    "reason": "用户要求保留所有同名封装以便其他 Linux 驱动翻译复用",
-    "implementation": "libos/src/linux_api/",
-    "feature": "linux-driver-api",
-    "same_name_interface_count": 49,
-    "mapping": "同名接口映射.json",
-    "previous_strategy": "首次实验直接把依赖合并到 liteeth.rs/liteeth_core.rs；本次抽出公共同名 Rust 封装，保留原 C 对照。",
-    "source_layout": "9 个原函数集中在 liteeth.rs，按原 C 顺序排列；probe 显式初始化统计，旧入口转发文件已删除。"
-  },
-  "naming_contract": {
-    "rule": "原驱动中有对应关系的函数、寄存器常量、类型和字段保留原名；目标侧新增辅助对象单独说明",
-    "driver_function_count": 9,
-    "verification": "tools/liteeth/test_native.py",
-    "target_only_helpers": [
-      "liteeth::prepare_open",
-      "liteeth::enable",
-      "liteeth::stop_device_events",
-      "Driver::wait_irq",
-      "Driver::receive"
-    ],
-    "note": "目标侧通知执行器和资源分层可增加辅助函数，不再用辅助函数名替代原 C 函数名；wait_irq 不属于原 C 函数。",
-    "register_constant_count": 20,
-    "driver_name_constant": "DRV_NAME",
-    "original_type_names": [
-      "liteeth",
-      "net_device",
-      "sk_buff",
-      "rtnl_link_stats64",
-      "pcpu_sw_netstats",
-      "platform_device",
-      "platform_driver"
-    ],
-    "rust_keyword_escape": {
-      "priv": "r#priv"
-    }
-  }
+  "remaining_semantic_differences": [
+    "netif_rx 交付本地 L2 接收核心，尚无 Linux IP/socket、RPS/backlog softirq 全套网络栈。",
+    "request_irq 只实现当前驱动的 flags=0 独占 IRQ；IRQF_SHARED 等未实现；EL0 回调上下文不同于 Linux hardirq。",
+    "模块宏接入目标静态驱动框架；Linux 动态 .ko 加载、别名自动加载及 .modinfo 兼容尚未实现。",
+    "OF 仅整理目标实际节点属性/MAC；没有 Linux IRQ domain、设备延迟探测与 NVMEM provider 全套机制。",
+    "skb 采用实际堆分配，但仅实现此驱动的线性独占报文路径，没有 clone/共享引用/非线性 skb。",
+    "随机 MAC 已接 QEMU/固件 rng-seed 的 ChaCha20；未提供种子的目标仍不能保证该回退路径可运行。"
+  ],
+  "not_claimed": [
+    "49 个依赖已与 Linux 全部语义等价",
+    "可自动移植其他 Linux 驱动",
+    "真实 FPGA 已验证",
+    "形式化等价证明"
+  ],
+  "history": "此前固定数组 skb、self 入口、额外后端参数、主动 wait_irq 派发和简化统计已被替换。旧有限样例成功不作为严格语义验收。"
 }

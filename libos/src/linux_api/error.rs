@@ -1,19 +1,21 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//! 错误判断沿用 Linux 名称，参数改为 Result；不再生成或解引用编码错误指针。
-pub const EINVAL: i32 = -22;
-pub const EBUSY: i32 = -16;
-pub const ENXIO: i32 = -6;
-pub const EOPNOTSUPP: i32 = -95;
-pub fn IS_ERR<T>(value: &Result<T, i32>) -> bool {
-    value.is_err()
+//! 保留 Linux 负错误码与错误指针协议；只检查地址值，不解引用错误指针。
+use core::ffi::c_void;
+pub const EINVAL: i32 = 22;
+pub const ENXIO: i32 = 6;
+pub const ENOMEM: i32 = 12;
+pub const EBUSY: i32 = 16;
+pub const ENODEV: i32 = 19;
+pub const EOPNOTSUPP: i32 = 95;
+pub fn ERR_PTR(error: i64) -> *mut c_void {
+    error as isize as *mut c_void
 }
-pub fn PTR_ERR<T>(value: &Result<T, i32>) -> i32 {
-    match value {
-        Err(e) => *e,
-        Ok(_) => 0,
-    }
+pub fn IS_ERR(ptr: *const c_void) -> bool {
+    (ptr as usize) >= (-4095isize as usize)
 }
-/// 仅保留分支含义；稳定 Rust 的这个版本不提供 Linux 的预测优化提示。
-pub fn unlikely(condition: bool) -> bool {
-    condition
+pub fn PTR_ERR(ptr: *const c_void) -> i64 {
+    ptr as isize as i64
+}
+pub fn unlikely(x: bool) -> bool {
+    x
 }
