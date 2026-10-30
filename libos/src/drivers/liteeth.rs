@@ -47,21 +47,24 @@ pub struct liteeth {
     pub rx_base: *mut c_void,    // RX SRAM 基址
 }
 
-// 接收一帧；两个失败分支汇入原 rx_drop 清理位置。
+// 接收一帧并交给网络栈。
 pub unsafe fn liteeth_rx(netdev: *mut net_device) -> i32 {
     let r#priv = netdev_priv(netdev).cast::<liteeth>();
+    // 读取当前接收槽号和数据长度。
     let rx_slot = litex_read8((*r#priv).base.byte_add(LITEETH_WRITER_SLOT));
     let len = litex_read32((*r#priv).base.byte_add(LITEETH_WRITER_LENGTH)) as i32;
     'rx_drop: {
+        // 长度为 0 或超过 2048 字节时丢弃。
         if len == 0 || len > 2048 {
             break 'rx_drop;
         }
+        // 分配 skb；失败时记录日志并走统一丢弃路径。
         let skb = netdev_alloc_skb_ip_align(netdev, len as u32);
         if skb.is_null() {
             netdev_err!(netdev, "couldn't get memory\n");
             break 'rx_drop;
         }
-        // 扩展 skb 数据区，再把设备 SRAM 复制到堆缓冲区。
+        // 扩展 skb 的数据区，再把 RX slot 的数据复制到 skb 缓冲区。
         let data = skb_put(skb, len as u32);
         memcpy_fromio(
             data,
@@ -70,9 +73,10 @@ pub unsafe fn liteeth_rx(netdev: *mut net_device) -> i32 {
                 .byte_add(rx_slot as usize * (*r#priv).slot_size as usize),
             len as usize,
         );
-        // 解析协议头，交给接收核心；netif_rx 取得 skb 所有权。
+        // 解析以太网头并更新接收统计，再把 skb 交给本地接收队列。
         (*skb).protocol = eth_type_trans(skb, netdev);
         dev_sw_netstats_rx_add(netdev, len as u32);
+        // 上交后队列取得 skb 所有权；当前目标尚未实现完整 Linux IP/socket。
         return netif_rx(skb);
     }
     (*netdev).stats.rx_dropped += 1;
@@ -80,10 +84,11 @@ pub unsafe fn liteeth_rx(netdev: *mut net_device) -> i32 {
     NET_RX_DROP
 }
 
-// 原 IRQ 回调；清设备 pending 后由目标 IRQ 服务 ACK 重新开放 GIC。
+// 处理中断并清除收发事件。
 pub unsafe fn liteeth_interrupt(irq: i32, dev_id: *mut c_void) -> irqreturn_t {
     let netdev = dev_id.cast::<net_device>();
     let r#priv = netdev_priv(netdev).cast::<liteeth>();
+    // READER 是发送完成事件；缓冲区空出后唤醒发送队列，再清事件。
     let reg = litex_read8((*r#priv).base.byte_add(LITEETH_READER_EV_PENDING));
     if reg != 0 {
         if netif_queue_stopped(netdev) {
@@ -91,6 +96,7 @@ pub unsafe fn liteeth_interrupt(irq: i32, dev_id: *mut c_void) -> irqreturn_t {
         }
         litex_write8((*r#priv).base.byte_add(LITEETH_READER_EV_PENDING), reg);
     }
+    // WRITER 是接收事件；有包时取出数据，再清事件。
     let reg = litex_read8((*r#priv).base.byte_add(LITEETH_WRITER_EV_PENDING));
     if reg != 0 {
         liteeth_rx(netdev);
@@ -100,11 +106,13 @@ pub unsafe fn liteeth_interrupt(irq: i32, dev_id: *mut c_void) -> irqreturn_t {
     IRQ_HANDLED
 }
 
-// 清旧事件、注册 IRQ，成功后才启用设备。
+// 打开网卡并启用中断和发送队列。
 pub unsafe fn liteeth_open(netdev: *mut net_device) -> i32 {
     let r#priv = netdev_priv(netdev).cast::<liteeth>();
+    // 清除旧的收发事件。
     litex_write8((*r#priv).base.byte_add(LITEETH_WRITER_EV_PENDING), 1);
     litex_write8((*r#priv).base.byte_add(LITEETH_READER_EV_PENDING), 1);
+    // 注册 IRQ 和中断处理函数；失败时返回错误，不打开设备侧中断。
     let err = request_irq(
         (*netdev).irq,
         liteeth_interrupt,
@@ -116,6 +124,7 @@ pub unsafe fn liteeth_open(netdev: *mut net_device) -> i32 {
         netdev_err!(netdev, "failed to request irq {}\n", (*netdev).irq);
         return err;
     }
+    // 打开设备侧收发中断，再标记链路可用并开放发送队列。
     litex_write8((*r#priv).base.byte_add(LITEETH_WRITER_EV_ENABLE), 1);
     litex_write8((*r#priv).base.byte_add(LITEETH_READER_EV_ENABLE), 1);
     netif_carrier_on(netdev);
@@ -123,9 +132,10 @@ pub unsafe fn liteeth_open(netdev: *mut net_device) -> i32 {
     0
 }
 
-// 先关闭设备事件，再释放注册的 IRQ。
+// 停止网卡并释放 IRQ。
 pub unsafe fn liteeth_stop(netdev: *mut net_device) -> i32 {
     let r#priv = netdev_priv(netdev).cast::<liteeth>();
+    // 停止发送队列、标记链路不可用，再关闭设备中断并释放 IRQ。
     netif_stop_queue(netdev);
     netif_carrier_off(netdev);
     litex_write8((*r#priv).base.byte_add(LITEETH_WRITER_EV_ENABLE), 0);
@@ -134,10 +144,10 @@ pub unsafe fn liteeth_stop(netdev: *mut net_device) -> i32 {
     0
 }
 
-// BUSY 不释放 skb；成功或超长丢弃时消费 skb，与原返回协议一致。
+// 将一帧写入发送缓冲区并启动发送。
 pub unsafe fn liteeth_start_xmit(skb: *mut sk_buff, netdev: *mut net_device) -> netdev_tx_t {
     let r#priv = netdev_priv(netdev).cast::<liteeth>();
-    // 硬件忙时停队列并返回 BUSY，不释放原 skb。
+    // 读取发送就绪寄存器；未就绪时停队列并返回 BUSY，保留 skb 供重试。
     if litex_read8((*r#priv).base.byte_add(LITEETH_READER_READY)) == 0 {
         if net_ratelimit() != 0 {
             netdev_err!(netdev, "LITEETH_READER_READY not ready\n");
@@ -145,6 +155,7 @@ pub unsafe fn liteeth_start_xmit(skb: *mut sk_buff, netdev: *mut net_device) -> 
         netif_stop_queue(netdev);
         return NETDEV_TX_BUSY;
     }
+    // 数据包超过 TX slot 容量时丢弃并记录错误。
     if unlikely((*skb).len > (*r#priv).slot_size) {
         if net_ratelimit() != 0 {
             netdev_err!(netdev, "tx packet too big\n");
@@ -154,7 +165,7 @@ pub unsafe fn liteeth_start_xmit(skb: *mut sk_buff, netdev: *mut net_device) -> 
         (*netdev).stats.tx_errors += 1;
         return NETDEV_TX_OK;
     }
-    // 数据写入 SRAM 后，再写槽号、长度和 START。
+    // 先把数据复制到 TX slot，再写槽号、长度并启动发送。
     let txbuffer = (*r#priv)
         .tx_base
         .byte_add((*r#priv).tx_slot as usize * (*r#priv).slot_size as usize);
@@ -174,7 +185,7 @@ pub unsafe fn liteeth_start_xmit(skb: *mut sk_buff, netdev: *mut net_device) -> 
     NETDEV_TX_OK
 }
 
-// 通过原 stats 输出参数返回统计。
+// 汇总网卡统计。
 pub unsafe fn liteeth_get_stats64(netdev: *mut net_device, stats: *mut rtnl_link_stats64) {
     netdev_stats_to_stats64(stats, ptr::addr_of!((*netdev).stats));
     dev_fetch_sw_netstats(stats, (*netdev).tstats);
@@ -186,7 +197,7 @@ static liteeth_netdev_ops: net_device_ops = net_device_ops {
     ndo_start_xmit: liteeth_start_xmit,
 };
 
-// 保留三次属性读取及各自的缺省分支，不在 DTB 层提前填好后省略它们。
+// 读取设备树中的槽位数量和大小，失败时使用默认值。
 pub unsafe fn liteeth_setup_slots(r#priv: *mut liteeth) {
     let np = (*(*r#priv).dev).of_node;
     let err = of_property_read_u32(
@@ -221,8 +232,9 @@ pub unsafe fn liteeth_setup_slots(r#priv: *mut liteeth) {
     }
 }
 
-// 由 platform 框架调用；失败回滚由框架的 devres_release_all 负责。
+// 初始化并注册网卡。
 pub unsafe fn liteeth_probe(pdev: *mut platform_device) -> i32 {
+    // 分配网卡对象，并预留 LiteEth 私有数据空间。
     let netdev = devm_alloc_etherdev(
         ptr::addr_of_mut!((*pdev).dev),
         core::mem::size_of::<liteeth>() as i32,
@@ -230,21 +242,26 @@ pub unsafe fn liteeth_probe(pdev: *mut platform_device) -> i32 {
     if netdev.is_null() {
         return -ENOMEM;
     }
+    // 关联父设备，并保存 netdev 供移除时取回。
     SET_NETDEV_DEV(netdev, ptr::addr_of_mut!((*pdev).dev));
     platform_set_drvdata(pdev, netdev.cast());
+    // 取得私有数据空间，保存所属网卡和父设备指针。
     let r#priv = netdev_priv(netdev).cast::<liteeth>();
     (*r#priv).netdev = netdev;
     (*r#priv).dev = ptr::addr_of_mut!((*pdev).dev);
+    // 为每个 CPU 分配软件网络统计数据。
     (*netdev).tstats =
         devm_netdev_alloc_pcpu_stats!(ptr::addr_of_mut!((*pdev).dev), pcpu_sw_netstats);
     if (*netdev).tstats.is_null() {
         return -ENOMEM;
     }
+    // 读取 IRQ 号
     let irq = platform_get_irq(pdev, 0);
     if irq < 0 {
         return irq;
     }
     (*netdev).irq = irq as u32;
+    // 分别MMIO映射控制器寄存器区和 RX/TX 共用缓冲区
     (*r#priv).base = devm_platform_ioremap_resource_byname(pdev, c"mac".as_ptr());
     if IS_ERR((*r#priv).base) {
         return PTR_ERR((*r#priv).base) as i32;
@@ -254,15 +271,18 @@ pub unsafe fn liteeth_probe(pdev: *mut platform_device) -> i32 {
         return PTR_ERR(buf_base) as i32;
     }
     liteeth_setup_slots(r#priv);
+    // RX 从 buffer 起始处开始，TX 槽紧随全部 RX 槽。
     (*r#priv).rx_base = buf_base;
     (*r#priv).rx_slot = 0;
     (*r#priv).tx_base =
         buf_base.byte_add((*r#priv).num_rx_slots as usize * (*r#priv).slot_size as usize);
     (*r#priv).tx_slot = 0;
+    // 读取设备树中的 MAC 地址；没有有效地址时生成随机地址。
     let err = of_get_ethdev_address((*pdev).dev.of_node, netdev);
     if err != 0 {
         eth_hw_addr_random(netdev);
     }
+    // 设置网络操作入口并注册网卡。
     (*netdev).netdev_ops = ptr::addr_of!(liteeth_netdev_ops);
     let err = register_netdev(netdev);
     if err != 0 {
@@ -284,7 +304,7 @@ pub unsafe fn liteeth_probe(pdev: *mut platform_device) -> i32 {
     0
 }
 
-// 先注销网卡；platform 框架在返回后回收 devm 资源。
+// 注销网卡；platform 框架在本函数返回后回收 devm 资源。
 pub unsafe fn liteeth_remove(pdev: *mut platform_device) {
     let netdev = platform_get_drvdata(pdev).cast::<net_device>();
     unregister_netdev(netdev);

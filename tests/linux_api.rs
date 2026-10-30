@@ -12,7 +12,7 @@ use support::*;
 #[test]
 fn allocation_returns_null_and_private_address_stays_stable() {
     reset();
-    for n in [0, 1] {
+    for n in [0] {
         let mut f = Fixture::new(vec![], None);
         memory::fail_after(n);
         let dev = unsafe { devm_alloc_etherdev(&mut f.pdev.dev, 32) };
@@ -24,6 +24,37 @@ fn allocation_returns_null_and_private_address_stays_stable() {
     let p = unsafe { netdev_priv(f.dev()) };
     assert_eq!((p as usize) % 32, 0);
     assert_eq!(p, unsafe { netdev_priv(f.dev()) });
+}
+#[test]
+fn netdev_and_private_share_one_zeroed_aligned_allocation() {
+    reset();
+    for private_size in [0, 1, 63, 64, 65, 512] {
+        let mut f = Fixture::new(vec![], None);
+        let before = memory::live();
+        // 只允许一次底层分配成功，防止实现退回分开申请对象与私有区。
+        memory::fail_after(1);
+        let dev = unsafe { devm_alloc_etherdev(&mut f.pdev.dev, private_size) };
+        memory::fail_after(usize::MAX);
+        assert!(!dev.is_null());
+        let header = core::mem::size_of::<net_device>();
+        let private = unsafe { netdev_priv(dev) }.cast::<u8>();
+        assert_eq!(private as usize, dev as usize + header);
+        assert_eq!(dev as usize % 64, 0);
+        assert_eq!(private as usize % 64, 0);
+        assert_eq!(memory::live(), before + 1);
+        unsafe {
+            assert!(core::slice::from_raw_parts(private, private_size as usize)
+                .iter()
+                .all(|&b| b == 0));
+            if private_size != 0 {
+                *private = 0xa5;
+                *private.add(private_size as usize - 1) = 0x5a;
+                assert_eq!((*dev).irq, 0);
+            }
+            devres_release_all(&mut f.pdev.dev);
+        }
+        assert_eq!(memory::live(), before);
+    }
 }
 #[test]
 fn cpu_stats_and_registered_device_directory_are_real() {

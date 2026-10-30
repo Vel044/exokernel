@@ -41,7 +41,7 @@
     {
       "name": "SET_NETDEV_DEV",
       "path": "libos/src/linux_api/netdevice.rs",
-      "line": 202,
+      "line": 200,
       "contract": "稳定地址的 netdev/私有区、实际每 CPU 统计、注册目录、链路状态和 FIFO 发送调度。"
     },
     {
@@ -59,7 +59,7 @@
     {
       "name": "dev_fetch_sw_netstats",
       "path": "libos/src/linux_api/netdevice.rs",
-      "line": 400,
+      "line": 398,
       "contract": "稳定地址的 netdev/私有区、实际每 CPU 统计、注册目录、链路状态和 FIFO 发送调度。"
     },
     {
@@ -71,13 +71,13 @@
     {
       "name": "dev_sw_netstats_rx_add",
       "path": "libos/src/linux_api/netdevice.rs",
-      "line": 357,
+      "line": 355,
       "contract": "稳定地址的 netdev/私有区、实际每 CPU 统计、注册目录、链路状态和 FIFO 发送调度。"
     },
     {
       "name": "dev_sw_netstats_tx_add",
       "path": "libos/src/linux_api/netdevice.rs",
-      "line": 364,
+      "line": 362,
       "contract": "稳定地址的 netdev/私有区、实际每 CPU 统计、注册目录、链路状态和 FIFO 发送调度。"
     },
     {
@@ -101,7 +101,7 @@
     {
       "name": "eth_hw_addr_random",
       "path": "libos/src/linux_api/netdevice.rs",
-      "line": 424,
+      "line": 422,
       "contract": "稳定地址的 netdev/私有区、实际每 CPU 统计、注册目录、链路状态和 FIFO 发送调度。"
     },
     {
@@ -185,31 +185,31 @@
     {
       "name": "netdev_priv",
       "path": "libos/src/linux_api/netdevice.rs",
-      "line": 199,
+      "line": 193,
       "contract": "稳定地址的 netdev/私有区、实际每 CPU 统计、注册目录、链路状态和 FIFO 发送调度。"
     },
     {
       "name": "netdev_stats_to_stats64",
       "path": "libos/src/linux_api/netdevice.rs",
-      "line": 371,
+      "line": 369,
       "contract": "稳定地址的 netdev/私有区、实际每 CPU 统计、注册目录、链路状态和 FIFO 发送调度。"
     },
     {
       "name": "netif_carrier_off",
       "path": "libos/src/linux_api/netdevice.rs",
-      "line": 320,
+      "line": 318,
       "contract": "稳定地址的 netdev/私有区、实际每 CPU 统计、注册目录、链路状态和 FIFO 发送调度。"
     },
     {
       "name": "netif_carrier_on",
       "path": "libos/src/linux_api/netdevice.rs",
-      "line": 313,
+      "line": 311,
       "contract": "稳定地址的 netdev/私有区、实际每 CPU 统计、注册目录、链路状态和 FIFO 发送调度。"
     },
     {
       "name": "netif_queue_stopped",
       "path": "libos/src/linux_api/netdevice.rs",
-      "line": 298,
+      "line": 296,
       "contract": "稳定地址的 netdev/私有区、实际每 CPU 统计、注册目录、链路状态和 FIFO 发送调度。"
     },
     {
@@ -221,19 +221,19 @@
     {
       "name": "netif_start_queue",
       "path": "libos/src/linux_api/netdevice.rs",
-      "line": 301,
+      "line": 299,
       "contract": "稳定地址的 netdev/私有区、实际每 CPU 统计、注册目录、链路状态和 FIFO 发送调度。"
     },
     {
       "name": "netif_stop_queue",
       "path": "libos/src/linux_api/netdevice.rs",
-      "line": 304,
+      "line": 302,
       "contract": "稳定地址的 netdev/私有区、实际每 CPU 统计、注册目录、链路状态和 FIFO 发送调度。"
     },
     {
       "name": "netif_wake_queue",
       "path": "libos/src/linux_api/netdevice.rs",
-      "line": 307,
+      "line": 305,
       "contract": "稳定地址的 netdev/私有区、实际每 CPU 统计、注册目录、链路状态和 FIFO 发送调度。"
     },
     {
@@ -269,7 +269,7 @@
     {
       "name": "register_netdev",
       "path": "libos/src/linux_api/netdevice.rs",
-      "line": 226,
+      "line": 224,
       "contract": "稳定地址的 netdev/私有区、实际每 CPU 统计、注册目录、链路状态和 FIFO 发送调度。"
     },
     {
@@ -293,7 +293,7 @@
     {
       "name": "unregister_netdev",
       "path": "libos/src/linux_api/netdevice.rs",
-      "line": 280,
+      "line": 278,
       "contract": "稳定地址的 netdev/私有区、实际每 CPU 统计、注册目录、链路状态和 FIFO 发送调度。"
     }
   ]

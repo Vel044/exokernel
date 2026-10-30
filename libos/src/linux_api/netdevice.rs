@@ -112,6 +112,8 @@ impl core::fmt::Display for DeviceName {
         f.write_str(self.as_str())
     }
 }
+// 对应 ARM64 Linux：网卡对象和尾随私有区按 64 字节缓存行对齐。
+#[repr(C, align(64))]
 pub struct net_device {
     pub(crate) access: super::lock::Lock<()>,
     pub name: DeviceName,
@@ -121,8 +123,6 @@ pub struct net_device {
     pub stats: net_device_stats,
     pub tstats: *mut pcpu_sw_netstats,
     pub netdev_ops: *const net_device_ops,
-    pub(crate) private: *mut c_void,
-    pub(crate) private_size: usize,
     pub addr_assign_type: u8,
     pub dsa_without_ethertype: bool,
     pub registered: bool,
@@ -142,62 +142,60 @@ unsafe fn drop_netdev(p: *mut u8) {
     while let Some(s) = (*n).tx_queue.pop_front() {
         dev_kfree_skb_any(s);
     }
-    memory::release((*n).private.cast(), (*n).private_size, 32);
+    // 这里只析构对象；devres 随后整体释放网卡对象与尾随私有区。
     ptr::drop_in_place(n);
 }
 pub unsafe fn devm_alloc_etherdev(dev: *mut device, sizeof_priv: i32) -> *mut net_device {
     if sizeof_priv < 0 {
         return ptr::null_mut();
     }
-    let private = memory::allocate(sizeof_priv as usize, 32);
-    if private.is_null() {
+    // sizeof(net_device) 已含末尾对齐填充，私有区紧随其后；只申请一次堆内存。
+    let size = match core::mem::size_of::<net_device>().checked_add(sizeof_priv as usize) {
+        Some(size) => size,
+        None => return ptr::null_mut(),
+    };
+    let align = core::mem::align_of::<net_device>();
+    let n = memory::allocate(size, align).cast::<net_device>();
+    if n.is_null() {
         return ptr::null_mut();
     }
-    let n = memory::value(net_device {
-        access: super::lock::Lock::new(()),
-        name: DeviceName::new(),
-        dev: device::new("eth0", (*dev).of_node),
-        irq: 0,
-        dev_addr: [0; 6],
-        stats: Default::default(),
-        tstats: ptr::null_mut(),
-        netdev_ops: ptr::null(),
-        private: private.cast(),
-        private_size: sizeof_priv as usize,
-        addr_assign_type: 0,
-        dsa_without_ethertype: false,
-        registered: false,
-        running: false,
-        stopped: true,
-        carrier: false,
-        tx_scheduled: false,
-        link_events: Vec::new(),
-        rx_queue: VecDeque::new(),
-        tx_queue: VecDeque::new(),
-    });
-    if n.is_null() {
-        memory::release(private, sizeof_priv as usize, 32);
-        return n;
-    }
-    if !manage_memory(
-        dev,
-        n.cast(),
-        core::mem::size_of::<net_device>(),
-        core::mem::align_of::<net_device>(),
-        Some(drop_netdev),
-    ) {
+    // 整块已清零，再构造对象中的锁、队列等 Rust 字段；尾随私有区保持清零。
+    ptr::write(
+        n,
+        net_device {
+            access: super::lock::Lock::new(()),
+            name: DeviceName::new(),
+            dev: device::new("eth0", (*dev).of_node),
+            irq: 0,
+            dev_addr: [0; 6],
+            stats: Default::default(),
+            tstats: ptr::null_mut(),
+            netdev_ops: ptr::null(),
+            addr_assign_type: 0,
+            dsa_without_ethertype: false,
+            registered: false,
+            running: false,
+            stopped: true,
+            carrier: false,
+            tx_scheduled: false,
+            link_events: Vec::new(),
+            rx_queue: VecDeque::new(),
+            tx_queue: VecDeque::new(),
+        },
+    );
+    if !manage_memory(dev, n.cast(), size, align, Some(drop_netdev)) {
         drop_netdev(n.cast());
-        memory::release(
-            n.cast(),
-            core::mem::size_of::<net_device>(),
-            core::mem::align_of::<net_device>(),
-        );
+        memory::release(n.cast(), size, align);
         return ptr::null_mut();
     }
     n
 }
 pub unsafe fn netdev_priv(dev: *const net_device) -> *mut c_void {
-    (*dev).private
+    // 与 Linux dev->priv 的关系一致：从稳定的对象基址计算尾随私有区地址。
+    dev.cast::<u8>()
+        .add(core::mem::size_of::<net_device>())
+        .cast_mut()
+        .cast()
 }
 pub unsafe fn SET_NETDEV_DEV(net: *mut net_device, pdev: *mut device) {
     (*net).dev.parent = pdev;

@@ -13,8 +13,11 @@ pub const IRQ_HANDLED: i32 = 1;
 pub const IRQ_WAKE_THREAD: i32 = 2;
 pub type irq_handler_t = unsafe fn(i32, *mut c_void) -> irqreturn_t;
 struct Lifetime {
+    // 已进入 dispatch 的使用者数量（包括等待通知者）；free_irq 等待清零后才能释放。
     users: AtomicUsize,
+    // 注销标志；free_irq 用 Release 发布，dispatch 用 Acquire 观察并停止回调。
     cancelled: AtomicBool,
+    // 已登记 net_device 的访问锁地址；0 表示没有设备锁，锁本身不由此结构拥有。
     context: usize,
 }
 struct Action {
@@ -28,6 +31,13 @@ struct Action {
     worker: u64,
 }
 static ACTIONS: Lock<Vec<Action>> = Lock::new(Vec::new());
+/// 注册 EL0 中断回调，绑定 IRQ 通知并启动负责 dispatch 的服务线程。
+/// 成功返回 0；失败返回负错误码。目前仅支持 flags == 0，且每个 IRQ 只能注册一次。
+///
+/// # 安全前提
+/// handler 及其使用的 dev 上下文必须在注册期间保持有效，直到 free_irq 同步结束；
+/// name 仅保存地址，不复制或解引用，其所有权不转移。平台操作必须已安装。
+/// 同一 IRQ 的注册与注销须由调用方串行化，避免启动线程期间注册记录被移除。
 pub unsafe fn request_irq(
     irq: u32,
     handler: irq_handler_t,
@@ -35,16 +45,21 @@ pub unsafe fn request_irq(
     name: *const c_char,
     dev: *mut c_void,
 ) -> i32 {
+    // 不静默忽略触发方式、共享中断等标志；当前适配层尚不支持这些请求。
     if flags != 0 {
         return -EOPNOTSUPP;
     }
     let mut actions = ACTIONS.lock();
+    // 检查与插入共用 ACTIONS 锁，防止并发注册占用同一个 IRQ。
     if actions.iter().any(|a| a.irq == irq) {
         return -EBUSY;
     }
+    // 先为注册表预留容量，避免取得内核资源后 push 再触发扩容分配。
     if actions.try_reserve(1).is_err() {
         return -ENOMEM;
     }
+    // 单独堆分配以保持地址稳定，不随 Vec 扩容移动；由 free_irq 在使用者退出后释放。
+    // 此时尚无 dispatch 使用者，也未发出取消请求；设备锁用于串行化应用与回调访问。
     let lifetime = memory::value(Lifetime {
         users: AtomicUsize::new(0),
         cancelled: AtomicBool::new(false),
@@ -53,13 +68,17 @@ pub unsafe fn request_irq(
     if lifetime.is_null() {
         return -ENOMEM;
     }
+    // 委托平台绑定 IRQ 与 Notification，返回通知句柄；回调和 dev 仍留在 EL0。
     let notification = match (kernel::ops().bind)(irq) {
         Ok(h) => h,
         Err(e) => {
+            // 尚未发布注册记录，仅需回收本地生命周期对象；错误码直接传回调用方。
             memory::free_value(lifetime);
             return e;
         }
     };
+    // 先发布记录，确保新服务线程一旦运行即可通过 IRQ 找到回调与通知句柄。
+    // name/dev 以地址保存，并不复制所指对象；lifetime 和 notification 交由注销路径回收。
     actions.push(Action {
         irq,
         handler,
@@ -68,17 +87,21 @@ pub unsafe fn request_irq(
         dev: dev as usize,
         notification,
         lifetime: lifetime as usize,
-        worker: 0,
+        worker: 0, // 启动前的占位值；当前平台 stop_worker(0) 无操作，供失败回滚使用。
     });
+    // 启动线程前释放注册表锁，dispatch 自身也需要取得这把锁。
     drop(actions);
     let worker = match (kernel::ops().start_worker)(irq) {
         Ok(w) => w,
         Err(e) => {
+            // 记录已发布且 IRQ 已绑定，复用注销流程解绑、同步使用者并销毁通知和 lifetime。
             free_irq(irq, dev);
             return e;
         }
     };
     let mut actions = ACTIONS.lock();
+    // 回填服务线程句柄，供完成等待与注销时使用。这里依赖调用方不并发注销同一 IRQ；
+    // 若该前提被破坏，expect 会 panic，并不提供竞态恢复。
     actions
         .iter_mut()
         .find(|a| a.irq == irq && a.dev == dev as usize)

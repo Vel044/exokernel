@@ -186,7 +186,7 @@ fn default_and_explicit_properties_are_in_driver() {
 #[test]
 fn probe_allocation_and_map_failures_rollback() {
     reset();
-    for n in 0..3 {
+    for n in 0..2 {
         let mut f = Fixture::new(vec![], Some([2, 0, 0, 0, 0, 1]));
         memory::fail_after(n);
         assert_eq!(f.attach(), -12);
