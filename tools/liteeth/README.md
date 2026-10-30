@@ -30,6 +30,17 @@ python3 tools/liteeth/compare.py --qemu /path/to/qemu-liteeth-build/qemu-system-
 
 ## 逐函数约束检查
 
+真实 AST 检查入口：
+
+```sh
+python3 tools/liteeth/check_ast.py
+python3 tools/liteeth/test_ast.py
+```
+
+使用 Clang/Linux 真实头文件与 Rust `syn`；比较实参、赋值、类型转换、分支、错误路径和回调表。当前源码有差异，第一条预期退出 `1`；第二条是检查器的正反例测试，预期退出 `0`。[覆盖范围、现有差异与报告位置](../../docs/LiteEth/AST规范化比较.md)。
+
+下面保留的 `check_translation.py` 是旧的 token/规则检查，不是真实 AST 检查：
+
 `python3 tools/liteeth/check_translation.py` 从本地 Linux 源码核对 9 个显式入口签名、20 个 if 条件/嵌套和依赖调用顺序；`linux_signatures.json` 固定经 Linux 定义核对的 39 个普通接口参数与返回映射，其余 10 个保留同名宏。C `priv` 映射为 Rust `r#priv`，整数条件映射为 `!= 0`，C goto 清理映射为带标签块。
 
 `source_contract.py` 核对完整代码 token 哈希，允许已有中文注释与排版差异；不会忽略标识符、操作符和字符串。源码或冻结签名改变须重新人工核查。以上检查不是依赖语义等价证明，未完成项见 `docs/LiteEth/逐函数翻译整改结果.md`。

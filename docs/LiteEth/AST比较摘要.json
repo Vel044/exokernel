@@ -1,0 +1,127 @@
+{
+  "schema": 1,
+  "description": "真实解析器的当前观察快照；不是形式化语义证明。",
+  "reference": {
+    "path": "../linux/drivers/net/ethernet/litex/litex_liteeth.c",
+    "linux_version": "6.12.75",
+    "sha256": "4461471c0307a738319f13dee3b2392d4b26fa652227e944a86b26b8ec5eac7f",
+    "target": "aarch64-linux-gnu",
+    "linux_config_sha256": "3b42fecacf022441dd064b2ecbe13ae36775a7eb6e556fea7f41965414cf3fc5"
+  },
+  "rust_inputs": {
+    "libos/src/drivers/liteeth.rs": "292a13839acf28e70f1ac4b2cd7f32b079129d7e94ebb299bd5ff3ba861c1c86",
+    "libos/src/linux_api/error.rs": "822681e0ad7e2be121cb0ce97f5d5af7b72191a20ef2882909c7974dcfa9cbc5",
+    "libos/src/linux_api/interrupt.rs": "98d6a64770972e9bc5a91f07ac0b00c63651ec8c2dde0679d73555b880944bab",
+    "libos/src/linux_api/io.rs": "3c92d2f3b995a0ac1596e8e7f152798dfb021373dec1546c4cb5b29b9d27d30d",
+    "libos/src/linux_api/module.rs": "18aba0632d220cf0942d28c5896ac74bb4ef7fc22af389f76bd6441323618c0d",
+    "libos/src/linux_api/netdevice.rs": "9c9c03dbdf0ae3d591dbfa1424a334c1626850ff7b140084e125816d3cda8a02",
+    "libos/src/linux_api/platform.rs": "859cf20f5f2f8cafae301579fcfbc520dc36ff2a7054a8ec3c02b5cf9b90915b",
+    "libos/src/linux_api/printk.rs": "4d0ec2f4fb33457a72e5c508495646a444bfa5708b515166707c1b10a07b0d31",
+    "libos/src/linux_api/skbuff.rs": "ab8a34b34ebe844dc223f6c638cb782476de72142edd2bb5489ed4f1a5d4f67e"
+  },
+  "parsers": {
+    "clang": "Homebrew clang version 22.1.8",
+    "rust_syn": "2.0.119",
+    "rust_driver_typechecked": false
+  },
+  "current_result": {
+    "passed": false,
+    "equal_functions": 4,
+    "different_functions": 5,
+    "unsupported_functions": 0,
+    "findings": 6,
+    "functions": [
+      {
+        "name": "liteeth_rx",
+        "status": "different",
+        "tree_differences": 5
+      },
+      {
+        "name": "liteeth_interrupt",
+        "status": "equal",
+        "tree_differences": 0
+      },
+      {
+        "name": "liteeth_open",
+        "status": "different",
+        "tree_differences": 5
+      },
+      {
+        "name": "liteeth_stop",
+        "status": "different",
+        "tree_differences": 4
+      },
+      {
+        "name": "liteeth_start_xmit",
+        "status": "different",
+        "tree_differences": 5
+      },
+      {
+        "name": "liteeth_get_stats64",
+        "status": "equal",
+        "tree_differences": 0
+      },
+      {
+        "name": "liteeth_setup_slots",
+        "status": "equal",
+        "tree_differences": 0
+      },
+      {
+        "name": "liteeth_probe",
+        "status": "different",
+        "tree_differences": 11
+      },
+      {
+        "name": "liteeth_remove",
+        "status": "equal",
+        "tree_differences": 0
+      }
+    ]
+  },
+  "difference_groups": [
+    {
+      "name": "槽偏移先做 u32 乘法还是先转 usize 后乘法",
+      "functions": [
+        "liteeth_rx",
+        "liteeth_start_xmit",
+        "liteeth_probe"
+      ]
+    },
+    {
+      "name": "net_device.irq 为 int 还是 u32",
+      "functions": [
+        "liteeth_open",
+        "liteeth_stop",
+        "liteeth_probe"
+      ]
+    },
+    {
+      "name": "liteeth 缺少 repr(C) 的布局保证"
+    }
+  ],
+  "interface_checks": {
+    "ordinary_rust_signatures_matching_reviewed_mapping": 39,
+    "type_aliases": 3,
+    "macro_definitions_present": 10,
+    "dependency_bodies_verified": false
+  },
+  "tests": {
+    "groups": 6,
+    "negative_cases_detected": 42,
+    "all_test_groups_passed": true,
+    "independent_positive_control_equal_functions": 9,
+    "positive_controls_modify_production_source": false,
+    "native_driver_host_tests_passed": 11,
+    "linux_api_host_tests_passed": 17
+  },
+  "commands": {
+    "comparison": "python3 tools/liteeth/check_ast.py",
+    "mutation_tests": "python3 tools/liteeth/test_ast.py"
+  },
+  "expected_exit_codes": {
+    "current_production_comparison": 1,
+    "mutation_tests": 0
+  },
+  "semantic_equivalence_proven": false,
+  "strict_constraints_fully_satisfied": false
+}
