@@ -174,9 +174,9 @@ pub unsafe fn devm_alloc_etherdev(dev: *mut device, sizeof_priv: i32) -> *mut ne
             addr_assign_type: 0,
             dsa_without_ethertype: false,
             registered: false,
-            running: false,
-            stopped: true,
-            carrier: false,
+            running: false, // 接口尚未 open。
+            stopped: false, // Linux 队列状态清零，DRV_XOFF 未设置。
+            carrier: true,  // Linux 设备状态清零，NOCARRIER 未设置。
             tx_scheduled: false,
             link_events: Vec::new(),
             rx_queue: VecDeque::new(),

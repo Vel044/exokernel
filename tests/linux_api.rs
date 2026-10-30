@@ -57,6 +57,33 @@ fn netdev_and_private_share_one_zeroed_aligned_allocation() {
     }
 }
 #[test]
+fn linux_default_flags_do_not_open_or_schedule_device() {
+    reset();
+    let f = fixture();
+    let before = memory::live();
+    unsafe {
+        let dev = f.dev();
+        // Linux 分配后的两个状态位均为 0；carrier 的含义是未设置 NOCARRIER。
+        assert!(!netif_queue_stopped(dev));
+        assert!((*dev).carrier);
+        assert!(!(*dev).running);
+        // 重复开放队列和链路不能凭空产生调度或链路变化事件。
+        netif_wake_queue(dev);
+        netif_carrier_on(dev);
+        assert!(!(*dev).tx_scheduled);
+        assert!((*dev).link_events.is_empty());
+        // 接口仍未 open；即使 carrier 为真，也不能向硬件发送。
+        assert_eq!(enqueue_tx(dev, packet(dev, 60)), -ENODEV);
+        assert!((*dev).tx_queue.is_empty());
+    }
+    assert_eq!(memory::live(), before);
+    assert!(!STATE.with(|s| s
+        .borrow()
+        .ops
+        .iter()
+        .any(|op| *op == Op::Write(0x18, 1))));
+}
+#[test]
 fn cpu_stats_and_registered_device_directory_are_real() {
     reset();
     let a = fixture();

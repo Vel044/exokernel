@@ -148,6 +148,13 @@ fn open_failure_does_not_enable_device() {
         s.ops.clear();
     });
     assert_eq!(unsafe { dev_open(f.dev()) }, -5);
+    unsafe {
+        // 请求 IRQ 失败不能把默认状态误改成 stop 后的状态。
+        assert!(!netif_queue_stopped(f.dev()));
+        assert!((*f.dev()).carrier);
+        assert!(!(*f.dev()).running);
+        assert!((*f.dev()).link_events.is_empty());
+    }
     assert!(!STATE.with(|s| s
         .borrow()
         .ops
@@ -209,10 +216,37 @@ fn probe_allocation_and_map_failures_rollback() {
 fn stop_reopen_and_remove_auto_stop() {
     reset();
     let mut f = fixture();
+    unsafe {
+        assert!(!netif_queue_stopped(f.dev()));
+        assert!((*f.dev()).carrier);
+        assert!(!(*f.dev()).running);
+    }
     f.open();
+    unsafe {
+        // 首次 open 没有发生 carrier 翻转，不能多报一次链路恢复。
+        assert!(!netif_queue_stopped(f.dev()));
+        assert!((*f.dev()).carrier);
+        assert!((*f.dev()).running);
+        assert!((*f.dev()).link_events.is_empty());
+        assert!(!(*f.dev()).tx_scheduled);
+    }
     f.close();
+    unsafe {
+        assert!(netif_queue_stopped(f.dev()));
+        assert!(!(*f.dev()).carrier);
+        assert!(!(*f.dev()).running);
+        assert_eq!((*f.dev()).link_events, [false]);
+    }
+    f.close();
+    assert_eq!(unsafe { &(*f.dev()).link_events }, &[false]);
     assert_eq!(STATE.with(|s| s.borrow().bound), 0);
     f.open();
+    unsafe {
+        assert!(!netif_queue_stopped(f.dev()));
+        assert!((*f.dev()).carrier);
+        assert!((*f.dev()).running);
+        assert_eq!((*f.dev()).link_events, [false, true]);
+    }
     f.detach();
     assert_eq!(
         STATE.with(|s| {
