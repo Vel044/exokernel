@@ -1,12 +1,4 @@
-//! ============================================================================
-//! 外核 (Exokernel) —— EL2 boot shim + EL1 外核
-//! ============================================================================
-//! 启动顺序: UEFI 固件 → BOOTAA64.EFI(EL2) → EBS → eret 进 EL1 外核 → eret 进 EL0 libOS
-//!
-//! main.rs       UEFI/EL2 入口: 收 GOP/DTB/MemoryMap → EBS → eret 到 EL1
-//! kmain.rs      EL1 外核主逻辑: 初始化内存/平台/MMU → 加载 EL0 libOS → eret
-//! boot_info.rs  BootInfo 结构体 (显存地址 / 空闲内存数量 / CPU状态)
-//! uart.rs       EBS 后由平台配置初始化的 PL011 串口驱动
+//! UEFI 启动入口。收集固件信息，退出启动服务，将 BootInfo 交给 EL1 的 el1_main。
 
 #![no_std] // 不用 Rust 标准库 (裸机, 没有操作系统)
 #![no_main] // 不用 Rust 默认的 main 函数 (用 UEFI 的 #[entry])
@@ -269,153 +261,98 @@ extern "C" {
     static el1_entry_trampoline_end: u8;
 }
 
-// ═══════════════════════════════════════════════════════════════════
-// UEFI 入口函数 —— 固件加载 BOOTAA64.EFI 后跳到这里
-// ═══════════════════════════════════════════════════════════════════
-// #[entry] 是 uefi crate 提供的宏, 它在编译期自动生成 UEFI 标准入口点
-// (_start / efi_main), 然后调我们这个 main()。
-// 返回 Status: 成功=0, 失败=错误码。但我们永远不会返回——EBS 后直接接管机器。
-// ═══════════════════════════════════════════════════════════════════
-
 #[entry]
 fn main() -> Status {
-    // ── 初始化 UEFI 库 (让 print! 等宏能工作) ──
+    // 1. 固件已提供控制台，第一条启动日志直接使用它输出。
     uefi::helpers::init().unwrap();
-
-    // ── EBS 前日志走 UEFI console ──
-    // 此时不能假设 UART MMIO 地址固定。QEMU/Pi5 的 UART 都应该从 DTB 发现。
     uefi::println!("[exo] UEFI console: EL2 boot, pre-EBS");
 
-    // ── 建一个 BootInfo 结构体, 用来收集所有硬件资源 ──
+    // 2. 建立内核自己的 BootInfo，保存显存信息和设备树副本的位置。
     let mut bi = BootInfo::default();
-
-    // ── 第一步: 拿 framebuffer 物理地址 (趁 UEFI Boot Services 还在) ──
-    // GOP = Graphics Output Protocol, UEFI 的显卡驱动提供的接口
-    // EBS 之后 GOP 协议就死了, 但 framebuffer 那块物理内存一直有效
-    // 我们要在 EBS 之前把物理地址抄出来
-    if let Ok(h) = uefi::boot::get_handle_for_protocol::<GraphicsOutput>() {
-        if let Ok(mut gop) = uefi::boot::open_protocol_exclusive::<GraphicsOutput>(h) {
-            let mut fb = gop.frame_buffer();
-            bi.fb.base = fb.as_mut_ptr() as u64; // framebuffer 物理基址
-            bi.fb.size = fb.size(); // 总共多少字节
-        }
-    }
-
-    // ── 第二步: 扫 UEFI 配置表拿 DTB (DeviceTree 物理地址) ──
-    // ConfigTable 是 UEFI 提供的一个全局表, 里面放了 ACPI 和 DTB 等系统描述数据
-    // EBS 后这些东西还在(它们是物理内存), 但趁 EBS 前抄地址更保险
-    // QEMU virt 默认走 ACPI (没有 FDT_GUID), 所以 bi.dtb 通常是 0
-    // Pi5 上需要设 SystemTableMode=0x02 才有 DTB
-    let (rsdp, dtb) = uefi::system::with_config_table(|entries| {
-        let mut rsdp = 0u64;
-        let mut dtb = 0u64;
-        for e in entries {
-            if e.guid == uefi::table::cfg::ACPI2_GUID {
-                rsdp = e.address as u64; // ACPI 表地址 (高级配置与电源接口)
-            } else if e.guid == FDT_GUID {
-                dtb = e.address as u64; // DeviceTree 地址 (扁平设备树)
-            }
-        }
-        (rsdp, dtb) // 返回 (ACPI地址, DTB地址)
-    });
-    bi.rsdp = rsdp;
-    uefi::println!("[exo] DTB source: {}", if dtb == 0 { "embedded QEMU" } else { "firmware" });
-    // 只复制完整 DTB，不在固件入口解析 UART/PCI/设备节点。
-    if let Err(error) = boot::handoff::copy_dtb(&mut bi, dtb) {
+    if let Err(error) = collect_firmware_info(&mut bi) {
         uefi::println!("[exo] DTB handoff failed: {}", error);
         return Status::LOAD_ERROR;
     }
-    uefi::println!("[exo] DTB handoff: {} bytes, device discovery runs in EL0", bi.dtb_size);
-    // 诊断串口属于板级启动配置；设备驱动稍后在 EL0 按 DTB 自行发现。
+
+    // 3. 提前配置UART，退出启动服务后用它输出日志。
     uart::init(crate::resources::PLATFORM.uart_pa);
 
-    // ── 第三步: ExitBootServices —— 从此机器归内核管 ──
-    // EBS 之前, UEFI 固件还在后台处理事件、管理协议、提供服务
-    // EBS 之后, UEFI 的 Boot Services 全部失效, 但 Runtime Services 和
-    // ConfigTable 还在。外核彻底接管硬件, 只能用自驱的 UART/framebuffer。
-    // exit_boot_services() 内部: GetMemoryMap → ExitBootServices,
-    // 失败则重试一次(仿 Linux 的做法), 返回 MemoryMap 的所有权。
-    // 诊断: 确认 EL 级别 (2=EL2 正常, 1=EL1 不正常)
+    // 4. 读取固件交付时的异常级，退出 UEFI 启动服务并取得最终内存图。
     let el_raw = mrs!("CurrentEL");
+    let mmap = exit_uefi_boot_services(el_raw);
+
+    // 5. 从内存图提取可用物理页范围，将它和 CPU 寄存器快照写入 BootInfo。
+    bi.fill_memmap(&mmap);
+    bi.read_cpu_state(el_raw);
+
+    // 6. 通过 x0 把 BootInfo 地址交给 EL1 外核入口 el1_main。
+    enter_el1(&mut bi)
+}
+
+/// 保存显存和 DTB，留给退出启动服务后的内核使用。
+fn collect_firmware_info(bi: &mut BootInfo) -> Result<(), &'static str> {
+    // 若固件提供图形输出协议（GOP），保存帧缓冲区的物理地址和长度。
+    if let Ok(h) = uefi::boot::get_handle_for_protocol::<GraphicsOutput>() {
+        if let Ok(mut gop) = uefi::boot::open_protocol_exclusive::<GraphicsOutput>(h) {
+            let mut fb = gop.frame_buffer();
+            bi.fb.base = fb.as_mut_ptr() as u64;
+            bi.fb.size = fb.size();
+        }
+    }
+
+    // 从固件配置表查找设备树（DTB）。
+    let dtb = uefi::system::with_config_table(|entries| {
+        entries
+            .iter()
+            .rfind(|entry| entry.guid == FDT_GUID)
+            .map_or(0, |entry| entry.address as u64)
+    });
+    uefi::println!("[exo] DTB source: {}", if dtb == 0 { "embedded QEMU" } else { "firmware" });
+    // 将 DTB 复制到保留页，供 EL0 解析；QEMU 缺少固件 DTB 时使用内嵌副本。
+    boot::handoff::copy_dtb(bi, dtb)?;
+    uefi::println!("[exo] DTB handoff: {} bytes, device discovery runs in EL0", bi.dtb_size);
+    Ok(())
+}
+
+/// 所有固件协议借用均已结束。返回最终内存图，后续日志由内核 UART 接管。
+fn exit_uefi_boot_services(el_raw: u64) -> uefi::mem::memory_map::MemoryMapOwned {
     uefi::println!(
         "[exo] CurrentEL raw=0x{:x}, exc_level={}",
         el_raw,
         (el_raw >> 2) & 3
     );
     uefi::println!("[exo] calling ExitBootServices...");
+    // 安全前提：GOP 句柄已释放，交接数据已复制，后续代码只访问保留的内存。
     let mmap = unsafe { uefi::boot::exit_boot_services(uefi::boot::MemoryType::LOADER_DATA) };
-    // EBS 之后 UEFI console 已经失效。后续日志使用平台配置的内核诊断 UART。
     uart::puts("[exo] post-EBS direct UART OK\r\n");
+    mmap
+}
 
-    // ── 第四步: 提取空闲物理内存范围, 放进 BootInfo 给 EL1 外核 ──
-    // MemoryMap 里记录了整台机器所有物理内存页的用途:
-    //   CONVENTIONAL     → 空闲可用 (Type 7)
-    //   LOADER_CODE/DATA → 内核自己占的 (Type 12/13)
-    //   BOOT_SERVICES_*  → 固件占的, EBS 后也变空闲了 (Type 3/4)
-    // 但我们暂时只收 Type 7, 保证不给内核自己的地址
-    bi.fill_memmap(&mmap);
-    bi.read_cpu_state(el_raw);
+/// 按固件交付的异常级选择入口，将 BootInfo 的地址放入 x0。
+fn enter_el1(bi: &mut BootInfo) -> ! {
+    let el_raw = bi.el2.current_el;
     uart::puts("[exo] BootInfo ready at CurrentEL=");
     uart::hex((el_raw >> 2) & 3);
     uart::puts("\r\n");
 
     #[cfg(feature = "pi5")]
-    let copied_el1_entry = {
-        let mut entry = el1_entry_trampoline as *const () as u64;
-        if bi.range_count != 0 && bi.ranges[0].pages != 0 {
-            let dst = bi.ranges[0].base;
-            let src = el1_entry_trampoline as *const u8;
-            let end = unsafe { &el1_entry_trampoline_end as *const u8 as u64 };
-            let size = end - src as u64;
-            unsafe {
-                core::ptr::copy_nonoverlapping(src, dst as *mut u8, size as usize);
-            }
-            clean_invalidate_exec_range(dst, size);
-            bi.ranges[0].base += 4096;
-            bi.ranges[0].pages -= 1;
-            if bi.mem.free_pages != 0 {
-                bi.mem.free_pages -= 1;
-            }
-            entry = dst;
-            uart::puts("[exo] copied EL1 trampoline pa=");
-            uart::hex(dst);
-            uart::puts(" size=");
-            uart::hex(size);
-            uart::puts("\r\n");
-            uart::puts("[exo] trampoline words=");
-            let w0 = unsafe { core::ptr::read_volatile(dst as *const u32) };
-            let w1 = unsafe { core::ptr::read_volatile((dst + 4) as *const u32) };
-            let w2 = unsafe { core::ptr::read_volatile((dst + 8) as *const u32) };
-            let w3 = unsafe { core::ptr::read_volatile((dst + 12) as *const u32) };
-            uart::hex(w0 as u64);
-            uart::puts(" ");
-            uart::hex(w1 as u64);
-            uart::puts(" ");
-            uart::hex(w2 as u64);
-            uart::puts(" ");
-            uart::hex(w3 as u64);
-            uart::puts("\r\n");
-        }
-        entry
-    };
+    let copied_el1_entry = prepare_pi5_el1_trampoline(bi);
 
-    // PE/COFF链接器不能可靠承载64KiB section alignment；静态区提供完整
-    // 64KiB容量，进入EL1前把栈顶向下对齐到AAPCS要求的16字节。
+    // EL2 路径使用独立的 EL1 启动栈，栈顶按 AArch64 调用约定对齐到 16 字节。
     let stack_top =
         (core::ptr::addr_of!(EL1_BOOT_STACK) as u64 + EL1_BOOT_STACK_SIZE as u64) & !0xf;
 
-    // HVF等环境由UEFI直接交付EL1。此时不能安装EL2向量或执行任何EL2
-    // 系统寄存器访问，只切换到外核栈后直接进入同一个el1_main。
+    // 固件已在 EL1 时，沿用当前栈直接进入 el1_main。
     if ((el_raw >> 2) & 3) == 1 {
         uart::puts("[exo] firmware entered at EL1; bypass EL2 boot shim\r\n");
         trap::enter_el1_direct(
             kmain::el1_main as *const () as u64,
             stack_top,
-            &bi as *const BootInfo as u64,
+            bi as *const BootInfo as u64,
         );
     }
 
-    // ── 第五步: EL2 boot shim 降级到 EL1 外核 ──
+    // EL2 路径先安装异常向量，随后以 x0 传递 BootInfo 地址，执行 eret 进入 EL1。
     crate::vectors::install_el2();
     uart::puts("[exo] VBAR_EL2 installed\r\n");
     let el1_vbar = crate::vectors::install_el1_from_el2();
@@ -425,7 +362,7 @@ fn main() -> Status {
 
     #[cfg(feature = "pi5")]
     {
-        let root = install_pi5_el1_boot_mmu(&mut bi);
+        let root = install_pi5_el1_boot_mmu(bi);
         uart::puts("[exo] EL1 boot identity MMU root=");
         uart::hex(root);
         uart::puts(" SCTLR_EL1=");
@@ -433,7 +370,6 @@ fn main() -> Status {
         uart::puts("\r\n");
     }
 
-    // PSCI辅助核栈仍由页分配器按64KiB对齐。
     #[cfg(feature = "pi5")]
     let el1_entry = copied_el1_entry;
     #[cfg(not(feature = "pi5"))]
@@ -441,7 +377,49 @@ fn main() -> Status {
     trap::enter_el1_kernel(
         el1_entry,
         stack_top,
-        &bi as *const BootInfo as u64,
+        bi as *const BootInfo as u64,
         kmain::el1_main as *const () as u64,
     )
+}
+
+/// Pi 5 优先从空闲物理页执行 EL1 跳板；没有可用页时沿用镜像中的入口。
+#[cfg(feature = "pi5")]
+fn prepare_pi5_el1_trampoline(bi: &mut BootInfo) -> u64 {
+    let mut entry = el1_entry_trampoline as *const () as u64;
+    if bi.range_count != 0 && bi.ranges[0].pages != 0 {
+        let dst = bi.ranges[0].base;
+        let src = el1_entry_trampoline as *const u8;
+        let end = unsafe { &el1_entry_trampoline_end as *const u8 as u64 };
+        let size = end - src as u64;
+        // 目标是首段空闲内存的第一页，与镜像中的跳板分离；跳板须能放入一页。
+        unsafe {
+            core::ptr::copy_nonoverlapping(src, dst as *mut u8, size as usize);
+        }
+        clean_invalidate_exec_range(dst, size);
+        bi.ranges[0].base += 4096;
+        bi.ranges[0].pages -= 1;
+        if bi.mem.free_pages != 0 {
+            bi.mem.free_pages -= 1;
+        }
+        entry = dst;
+        uart::puts("[exo] copied EL1 trampoline pa=");
+        uart::hex(dst);
+        uart::puts(" size=");
+        uart::hex(size);
+        uart::puts("\r\n");
+        uart::puts("[exo] trampoline words=");
+        let w0 = unsafe { core::ptr::read_volatile(dst as *const u32) };
+        let w1 = unsafe { core::ptr::read_volatile((dst + 4) as *const u32) };
+        let w2 = unsafe { core::ptr::read_volatile((dst + 8) as *const u32) };
+        let w3 = unsafe { core::ptr::read_volatile((dst + 12) as *const u32) };
+        uart::hex(w0 as u64);
+        uart::puts(" ");
+        uart::hex(w1 as u64);
+        uart::puts(" ");
+        uart::hex(w2 as u64);
+        uart::puts(" ");
+        uart::hex(w3 as u64);
+        uart::puts("\r\n");
+    }
+    entry
 }

@@ -67,7 +67,6 @@ pub struct BootInfo {
     pub fb: Framebuffer, // ① framebuffer: 显存物理地址+大小
     pub mem: MemInfo,    // ② 空闲物理内存: 有多少可用页
     pub el2: El2Regs,    // ③ CPU寄存器快照: 固件留下的页表/MMU配置
-    pub rsdp: u64,       // ACPI RSDP 表地址 (没有操作系统用 ACPI 就是 0)
     pub dtb: u64,        // 交接 DTB 的页对齐物理地址，由 UEFI LoaderData 保留
     pub dtb_size: u64,   // 完整 blob 有效字节数；内核不解释其中的设备节点
     pub range_count: usize,
@@ -80,7 +79,6 @@ impl Default for BootInfo {
             fb: Framebuffer::default(),
             mem: MemInfo::default(),
             el2: El2Regs::default(),
-            rsdp: 0,
             dtb: 0,
             dtb_size: 0,
             range_count: 0,
